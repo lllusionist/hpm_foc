@@ -1,18 +1,14 @@
-/*
- * Copyright (c) 2021 HPMicro
- *
- * SPDX-License-Identifier: BSD-3-Clause
- *
- */
-
 #include <stdio.h>
-
 #include "board.h"
+#include "main.h"
+#include "sys.h"
 
 int main(void)
 {
-    board_init();
 
+    sys_pmp_init();
+    sys_init();
+    sys_console_init();
     printf("foc start\n");
 
     while (1) {

@@ -28,6 +28,7 @@ find_package(hpm-sdk REQUIRED HINTS $ENV{HPM_SDK_BASE})
 
 project(foc)
 
-sdk_inc(src)
-sdk_app_src(src/main.c)
+sdk_inc(core/inc)
+sdk_app_src(core/src/main.c)
+sdk_app_src(core/src/sys.c)
 generate_ide_projects()
