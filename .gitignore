@@ -1,0 +1,42 @@
+# ===== 构建产物与 IDE 工程（不入库，克隆后重新配置生成）=====
+foc/hpm5e00evk_flash_xip_debug/
+build_*/
+**/output/
+**/build_tmp/
+*.o
+*.obj
+*.d
+*.elf
+*.bin
+*.map
+*.asm
+*.hex
+*.lst
+*.su
+
+# ===== IDE 生成物 =====
+**/segger_embedded_studio/
+**/iar_embedded_workbench/
+**/.cmake/
+compile_commands.json
+.ninja_log
+.ninja_deps
+CMakeCache.txt
+CMakeFiles/
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+*.lnk
+
+# ===== 注意 =====
+# foc/hpm_sdk_localized_for_hpm5e00evk/ 是刻意纳入跟踪的（BSD-3-Clause，
+# 随包带 LICENSE，可再分发），这样别人克隆后无需安装 SDK 即可编译。
+# 切勿用 "lib/" 这类通配规则，否则会漏掉 SDK 里需要的文件。
+# 注意 *.elf 会同时命中 SEGGER 的 Output/Debug/Exe/foc.elf。
