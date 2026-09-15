@@ -1,6 +1,6 @@
 #include "sys.h"
 
-void sys_init(void)
+static void sys_init(void)
 {
     uint32_t cpu0_freq = clock_get_frequency(clock_cpu0);
     if (cpu0_freq == PLLCTL_SOC_PLL_REFCLK_FREQ) {
@@ -54,7 +54,7 @@ void sys_init(void)
     clock_set_source_divider(clock_mchtmr0, clk_src_osc24m, 1);
 }
 
-void sys_pmp_init(void)
+static void sys_pmp_init(void)
 {
     uint32_t start_addr;
     uint32_t end_addr;
@@ -91,7 +91,7 @@ void sys_pmp_init(void)
     pmp_config(&pmp_entry[0], index);
 }
 
-void print_banner(void)
+static void print_banner(void)
 {
     const uint8_t banner[] = { "\n\
     ----------------------------------------------------------------------\n\
@@ -107,8 +107,24 @@ void print_banner(void)
     printf("%s", banner);
 }
 
+static void sys_print_clock_freq(void)
+{
+    printf("==============================\n");
+    printf(" %s clock summary\n", BOARD_NAME);
+    printf("==============================\n");
+    printf("cpu0:\t\t %dHz\n", clock_get_frequency(clock_cpu0));
+    printf("ahb:\t\t %luHz\n", clock_get_frequency(clock_ahb0));
+    printf("axif:\t\t %dHz\n", clock_get_frequency(clock_axif));
+    printf("axis:\t\t %dHz\n", clock_get_frequency(clock_axis));
+    printf("axic:\t\t %dHz\n", clock_get_frequency(clock_axic));
+    printf("xpi0:\t\t %dHz\n", clock_get_frequency(clock_xpi0));
+    printf("mchtmr0:\t %dHz\n", clock_get_frequency(clock_mchtmr0));
+    printf("==============================\n");
+}
 
-void sys_console_init(void)
+
+
+static void sys_console_init(void)
 {
     console_config_t cfg;
 
@@ -131,5 +147,22 @@ void sys_console_init(void)
         }
     }
     print_banner();
-    
+    sys_print_clock_freq();
+}
+
+void sys_board_init(void)
+{
+    sys_pmp_init();
+    sys_init();
+    sys_console_init();
+}
+
+void sys_delay_us(uint32_t us)
+{
+    clock_cpu_delay_us(us);
+}
+
+void sys_delay_ms(uint32_t ms)
+{
+    clock_cpu_delay_ms(ms);
 }

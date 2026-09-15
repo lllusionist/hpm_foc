@@ -13,8 +13,8 @@
 
 #define SYS_CPU_FREQ        (480000000UL)
 
-void sys_pmp_init(void);
-void sys_console_init(void);
-void sys_init(void);
+void sys_board_init(void);
+void sys_delay_us(uint32_t us);
+void sys_delay_ms(uint32_t ms);
 
 #endif /* __SYS_H__ */

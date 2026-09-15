@@ -1,15 +1,12 @@
 #include <stdio.h>
-#include "board.h"
 #include "main.h"
 #include "sys.h"
 
 int main(void)
 {
+    sys_board_init();
 
-    sys_pmp_init();
-    sys_init();
-    sys_console_init();
-    printf("foc start\n");
+    printf("main start\n");
 
     while (1) {
     }
