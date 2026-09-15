@@ -10,6 +10,9 @@ set(RV_ARCH "rv32imafc")
 # 产物名，缺省为 demo（SDK application.cmake: if(NOT APP_NAME) set(APP_NAME demo)）
 set(APP_NAME foc)
 
+# SEGGER RTT：printf 走 J-Link，不占用 UART0 引脚
+set(CONFIG_SEGGER_RTT 1)
+
 
 # the following lines before "### END ###" are added during project localization
 ### START ###
@@ -27,6 +30,10 @@ set(BOARD ${LOCALIZED_BOARD})
 find_package(hpm-sdk REQUIRED HINTS $ENV{HPM_SDK_BASE})
 
 project(foc)
+
+# 关闭 UART console：否则它的 _write 与 RTT_Syscalls_GCC.c 的 _write 重定义冲突。
+# 副作用：board.h 不再提供 BOARD_CONSOLE_UART_* 宏，sys.c 里对应的初始化已移除。
+sdk_compile_definitions(-DCONFIG_NDEBUG_CONSOLE=1)
 
 sdk_inc(core/inc)
 sdk_app_src(core/src/main.c)
