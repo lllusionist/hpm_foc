@@ -97,12 +97,12 @@ void pwm_init(void)
     pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(6), reload, 0, false);  // W相关断点
     // 初值a=b=周期,上管全关下管全开
 
-    // ADC触发(待加,仍在unlock窗口内)
-    // pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(9), 1, 0, false);
-    // pwmv2_select_cmp_source(PWM, PWMV2_CMP_INDEX(20), cmp_value_from_shadow_val, PWMV2_SHADOW_INDEX(9));
-    // pwmv2_cmp_select_counter(PWM, PWMV2_CMP_INDEX(20), pwm_counter_0);
-    // pwmv2_set_trigout_cmp_index(PWM, 0, PWMV2_CMP_INDEX(20));
-    // pwmv2_cmp_update_trig_time(PWM, PWMV2_CMP_INDEX(20), pwm_shadow_register_update_on_reload);
+    // ADC触发
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(7), 1, 0, false);
+    pwmv2_select_cmp_source(PWM, PWMV2_CMP_INDEX(20), cmp_value_from_shadow_val, PWMV2_SHADOW_INDEX(7)); // 比较器0~15计数器绑死
+    pwmv2_cmp_select_counter(PWM, PWMV2_CMP_INDEX(20), pwm_counter_0);
+    pwmv2_set_trigout_cmp_index(PWM, 0, PWMV2_CMP_INDEX(20));
+    pwmv2_cmp_update_trig_time(PWM, PWMV2_CMP_INDEX(20), pwm_shadow_register_update_on_reload);
 
     // 计数器周期来源
     pwmv2_counter_select_data_offset_from_shadow_value(PWM, pwm_counter_0, PWMV2_SHADOW_INDEX(0));   // 三相共用
