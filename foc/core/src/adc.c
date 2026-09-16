@@ -13,6 +13,9 @@
 static const uint8_t adc_ch_tab[ADC_TRIG_LEN] = {ADC_CH_IA, ADC_CH_IB, ADC_CH_IC};
 volatile foc_data_t FOC;
 
+ATTR_PLACE_AT_FAST_RAM_WITH_ALIGNMENT(ADC_SOC_DMA_ADDR_ALIGNMENT)
+volatile adc16_pmt_dma_data_t adc_dma_buf[ADC_TRIG_LEN];
+
 volatile uint32_t g_adc_cnt;            // 进中断的次数, 只用来验证, 验证完可删
 
 void adc_init(void)
@@ -33,7 +36,7 @@ void adc_init(void)
     cfg.conv_mode    = adc16_conv_mode_preemption;  // 工作模式: 抢占(PMT)
     cfg.adc_clk_div  = adc16_clock_divider_4;       // ADC 时钟 = 源/4 = 50MHz
     cfg.sel_sync_ahb = true;                        // ADC 时钟来自 AHB(与上面 ahb0 对应)
-    cfg.adc_ahb_en   = false;                       // DMA使能
+    cfg.adc_ahb_en   = true;                        // 打开 ADC 内置 DMA
 
     adc16_init(HPM_ADC0, &cfg);
 
@@ -56,19 +59,15 @@ void adc_init(void)
     pmt_cfg.inten[ADC_TRIG_LEN - 1U] = true;
 
     adc16_set_pmt_config(HPM_ADC0, &pmt_cfg);
+    adc16_init_pmt_dma(HPM_ADC0, (uint32_t)adc_dma_buf);
     adc16_enable_pmt_queue(HPM_ADC0, ADC_TRIG_CH);  // 使能 TRG0A 这个队列
 
     // 开中断
     adc16_enable_interrupts(HPM_ADC0, adc16_event_trig_complete);
     intc_m_enable_irq_with_priority(ADC_IRQ, 1);
 
-    /* ---- ⑥ TRGM 连线: PWM → ADC ----
-       PWM 和 ADC 之间不是硬连线, 要经 TRGM(互联管理器)这个可编程开关矩阵:
-         input  = 从哪来(PWM0 的 TRGO_0)
-         output = 到哪去(ADC 的 PTRGI0A, 即 TRG0A)
-       配好后: PWM 比较点一到 → TRGO_0 变高 → TRG0A 收到脉冲 → ADC 开始转换。*/
     trgm_cfg.invert = false;                        // 不反相
-    trgm_cfg.type   = trgm_output_same_as_input;    // 直通(不整形)
+    trgm_cfg.type   = trgm_output_same_as_input;    // 直通
     trgm_cfg.input  = HPM_TRGM0_INPUT_SRC_PWM0_TRGO_0;
     trgm_output_config(HPM_TRGM0, TRGM_TRGOCFG_ADCX_PTRGI0A, &trgm_cfg);
 }
@@ -80,15 +79,9 @@ void isr_adc(void)
     adc16_clear_status_flags(HPM_ADC0, st);     // 清标志
 
     if (ADC16_INT_STS_TRIG_CMPT_GET(st)) {
-        uint16_t ia, ib, ic;
-
-        adc16_get_prd_result(HPM_ADC0, ADC_CH_IA, &ia);
-        adc16_get_prd_result(HPM_ADC0, ADC_CH_IB, &ib);
-        adc16_get_prd_result(HPM_ADC0, ADC_CH_IC, &ic);
-
-        FOC.Ia = ia;
-        FOC.Ib = ib;
-        FOC.Ic = ic;
+        FOC.Ia = adc_dma_buf[0].result;
+        FOC.Ib = adc_dma_buf[1].result;
+        FOC.Ic = adc_dma_buf[2].result;
         g_adc_cnt++;
     }
 }
