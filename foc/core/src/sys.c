@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "SEGGER_RTT.h"
 
 static void sys_init(void)
 {
@@ -110,8 +109,6 @@ static void print_banner(void)
 
 static void sys_print_clock_freq(void)
 {
-    printf("==============================\n");
-    printf(" %s clock summary\n", BOARD_NAME);
     printf("==============================\n");
     printf("cpu0:\t\t %dHz\n", clock_get_frequency(clock_cpu0));
     printf("ahb:\t\t %luHz\n", clock_get_frequency(clock_ahb0));
