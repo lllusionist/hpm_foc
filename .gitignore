@@ -1,5 +1,4 @@
-# ===== 构建产物与 IDE 工程（不入库，克隆后重新配置生成）=====
-foc/hpm5e00evk_flash_xip_debug/
+# ===== 构建产物 =====
 build_*/
 **/output/
 **/build_tmp/
@@ -14,10 +13,21 @@ build_*/
 *.lst
 *.su
 
-# ===== IDE 生成物 =====
-**/segger_embedded_studio/
+# ===== IDE / CMake 生成物 =====
+# 策略：SES 工程文件（.emProject / .emSession / .jlink / *.json）入库，
+#       克隆后可直接打开工程；只忽略编译输出。
+# 注意：这里不能用 "foc/hpm5e00evk_flash_xip_debug/" 整目录忽略，
+#       因为 git 无法对被忽略目录内部的文件做反向放行（! 规则失效）。
+foc/hpm5e00evk_flash_xip_debug/segger_embedded_studio/Output/
+foc/hpm5e00evk_flash_xip_debug/build_tmp/
+foc/hpm5e00evk_flash_xip_debug/CMakeFiles/
+foc/hpm5e00evk_flash_xip_debug/lib/
+foc/hpm5e00evk_flash_xip_debug/output/
+foc/hpm5e00evk_flash_xip_debug/iar_embedded_workbench/
 **/iar_embedded_workbench/
 **/.cmake/
+build.ninja
+cmake_install.cmake
 compile_commands.json
 .ninja_log
 .ninja_deps
