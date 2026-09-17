@@ -3,6 +3,10 @@
 #include "sys.h"
 #include "tim.h"
 #include "adc.h"
+#include "mt6835.h"
+#include "hpm_dma_mgr.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 int main(void)
 {
@@ -12,9 +16,13 @@ int main(void)
 
     pwm_init();
     adc_init();
+    dma_mgr_init();
+    mt6835_init();
+
+
+    vTaskStartScheduler();
 
     while (1) {
-        sys_delay_ms(100);
     }
 
     return 0;

@@ -1,4 +1,5 @@
 #include "tim.h"
+#include "foc.h"
 
 #define PWM                 HPM_PWM0
 #define PWM_FREQ_HZ         (20000U)    // 载波频率

@@ -2,7 +2,7 @@
 <solution Name="foc" target="20" version="2">
   <configuration
     Name="Common"
-    c_preprocessor_definitions="FLASH_XIP=1;HPMSOC_HAS_HPMSDK_GPIO=y;HPMSOC_HAS_HPMSDK_TFA=y;HPMSOC_HAS_HPMSDK_PLIC=y;HPMSOC_HAS_HPMSDK_MCHTMR=y;HPMSOC_HAS_HPMSDK_PLICSW=y;HPMSOC_HAS_HPMSDK_GPTMR=y;HPMSOC_HAS_HPMSDK_OWR=y;HPMSOC_HAS_HPMSDK_EUI=y;HPMSOC_HAS_HPMSDK_UART=y;HPMSOC_HAS_HPMSDK_I2C=y;HPMSOC_HAS_HPMSDK_SPI=y;HPMSOC_HAS_HPMSDK_CRC=y;HPMSOC_HAS_HPMSDK_TSNS=y;HPMSOC_HAS_HPMSDK_MBX=y;HPMSOC_HAS_HPMSDK_EWDG=y;HPMSOC_HAS_HPMSDK_DMAMUX=y;HPMSOC_HAS_HPMSDK_DMAV2=y;HPMSOC_HAS_HPMSDK_PPI=y;HPMSOC_HAS_HPMSDK_GPIOM=y;HPMSOC_HAS_HPMSDK_LOBS=y;HPMSOC_HAS_HPMSDK_ADC16=y;HPMSOC_HAS_HPMSDK_ACMP=y;HPMSOC_HAS_HPMSDK_MCAN=y;HPMSOC_HAS_HPMSDK_PTPC=y;HPMSOC_HAS_HPMSDK_QEIV2=y;HPMSOC_HAS_HPMSDK_QEOV2=y;HPMSOC_HAS_HPMSDK_PWMV2=y;HPMSOC_HAS_HPMSDK_SDM=y;HPMSOC_HAS_HPMSDK_PLB=y;HPMSOC_HAS_HPMSDK_SYNT=y;HPMSOC_HAS_HPMSDK_TRGM=y;HPMSOC_HAS_HPMSDK_ENET=y;HPMSOC_HAS_HPMSDK_USB=y;HPMSOC_HAS_HPMSDK_ESC=y;HPMSOC_HAS_HPMSDK_OTP=y;HPMSOC_HAS_HPMSDK_SYSCTL=y;HPMSOC_HAS_HPMSDK_IOC=y;HPMSOC_HAS_HPMSDK_PLLCTLV2=y;HPMSOC_HAS_HPMSDK_PPOR=y;HPMSOC_HAS_HPMSDK_PCFG=y;HPMSOC_HAS_HPMSDK_PDGO=y;HPMSOC_HAS_HPMSDK_PGPR=y;HPMSOC_HAS_HPMSDK_HYBRID_XPI=y;HPMSOC_HAS_HPMSDK_PMP=y;CONFIG_NDEBUG_CONSOLE=1;HPM_SES_USE_SEGGER_LD=1;"
+    c_preprocessor_definitions="FLASH_XIP=1;HPMSOC_HAS_HPMSDK_GPIO=y;HPMSOC_HAS_HPMSDK_TFA=y;HPMSOC_HAS_HPMSDK_PLIC=y;HPMSOC_HAS_HPMSDK_MCHTMR=y;HPMSOC_HAS_HPMSDK_PLICSW=y;HPMSOC_HAS_HPMSDK_GPTMR=y;HPMSOC_HAS_HPMSDK_OWR=y;HPMSOC_HAS_HPMSDK_EUI=y;HPMSOC_HAS_HPMSDK_UART=y;HPMSOC_HAS_HPMSDK_I2C=y;HPMSOC_HAS_HPMSDK_SPI=y;HPMSOC_HAS_HPMSDK_CRC=y;HPMSOC_HAS_HPMSDK_TSNS=y;HPMSOC_HAS_HPMSDK_MBX=y;HPMSOC_HAS_HPMSDK_EWDG=y;HPMSOC_HAS_HPMSDK_DMAMUX=y;HPMSOC_HAS_HPMSDK_DMAV2=y;HPMSOC_HAS_HPMSDK_PPI=y;HPMSOC_HAS_HPMSDK_GPIOM=y;HPMSOC_HAS_HPMSDK_LOBS=y;HPMSOC_HAS_HPMSDK_ADC16=y;HPMSOC_HAS_HPMSDK_ACMP=y;HPMSOC_HAS_HPMSDK_MCAN=y;HPMSOC_HAS_HPMSDK_PTPC=y;HPMSOC_HAS_HPMSDK_QEIV2=y;HPMSOC_HAS_HPMSDK_QEOV2=y;HPMSOC_HAS_HPMSDK_PWMV2=y;HPMSOC_HAS_HPMSDK_SDM=y;HPMSOC_HAS_HPMSDK_PLB=y;HPMSOC_HAS_HPMSDK_SYNT=y;HPMSOC_HAS_HPMSDK_TRGM=y;HPMSOC_HAS_HPMSDK_ENET=y;HPMSOC_HAS_HPMSDK_USB=y;HPMSOC_HAS_HPMSDK_ESC=y;HPMSOC_HAS_HPMSDK_OTP=y;HPMSOC_HAS_HPMSDK_SYSCTL=y;HPMSOC_HAS_HPMSDK_IOC=y;HPMSOC_HAS_HPMSDK_PLLCTLV2=y;HPMSOC_HAS_HPMSDK_PPOR=y;HPMSOC_HAS_HPMSDK_PCFG=y;HPMSOC_HAS_HPMSDK_PDGO=y;HPMSOC_HAS_HPMSDK_PGPR=y;HPMSOC_HAS_HPMSDK_HYBRID_XPI=y;HPMSOC_HAS_HPMSDK_PMP=y;USE_DMA_MGR=1;HPM_SES_USE_SEGGER_LD=1;"
     debug_cpu_registers_file="..\..\hpm_sdk_localized_for_hpm5e00evk\soc\HPM5E00\HPM5E31\hpm_ses_riscv_cpu_regs.xml"
     debug_register_definition_file="..\..\hpm_sdk_localized_for_hpm5e00evk\soc\HPM5E00\HPM5E31\hpm_ses_reg.xml"
     debug_restrict_memory_access="No"
@@ -38,7 +38,7 @@
       build_generic_options_file_name=""
       build_output_file_name="$(OutDir)/foc$(EXE)"
       c_additional_options="-Wall;-Wundef;-Wno-format;-fomit-frame-pointer;-fno-builtin;-ffunction-sections;-fdata-sections;-g"
-      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/arch;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/l1c;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/intc;../../hpm_sdk_localized_for_hpm5e00evk/boards/hpm5e00evk;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/ip;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/toolchains;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/boot;../../hpm_sdk_localized_for_hpm5e00evk/drivers/inc;../../hpm_sdk_localized_for_hpm5e00evk/utils;../../hpm_sdk_localized_for_hpm5e00evk/components/debug_console;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/Config;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/RTT;../build_tmp/generated/include;../../core/inc;"
+      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/arch;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/l1c;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/intc;../../hpm_sdk_localized_for_hpm5e00evk/boards/hpm5e00evk;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/ip;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/toolchains;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/boot;../../hpm_sdk_localized_for_hpm5e00evk/drivers/inc;../../hpm_sdk_localized_for_hpm5e00evk/utils;../../hpm_sdk_localized_for_hpm5e00evk/components/debug_console;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/Config;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/RTT;../build_tmp/generated/include;../../core/inner/inc;../../core/outer;"
       debug_target_connection="GDB Server"
       gcc_all_warnings_command_line_options="-Wall;-Wextra;-Wno-format"
       gcc_cplusplus_language_standard="c++11"
@@ -76,31 +76,50 @@
       rv_toolchain_prefix=""
       stack_size="0x4000"
       target_device_name="HPM5E31xGNx" />
-    <configuration Name="Debug" debug_target_connection="J-Link" />
+    <configuration
+      Name="Debug"
+      c_preprocessor_definitions="CONFIG_FREERTOS=1;CONFIG_DISABLE_GLOBAL_IRQ_ON_STARTUP=1;__freertos_irq_stack_top=_stack;portasmHAS_MTIME=1;USE_NONVECTOR_MODE=1;DISABLE_IRQ_PREEMPTIVE=1"
+      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/include;../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V;../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V/chip_specific_extensions/HPMicro"
+      debug_target_connection="J-Link" />
     <folder Name="application">
       <folder Name="core">
         <configuration
           Name="Common"
           build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/application/core/src" />
-        <folder Name="inc">
-          <file file_name="../../core/inc/adc.h" />
-          <file file_name="../../core/inc/main.h" />
-          <file file_name="../../core/inc/sys.h" />
-          <file file_name="../../core/inc/tim.h" />
+        <folder Name="inner">
+          <folder Name="inc">
+            <file file_name="../../core/inner/inc/adc.h" />
+            <file file_name="../../core/inner/inc/foc.h" />
+            <file file_name="../../core/inner/inc/hpm_dma_mgr.h" />
+            <file file_name="../../core/inner/inc/main.h" />
+            <file file_name="../../core/inner/inc/spi.h" />
+            <file file_name="../../core/inner/inc/sys.h" />
+            <file file_name="../../core/inner/inc/tim.h" />
+          </folder>
+          <folder Name="src">
+            <file file_name="../../core/inner/src/adc.c" />
+            <file file_name="../../core/inner/src/foc.c" />
+            <file file_name="../../core/inner/src/hpm_dma_mgr.c" />
+            <file file_name="../../core/inner/src/main.c">
+              <configuration
+                Name="Common"
+                build_object_file_name="$(IntDir)/main.c$(OBJ)" />
+            </file>
+            <file file_name="../../core/inner/src/spi.c" />
+            <file file_name="../../core/inner/src/sys.c">
+              <configuration
+                Name="Common"
+                build_object_file_name="$(IntDir)/sys.c$(OBJ)" />
+            </file>
+            <file file_name="../../core/inner/src/tim.c" />
+          </folder>
         </folder>
-        <folder Name="src">
-          <file file_name="../../core/src/adc.c" />
-          <file file_name="../../core/src/main.c">
-            <configuration
-              Name="Common"
-              build_object_file_name="$(IntDir)/main.c$(OBJ)" />
-          </file>
-          <file file_name="../../core/src/sys.c">
-            <configuration
-              Name="Common"
-              build_object_file_name="$(IntDir)/sys.c$(OBJ)" />
-          </file>
-          <file file_name="../../core/src/tim.c" />
+        <folder Name="outer">
+          <configuration
+            Name="Common"
+            build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/application/core/outer" />
+          <file file_name="../../core/outer/mt6835.c" />
+          <file file_name="../../core/outer/mt6835.h" />
         </folder>
       </folder>
     </folder>
@@ -310,17 +329,42 @@
       </folder>
     </folder>
     <folder Name="middleware">
+      <folder Name="FreeRTOS">
+        <folder Name="portable">
+          <folder Name="GCC">
+            <folder Name="RISC-V">
+              <folder Name="chip_specific_extensions">
+                <folder Name="HPMicro">
+                  <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V/chip_specific_extensions/HPMicro/hpm_port.c" />
+                </folder>
+              </folder>
+              <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V/port.c" />
+              <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V/portASM.S" />
+            </folder>
+          </folder>
+          <folder Name="MemMang">
+            <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/MemMang/heap_4.c" />
+          </folder>
+        </folder>
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/croutine.c" />
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/event_groups.c" />
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/list.c" />
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/queue.c" />
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/stream_buffer.c" />
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/tasks.c" />
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/timers.c" />
+      </folder>
       <folder Name="segger_rtt">
         <folder Name="RTT">
           <configuration
             Name="Common"
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/middleware/segger_rtt/RTT" />
-          <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/RTT/SEGGER_RTT.c">
+          <file file_name="SEGGER_RTT.c">
             <configuration
               Name="Common"
               build_object_file_name="$(IntDir)/SEGGER_RTT.c$(OBJ)" />
           </file>
-          <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/RTT/SEGGER_RTT_printf.c">
+          <file file_name="SEGGER_RTT_printf.c">
             <configuration
               Name="Common"
               build_object_file_name="$(IntDir)/SEGGER_RTT_printf.c$(OBJ)" />
@@ -330,10 +374,13 @@
           <configuration
             Name="Common"
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/middleware/segger_rtt/Syscalls" />
-          <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/Syscalls/SEGGER_RTT_Syscalls_SES.c">
+          <!-- printf 改走串口了。这个文件会把 printf 抢到 RTT 上, 必须排除编译,
+               否则 SES 的 printf 永远不会走到 hpm_debug_console.c 的串口重定向 -->
+          <file file_name="SEGGER_RTT_Syscalls_SES.c">
             <configuration
               Name="Common"
-              build_object_file_name="$(IntDir)/SEGGER_RTT_Syscalls_SES.c$(OBJ)" />
+              build_object_file_name="$(IntDir)/SEGGER_RTT_Syscalls_SES.c$(OBJ)"
+              build_exclude_from_build="Yes" />
           </file>
         </folder>
       </folder>

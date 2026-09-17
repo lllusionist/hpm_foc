@@ -91,22 +91,6 @@ static void sys_pmp_init(void)
     pmp_config(&pmp_entry[0], index);
 }
 
-static void print_banner(void)
-{
-    const uint8_t banner[] = { "\n\
-    ----------------------------------------------------------------------\n\
-    $$\\   $$\\ $$$$$$$\\  $$\\      $$\\ $$\\\n\
-    $$ |  $$ |$$  __$$\\ $$$\\    $$$ |\\__|\n\
-    $$ |  $$ |$$ |  $$ |$$$$\\  $$$$ |$$\\  $$$$$$$\\  $$$$$$\\   $$$$$$\\\n\
-    $$$$$$$$ |$$$$$$$  |$$\\$$\\$$ $$ |$$ |$$  _____|$$  __$$\\ $$  __$$\\\n\
-    $$  __$$ |$$  ____/ $$ \\$$$  $$ |$$ |$$ /      $$ |  \\__|$$ /  $$ |\n\
-    $$ |  $$ |$$ |      $$ |\\$  /$$ |$$ |$$ |      $$ |      $$ |  $$ |\n\
-    $$ |  $$ |$$ |      $$ | \\_/ $$ |$$ |\\$$$$$$$\\ $$ |      \\$$$$$$  |\n\
-    \\__|  \\__|\\__|      \\__|     \\__|\\__| \\_______|\\__|       \\______/\n\
-    ----------------------------------------------------------------------\n" };
-    printf("%s", banner);
-}
-
 static void sys_print_clock_freq(void)
 {
     printf("==============================\n");
@@ -124,12 +108,32 @@ static void sys_print_clock_freq(void)
 
 static void sys_console_init(void)
 {
-    /* printf 由 RTT_Syscalls_GCC.c 重定向到 RTT，不占用 UART0 */
-    SEGGER_RTT_Init();
-    /* 缓冲区(1KB)满时阻塞等待主机读取；默认 NO_BLOCK_SKIP 会丢日志 */
-    SEGGER_RTT_ConfigUpBuffer(0, NULL, NULL, 0, SEGGER_RTT_MODE_BLOCK_IF_FIFO_FULL);
+    console_config_t cfg;
 
-    // print_banner();
+    /* 先配引脚再开时钟：反过来的话，配引脚那一刻 RX 上的电平跳变会被当成起始位收进来 */
+    HPM_IOC->PAD[SYS_CONSOLE_TX_PAD].FUNC_CTL = SYS_CONSOLE_TX_FUNC;
+    HPM_IOC->PAD[SYS_CONSOLE_RX_PAD].FUNC_CTL = SYS_CONSOLE_RX_FUNC;
+
+    clock_add_to_group(SYS_CONSOLE_UART_CLK, 0);
+
+    cfg.type           = CONSOLE_TYPE_UART;
+    cfg.base           = (uint32_t)SYS_CONSOLE_UART;
+    cfg.src_freq_in_hz = clock_get_frequency(SYS_CONSOLE_UART_CLK);
+    cfg.baudrate       = SYS_CONSOLE_BAUDRATE;
+
+    if (console_init(&cfg) != status_success) {
+        while (1) {
+        }
+    }
+
+    /* printf 由 SDK 的 console 组件接管：
+     *   SES 的 RTL 会调 __SEGGER_RTL_X_file_write()，那个函数在 hpm_debug_console.c 里
+     *   被重定向到串口，而且会自动把 \n 补成 \r\n
+     * 两个前提：
+     *   1. 编译宏里不能有 CONFIG_NDEBUG_CONSOLE=1（否则组件编译成空壳）
+     *   2. SEGGER_RTT_Syscalls_SES.c 必须排除编译（它会把 printf 抢到 RTT 上）
+     */
+
     sys_print_clock_freq();
 }
 

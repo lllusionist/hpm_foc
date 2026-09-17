@@ -11,12 +11,9 @@
 #define ADC_SAMPLE_CYCLE    (20U)
 
 static const uint8_t adc_ch_tab[ADC_TRIG_LEN] = {ADC_CH_IA, ADC_CH_IB, ADC_CH_IC};
-volatile foc_data_t FOC;
 
 ATTR_PLACE_AT_FAST_RAM_WITH_ALIGNMENT(ADC_SOC_DMA_ADDR_ALIGNMENT)
 volatile adc16_pmt_dma_data_t adc_dma_buf[ADC_TRIG_LEN];
-
-volatile uint32_t g_adc_cnt;            // 进中断的次数, 只用来验证, 验证完可删
 
 void adc_init(void)
 {
@@ -82,6 +79,5 @@ void isr_adc(void)
         FOC.Ia = adc_dma_buf[0].result;
         FOC.Ib = adc_dma_buf[1].result;
         FOC.Ic = adc_dma_buf[2].result;
-        g_adc_cnt++;
     }
 }

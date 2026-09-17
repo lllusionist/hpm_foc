@@ -35,9 +35,18 @@ project(foc)
 # 副作用：board.h 不再提供 BOARD_CONSOLE_UART_* 宏，sys.c 里对应的初始化已移除。
 sdk_compile_definitions(-DCONFIG_NDEBUG_CONSOLE=1)
 
-sdk_inc(core/inc)
-sdk_app_src(core/src/main.c)
-sdk_app_src(core/src/sys.c)
-sdk_app_src(core/src/adc.c)
-sdk_app_src(core/src/tim.c)
+# SPI 组件的非阻塞(DMA)收发接口被 #if USE_DMA_MGR 包着，不开这个宏就没有声明
+sdk_compile_definitions(-DUSE_DMA_MGR=1)
+
+sdk_inc(core/inner/inc)
+sdk_inc(core/outer)
+
+sdk_app_src(core/inner/src/main.c)
+sdk_app_src(core/inner/src/sys.c)
+sdk_app_src(core/inner/src/adc.c)
+sdk_app_src(core/inner/src/foc.c)
+sdk_app_src(core/inner/src/tim.c)
+sdk_app_src(core/inner/src/spi.c)
+sdk_app_src(core/inner/src/hpm_dma_mgr.c)
+sdk_app_src(core/outer/mt6835.c)
 generate_ide_projects()
