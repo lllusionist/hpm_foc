@@ -11,12 +11,13 @@ void foc_adc_midpoint(void)
 
     for(uint8_t i = 0; i < 32; i++)
     {
-        FOC.Ia += adc_a_sum;
-        FOC.Ib += adc_b_sum;
-        FOC.Ic += adc_c_sum;
+        adc_a_sum += FOC.Ia;
+        adc_b_sum += FOC.Ib;
+        adc_c_sum += FOC.Ic;
+        times += 1;
         sys_delay_ms(1);
     }
-    FOC.Ia_midpoint = FOC.Ia / 5;
-    FOC.Ib_midpoint = FOC.Ib / 5;
-    FOC.Ic_midpoint = FOC.Ic / 5;
+    FOC.Ia_midpoint = adc_a_sum / times;
+    FOC.Ib_midpoint = adc_b_sum / times;
+    FOC.Ic_midpoint = adc_c_sum / times;
 }

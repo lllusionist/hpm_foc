@@ -9,5 +9,6 @@
 #include <stdio.h>
 
 void pwm_init(void);
+void pwm_set_duty(float du, float dv, float dw);
 
 #endif /* __TIM_H__ */

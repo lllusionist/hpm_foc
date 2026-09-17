@@ -13,11 +13,7 @@
 #include "hpm_iomux.h"
 #include <stdio.h>
 
-#define SYS_CPU_FREQ        (480000000UL)
-
-// ---- 调试串口: printf 从这里输出 ----
-// 换板子只改这一段(UART 号 + TX/RX 引脚 + 波特率)
-// 因为本工程不用 board.h, 引脚复用得自己写, 和 tim.c / mt6835.c 的做法一致
+#define SYS_CPU_FREQ            (480000000UL)
 #define SYS_CONSOLE_UART        HPM_UART0
 #define SYS_CONSOLE_UART_CLK    clock_uart0
 #define SYS_CONSOLE_BAUDRATE    (115200UL)

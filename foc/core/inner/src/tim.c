@@ -185,3 +185,20 @@ void pwm_init(void)
     pwmv2_start_pwm_output_sync(PWM, 0x07);       // 同时启动
 
 }
+
+void pwm_set_duty(float du, float dv, float dw)
+{
+    uint32_t half = reload >> 1;
+    uint32_t hu = (uint32_t)(du * (float)reload) >> 1; // 每相导通宽度的一半
+    uint32_t hv = (uint32_t)(dv * (float)reload) >> 1;
+    uint32_t hw = (uint32_t)(dw * (float)reload) >> 1;
+
+    pwmv2_shadow_register_unlock(PWM);
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(1), half - hu, 0, false);   // U相开通点
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(2), half + hu, 0, false);   // U相关断点
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(3), half - hv, 0, false);   // V相开通点
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(4), half + hv, 0, false);   // V相关断点
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(5), half - hw, 0, false);   // W相开通点
+    pwmv2_set_shadow_val(PWM, PWMV2_SHADOW_INDEX(6), half + hw, 0, false);   // W相关断点
+    pwmv2_shadow_register_lock(PWM);
+}

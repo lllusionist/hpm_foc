@@ -118,8 +118,14 @@
           <configuration
             Name="Common"
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/application/core/outer" />
-          <file file_name="../../core/outer/mt6835.c" />
-          <file file_name="../../core/outer/mt6835.h" />
+          <folder Name="inc">
+            <file file_name="../../core/outer/mt6835.h" />
+            <file file_name="../../core/outer/util.h" />
+          </folder>
+          <folder Name="src">
+            <file file_name="../../core/outer/mt6835.c" />
+            <file file_name="../../core/outer/util.c" />
+          </folder>
         </folder>
       </folder>
     </folder>
@@ -374,13 +380,11 @@
           <configuration
             Name="Common"
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/middleware/segger_rtt/Syscalls" />
-          <!-- printf 改走串口了。这个文件会把 printf 抢到 RTT 上, 必须排除编译,
-               否则 SES 的 printf 永远不会走到 hpm_debug_console.c 的串口重定向 -->
           <file file_name="SEGGER_RTT_Syscalls_SES.c">
             <configuration
               Name="Common"
-              build_object_file_name="$(IntDir)/SEGGER_RTT_Syscalls_SES.c$(OBJ)"
-              build_exclude_from_build="Yes" />
+              build_exclude_from_build="Yes"
+              build_object_file_name="$(IntDir)/SEGGER_RTT_Syscalls_SES.c$(OBJ)" />
           </file>
         </folder>
       </folder>
