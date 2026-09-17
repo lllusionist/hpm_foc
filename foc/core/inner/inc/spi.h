@@ -28,7 +28,7 @@
 #endif
 
 #if USE_DMA_MGR
-#include "hpm_dma_mgr.h"
+#include "dma.h"
 #endif
 /* Every transaction can be delineated by 3 dma descriptions: SPI control, SPI cmd, SPI data */
 #define SPI_DMA_DESC_COUNT_PER_TRANS    (3U)

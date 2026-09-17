@@ -3,24 +3,30 @@
 
 #include "hpm_common.h"
 #include "sys.h"
+#include "util.h"
+#include "tim.h"
 
 typedef struct {
-    float Ia;
-    float Ib;
-    float Ic;
-    float Ibus;
+    volatile float Ia;
+    volatile float Ib;
+    volatile float Ic;
+    volatile float Ibus;
 
-    float Ia_midpoint;
-    float Ib_midpoint;
-    float Ic_midpoint;
+    volatile float Ia_midpoint;
+    volatile float Ib_midpoint;
+    volatile float Ic_midpoint;
 
-    float Va;
-    float Vb;
-    float Vc;
-    float Vbus;
+    volatile float Va;
+    volatile float Vb;
+    volatile float Vc;
+    volatile float Vbus;
 
-    float Iq;
-    float Id;
+    volatile float Iq;
+    volatile float Id;
+
+    volatile float dtc_a;
+    volatile float dtc_b;
+    volatile float dtc_c;
     
 } foc_data_t;
 

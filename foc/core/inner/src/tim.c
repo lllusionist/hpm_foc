@@ -1,11 +1,6 @@
 #include "tim.h"
 #include "foc.h"
 
-#define PWM                 HPM_PWM0
-#define PWM_FREQ_HZ         (20000U)    // 载波频率
-#define PWM_DEAD_TIME_NS    (500U)      // 死区(ns)
-#define PWM_MIN_ON_NS       (1000U)     // 最小导通脉宽(ns)
-
 static uint32_t g_pwm_clk_hz;           // PWM计数时钟(=AHB)
 static uint32_t g_dead_ticks;           // 死区(计数周期数)
 

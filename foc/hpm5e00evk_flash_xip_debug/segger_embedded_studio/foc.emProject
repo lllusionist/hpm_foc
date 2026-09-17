@@ -89,8 +89,8 @@
         <folder Name="inner">
           <folder Name="inc">
             <file file_name="../../core/inner/inc/adc.h" />
+            <file file_name="../../core/inner/inc/dma.h" />
             <file file_name="../../core/inner/inc/foc.h" />
-            <file file_name="../../core/inner/inc/hpm_dma_mgr.h" />
             <file file_name="../../core/inner/inc/main.h" />
             <file file_name="../../core/inner/inc/spi.h" />
             <file file_name="../../core/inner/inc/sys.h" />
@@ -98,8 +98,8 @@
           </folder>
           <folder Name="src">
             <file file_name="../../core/inner/src/adc.c" />
+            <file file_name="../../core/inner/src/dma.c" />
             <file file_name="../../core/inner/src/foc.c" />
-            <file file_name="../../core/inner/src/hpm_dma_mgr.c" />
             <file file_name="../../core/inner/src/main.c">
               <configuration
                 Name="Common"
@@ -120,7 +120,6 @@
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/application/core/outer" />
           <folder Name="inc">
             <file file_name="../../core/outer/mt6835.h" />
-            <file file_name="../../core/outer/util.h" />
           </folder>
           <folder Name="src">
             <file file_name="../../core/outer/mt6835.c" />
