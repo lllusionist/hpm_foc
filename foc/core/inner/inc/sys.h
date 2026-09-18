@@ -23,6 +23,7 @@
 #define SYS_CONSOLE_RX_FUNC     IOC_PA01_FUNC_CTL_UART0_RXD
 
 void sys_board_init(void);
+void sys_usb_init(void);
 void sys_delay_us(uint32_t us);
 void sys_delay_ms(uint32_t ms);
 

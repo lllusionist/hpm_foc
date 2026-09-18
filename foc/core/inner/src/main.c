@@ -5,20 +5,19 @@
 #include "adc.h"
 #include "mt6835.h"
 #include "dma.h"
+#include "cdc_acm.h"
+#include "vofa.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
 int main(void)
 {
     sys_board_init();
-
-    printf("main start\n");
-
+    sys_usb_init();
     pwm_init();
     adc_init();
     dma_mgr_init();
     mt6835_init();
-
 
     vTaskStartScheduler();
 

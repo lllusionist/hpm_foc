@@ -43,9 +43,11 @@
 #define FLOAT_EQU(floatA, floatB)                     ((ABS((floatA) - (floatB))) < 0.000001f)
 #define UTILS_LP_FAST(value, sample, filter_constant) (value -= (filter_constant) * ((value) - (sample)))
 
-extern inline void clarke_transform(float Ia, float Ib, float Ic, float *Ialpha, float *Ibeta);
-extern inline void park_transform(float Ialpha, float Ibeta, float Theta, float *Id, float *Iq);
-extern inline void inverse_park(float mod_d, float mod_q, float Theta, float *mod_alpha, float *mod_beta);
+/* 注意: 这里不能用 extern inline —— 定义只在 util.c 里,
+ * 其它文件只看到声明会报 "inline function declared but never defined" */
+void clarke_transform(float Ia, float Ib, float Ic, float *Ialpha, float *Ibeta);
+void park_transform(float Ialpha, float Ibeta, float Theta, float *Id, float *Iq);
+void inverse_park(float mod_d, float mod_q, float Theta, float *mod_alpha, float *mod_beta);
 int SVPWM(float alpha, float beta, volatile float *duty_a, volatile float *duty_b, volatile float *duty_c);
 
 float    sin_f32(float x);

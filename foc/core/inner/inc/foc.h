@@ -27,11 +27,15 @@ typedef struct {
     volatile float dtc_a;
     volatile float dtc_b;
     volatile float dtc_c;
-    
+
+    volatile float current_ctrl_p_gain;     // 电流环 P (上位机 USB 命令可在线改)
+    volatile float current_ctrl_i_gain;     // 电流环 I
+
 } foc_data_t;
 
 extern volatile foc_data_t FOC;
 
 void foc_adc_midpoint(void);
+void FOC_voltage(float Vd, float Vq, float phase);
 
 #endif /* __FOC_H__ */

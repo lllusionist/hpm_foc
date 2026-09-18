@@ -38,6 +38,11 @@ sdk_compile_definitions(-DCONFIG_NDEBUG_CONSOLE=1)
 # SPI 组件的非阻塞(DMA)收发接口被 #if USE_DMA_MGR 包着，不开这个宏就没有声明
 sdk_compile_definitions(-DUSE_DMA_MGR=1)
 
+# USB 虚拟串口 (CherryUSB CDC ACM)
+set(CONFIG_CHERRYUSB 1)
+set(CONFIG_USB_DEVICE 1)
+set(CONFIG_USB_DEVICE_CDC_ACM 1)
+
 sdk_inc(core/inner/inc)
 sdk_inc(core/outer)
 
@@ -47,6 +52,10 @@ sdk_app_src(core/inner/src/adc.c)
 sdk_app_src(core/inner/src/foc.c)
 sdk_app_src(core/inner/src/tim.c)
 sdk_app_src(core/inner/src/spi.c)
-sdk_app_src(core/inner/src/hpm_dma_mgr.c)
+sdk_app_src(core/inner/src/dma.c)
+sdk_app_src(core/inner/src/cdc_acm.c)
 sdk_app_src(core/outer/mt6835.c)
+sdk_app_src(core/outer/util.c)
+sdk_app_src(core/outer/vofa.c)
+sdk_app_src(core/outer/usb_driver.c)
 generate_ide_projects()

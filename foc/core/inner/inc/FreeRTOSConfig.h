@@ -52,6 +52,9 @@
 /* Memory allocation definitions. */
 #define configSUPPORT_STATIC_ALLOCATION         0
 #define configSUPPORT_DYNAMIC_ALLOCATION        1
+/* CherryUSB 的 FreeRTOS 适配层 (usb_osal_freertos.c) 要用互斥量和计数信号量, 默认是 0 */
+#define configUSE_MUTEXES                       1
+#define configUSE_COUNTING_SEMAPHORES           1
 // idle 任务 1K + timer 任务 1K + 自己的任务 2K, 再加 TCB/队列, 8K 余量太薄
 #define configTOTAL_HEAP_SIZE                   ((size_t) (16 * 1024))
 

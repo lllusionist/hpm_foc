@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "cdc_acm.h"
 
 static void sys_init(void)
 {
@@ -91,21 +92,6 @@ static void sys_pmp_init(void)
     pmp_config(&pmp_entry[0], index);
 }
 
-static void sys_print_clock_freq(void)
-{
-    printf("==============================\n");
-    printf("cpu0:\t\t %dHz\n", clock_get_frequency(clock_cpu0));
-    printf("ahb:\t\t %luHz\n", clock_get_frequency(clock_ahb0));
-    printf("axif:\t\t %dHz\n", clock_get_frequency(clock_axif));
-    printf("axis:\t\t %dHz\n", clock_get_frequency(clock_axis));
-    printf("axic:\t\t %dHz\n", clock_get_frequency(clock_axic));
-    printf("xpi0:\t\t %dHz\n", clock_get_frequency(clock_xpi0));
-    printf("mchtmr0:\t %dHz\n", clock_get_frequency(clock_mchtmr0));
-    printf("==============================\n");
-}
-
-
-
 static void sys_console_init(void)
 {
     console_config_t cfg;
@@ -125,16 +111,6 @@ static void sys_console_init(void)
         while (1) {
         }
     }
-
-    /* printf 由 SDK 的 console 组件接管：
-     *   SES 的 RTL 会调 __SEGGER_RTL_X_file_write()，那个函数在 hpm_debug_console.c 里
-     *   被重定向到串口，而且会自动把 \n 补成 \r\n
-     * 两个前提：
-     *   1. 编译宏里不能有 CONFIG_NDEBUG_CONSOLE=1（否则组件编译成空壳）
-     *   2. SEGGER_RTT_Syscalls_SES.c 必须排除编译（它会把 printf 抢到 RTT 上）
-     */
-
-    sys_print_clock_freq();
 }
 
 void sys_board_init(void)
@@ -142,6 +118,12 @@ void sys_board_init(void)
     sys_pmp_init();
     sys_init();
     sys_console_init();
+}
+
+void sys_usb_init(void)
+{
+    clock_add_to_group(clock_usb0, 0);
+    cdc_acm_init(0, HPM_USB0_BASE);
 }
 
 void sys_delay_us(uint32_t us)

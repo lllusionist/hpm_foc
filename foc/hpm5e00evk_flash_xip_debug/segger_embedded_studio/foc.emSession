@@ -2,9 +2,7 @@
 <session>
  <Bookmarks/>
  <Breakpoints groups="Breakpoints" active_group="Breakpoints">
-  <Exceptions>
-   <Group group="" set=""/>
-  </Exceptions>
+  <Exceptions/>
  </Breakpoints>
  <ExecutionProfileWindow/>
  <FrameBuffer>
@@ -30,13 +28,6 @@
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner;inc"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner;src"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS;portable"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS;portable;GCC"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS;portable;GCC;RISC-V"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS;portable;GCC;RISC-V;chip_specific_extensions"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS;portable;GCC;RISC-V;chip_specific_extensions;HPMicro"/>
  </Project>
  <Register1>
   <RegisterWindow invisibleNodes="" visibleNodes="ABI, RV32I/pc;ABI, RV32I/ra;ABI, RV32I/sp;ABI, RV32I/gp;ABI, RV32I/tp;ABI, RV32I/a0;ABI, RV32I/a1;ABI, RV32I/a2;ABI, RV32I/a3;ABI, RV32I/a4;ABI, RV32I/a5;ABI, RV32I/a6;ABI, RV32I/a7;ABI, RV32I/t0;ABI, RV32I/t1;ABI, RV32I/t2;ABI, RV32I/t3;ABI, RV32I/t4;ABI, RV32I/t5;ABI, RV32I/t6;ABI, RV32I/s0;ABI, RV32I/s1;ABI, RV32I/s2;ABI, RV32I/s3;ABI, RV32I/s4;ABI, RV32I/s5;ABI, RV32I/s6;ABI, RV32I/s7;ABI, RV32I/s8;ABI, RV32I/s9;ABI, RV32I/s10;ABI, RV32I/s11;CPU, RV32I/pc;CPU, RV32I/x1;CPU, RV32I/x2;CPU, RV32I/x3;CPU, RV32I/x4;CPU, RV32I/x5;CPU, RV32I/x6;CPU, RV32I/x7;CPU, RV32I/x8;CPU, RV32I/x9;CPU, RV32I/x10;CPU, RV32I/x11;CPU, RV32I/x12;CPU, RV32I/x13;CPU, RV32I/x14;CPU, RV32I/x15;CPU, RV32I/x16;CPU, RV32I/x17;CPU, RV32I/x18;CPU, RV32I/x19;CPU, RV32I/x20;CPU, RV32I/x21;CPU, RV32I/x22;CPU, RV32I/x23;CPU, RV32I/x24;CPU, RV32I/x25;CPU, RV32I/x26;CPU, RV32I/x27;CPU, RV32I/x28;CPU, RV32I/x29;CPU, RV32I/x30;CPU, RV32I/x31" binaryNodes="" asciiNodes="" openNodes="ABI, RV32I;CPU, RV32I" name="foc - hpm5e00evk_Debug" decimalNodes="" octalNodes="" unsignedNodes=""/>
@@ -70,7 +61,12 @@
  </Watch4>
  <Files>
   <SessionOpenFile windowGroup="DockEditLeft" x="5" y="147" useTextEdit="1" path="../../core/inner/src/sys.c" left="0" top="112" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="46" useTextEdit="1" path="../../core/inner/src/main.c" left="0" selected="1" top="29" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="14" y="19" useTextEdit="1" path="../../core/inner/src/main.c" left="0" selected="1" top="9" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="6" y="24" useTextEdit="1" path="../../core/outer/util.h" left="0" top="7" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="16" useTextEdit="1" path="../../core/outer/util.c" left="0" top="9" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="10" y="16" useTextEdit="1" path="../../core/inner/src/foc.c" left="0" top="0" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="5" y="138" useTextEdit="1" path="../../core/inner/src/hpm_dma_mgr.c" left="0" top="120" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="28" useTextEdit="1" path="../../core/inner/inc/spi.h" left="0" top="45" codecName="Default"/>
  </Files>
- <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="D:/Desktop/FOC/foc/hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/MemMang" debugSearchPath="" autoConnectCapabilities="3199"/>
+ <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="D:/Desktop/FOC/foc/core/inner/src" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>

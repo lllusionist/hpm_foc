@@ -78,8 +78,8 @@
       target_device_name="HPM5E31xGNx" />
     <configuration
       Name="Debug"
-      c_preprocessor_definitions="CONFIG_FREERTOS=1;CONFIG_DISABLE_GLOBAL_IRQ_ON_STARTUP=1;__freertos_irq_stack_top=_stack;portasmHAS_MTIME=1;USE_NONVECTOR_MODE=1;DISABLE_IRQ_PREEMPTIVE=1"
-      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/include;../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V;../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V/chip_specific_extensions/HPMicro"
+      c_preprocessor_definitions="CONFIG_FREERTOS=1;CONFIG_DISABLE_GLOBAL_IRQ_ON_STARTUP=1;__freertos_irq_stack_top=_stack;portasmHAS_MTIME=1;USE_NONVECTOR_MODE=1;DISABLE_IRQ_PREEMPTIVE=1;CONFIG_CHERRYUSB=1;CONFIG_USB_DEVICE=1;CONFIG_USB_DEVICE_CDC_ACM=1"
+      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/include;../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V;../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/portable/GCC/RISC-V/chip_specific_extensions/HPMicro;../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/common;../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/osal;../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/core;../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/class/cdc;../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/class/hub;../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/port/hpmicro;../../hpm_sdk_localized_for_hpm5e00evk/components/usb/device"
       debug_target_connection="J-Link" />
     <folder Name="application">
       <folder Name="core">
@@ -89,15 +89,18 @@
         <folder Name="inner">
           <folder Name="inc">
             <file file_name="../../core/inner/inc/adc.h" />
+            <file file_name="../../core/inner/inc/cdc_acm.h" />
             <file file_name="../../core/inner/inc/dma.h" />
             <file file_name="../../core/inner/inc/foc.h" />
             <file file_name="../../core/inner/inc/main.h" />
             <file file_name="../../core/inner/inc/spi.h" />
             <file file_name="../../core/inner/inc/sys.h" />
             <file file_name="../../core/inner/inc/tim.h" />
+            <file file_name="../../core/inner/inc/usb_config.h" />
           </folder>
           <folder Name="src">
             <file file_name="../../core/inner/src/adc.c" />
+            <file file_name="../../core/inner/src/cdc_acm.c" />
             <file file_name="../../core/inner/src/dma.c" />
             <file file_name="../../core/inner/src/foc.c" />
             <file file_name="../../core/inner/src/main.c">
@@ -120,10 +123,15 @@
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/application/core/outer" />
           <folder Name="inc">
             <file file_name="../../core/outer/mt6835.h" />
+            <file file_name="../../core/outer/usb_driver.h" />
+            <file file_name="../../core/outer/util.h" />
+            <file file_name="../../core/outer/vofa.h" />
           </folder>
           <folder Name="src">
             <file file_name="../../core/outer/mt6835.c" />
+            <file file_name="../../core/outer/usb_driver.c" />
             <file file_name="../../core/outer/util.c" />
+            <file file_name="../../core/outer/vofa.c" />
           </folder>
         </folder>
       </folder>
@@ -358,6 +366,31 @@
         <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/stream_buffer.c" />
         <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/tasks.c" />
         <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/timers.c" />
+      </folder>
+      <folder Name="cherryusb">
+        <configuration
+          Name="Common"
+          build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/middleware/cherryusb" />
+        <folder Name="class">
+          <folder Name="cdc">
+            <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/class/cdc/usbd_cdc_acm.c" />
+          </folder>
+        </folder>
+        <folder Name="core">
+          <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/core/usbd_core.c" />
+          <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/core/usbotg_core.c" />
+        </folder>
+        <folder Name="osal">
+          <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/osal/usb_osal_freertos.c" />
+        </folder>
+        <folder Name="port">
+          <folder Name="hpmicro">
+            <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/port/hpmicro/usb_dc_hpm.c" />
+            <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/middleware/cherryusb/port/hpmicro/usb_glue_hpm.c" />
+          </folder>
+        </folder>
+        <!-- SDK 的 components/usb/device, 被 usb_dc_hpm.c 依赖, 必须一起编 -->
+        <file file_name="../../hpm_sdk_localized_for_hpm5e00evk/components/usb/device/hpm_usb_device.c" />
       </folder>
       <folder Name="segger_rtt">
         <folder Name="RTT">
