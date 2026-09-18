@@ -36,14 +36,6 @@ typedef struct {
 
 } foc_data_t;
 
-typedef enum led_mode {
-	ST_BOOT,
-	ST_IDLE,  // 空闲
-	ST_RUN,	  // 运行
-	ST_CAL,	  // 校准
-	ST_FAULT, // 故障
-} foc_stage_t;
-
 extern volatile foc_data_t FOC;
 
 void foc_adc_midpoint(void);
