@@ -12,17 +12,17 @@
 
 int main(void)
 {
-    sys_board_init();
-    sys_usb_init();
-    pwm_init();
-    adc_init();
-    dma_mgr_init();
-    mt6835_init();
+	sys_board_init();
+	sys_usb_init();
+	pwm_init();
+	adc_init();
+	dma_mgr_init();
+	mt6835_init();
 
-    vTaskStartScheduler();
+	vTaskStartScheduler();
 
-    while (1) {
-    }
+	while (1) {
+	}
 
-    return 0;
+	return 0;
 }

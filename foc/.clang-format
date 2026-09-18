@@ -1,0 +1,37 @@
+# Linux 内核代码风格
+# 参考: https://www.kernel.org/doc/html/v4.15/translations/zh_CN/coding-style.html
+BasedOnStyle: LLVM
+
+# 缩进: 8 宽 Tab (内核要求 8, 不是 4)
+IndentWidth: 8
+TabWidth: 8
+UseTab: Always
+
+# 大括号: 函数另起一行, 控制语句跟在同行
+BreakBeforeBraces: Linux
+
+# 一行不超过 80 列
+ColumnLimit: 80
+
+# 短语句不许写在一行
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortBlocksOnASingleLine: false
+
+# switch 的 case 和 switch 同级 (内核风格)
+IndentCaseLabels: false
+IndentGotoLabels: false
+
+# 关键字后一个空格: if (x) / for (;;) / while (1)
+SpaceBeforeParens: ControlStatements
+
+# 指针星号靠变量名: char *p
+PointerAlignment: Right
+
+# 注释不重排、保持人工对齐 (本工程注释规范要求手工排版)
+ReflowComments: false
+AlignTrailingComments: true
+
+# 不动 include 顺序
+SortIncludes: false
