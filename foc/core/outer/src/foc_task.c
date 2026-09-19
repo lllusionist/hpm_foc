@@ -71,7 +71,7 @@ static void enter_state(tFSMState state)
         break;
     case IDLE:
         foc_disarm();
-        pwm_output_low_sides(); // 三相下桥全开 = 短路制动
+        pwm_output_low_sides();
         break;
     case RUN:
         foc_arm();
@@ -126,23 +126,28 @@ static void Task_FOC(void *argument)
 
         switch (sFSM.state) {
         case BOOT_UP: {
-            // 调度器起来后标定一次电流零点 (必须在使能之前)
             static bool midpoint_done;
             if (!midpoint_done) {
                 midpoint_done = true;
                 foc_adc_midpoint();
-                printf("current midpoint: Ia=%.0f Ib=%.0f Ic=%.0f\n",
-                       FOC.Ia_midpoint, FOC.Ib_midpoint,
-                       FOC.Ic_midpoint);
             }
         } break;
         case IDLE:
             break;
         case RUN:
-            // TODO: 速度环 / 位置环
+            if (ABS(FOC.Ia) > Config.protect_over_current || ABS(FOC.Ib) > Config.protect_over_current
+                || ABS(FOC.Ic) > Config.protect_over_current) {
+                FOC_disarm();
+                foc_request_stage(IDLE);
+            }
             break;
         case CALIBRATION:
             calibration_loop();
+            if (ABS(FOC.Ia) > Config.protect_over_current || ABS(FOC.Ib) > Config.protect_over_current
+                || ABS(FOC.Ic) > Config.protect_over_current) {
+                FOC_disarm();
+                foc_request_stage(IDLE);
+            }
             break;
         default:
             break;
