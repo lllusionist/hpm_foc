@@ -1,10 +1,7 @@
 #include "usb_driver.h"
 #include "util.h"
-#include "foc.h"
+#include "foc_task.h"
 
-// 上位机命令分发, 每帧 5 字节: id + 4 字节小端参数
-// 原工程里这些命令大多要落到 mc_task / controller / config 那一层,
-// 那层还没移植, 所以只实现当前能做的, 其余保留 case 以后再填
 void USB_parse_frame(UsbFrame *frame)
 {
 	uint8_t id = frame->id;
@@ -27,7 +24,9 @@ void USB_parse_frame(UsbFrame *frame)
 	case USB_CMD_RESET_ALL_CONFIG:  // CONFIG_clear_all_settings()
 	case USB_CMD_SAVE_CONFIG:       // CONFIG_save_to_flash()
 	case USB_CMD_SET_OP_MODE:       // CONTROLLER_set_op_mode(mode)
-	case USB_CMD_CALIB_START:       // MCT_set_state(CALIBRATION)
+	case USB_CMD_CALIB_START:
+		foc_request_stage(CALIBRATION);
+		break;
 	case USB_CMD_ANTICOGGING_START: // MCT_set_state(ANTICOGGING)
 	case USB_CMD_SET_TORQUE:        // Controller.input_current_buffer
 	case USB_CMD_SET_VELOCITY:      // Controller.input_velocity_buffer

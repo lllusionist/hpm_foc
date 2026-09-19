@@ -7,12 +7,18 @@
 #include "tim.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include <stdbool.h>
+#include "config.h"
 
 typedef struct {
+
+	volatile bool is_armed;
+	
 	volatile float Ia;
 	volatile float Ib;
 	volatile float Ic;
 	volatile float Ibus;
+	volatile float Ibus_filt;
 
 	volatile float Ia_midpoint;
 	volatile float Ib_midpoint;
@@ -24,7 +30,9 @@ typedef struct {
 	volatile float Vbus;
 
 	volatile float Iq;
+	volatile float Iq_filt;
 	volatile float Id;
+	volatile float Id_filt;
 
 	volatile float dtc_a;
 	volatile float dtc_b;
@@ -40,5 +48,11 @@ extern volatile foc_data_t FOC;
 
 void foc_adc_midpoint(void);
 void FOC_voltage(float Vd, float Vq, float phase);
+void enable_bldc_pwm_output(void);
+void disable_bldc_pwm_output(void);
+void pwm_output_low_sides(void);
+void foc_arm(void);
+void foc_disarm(void);
+void foc_init(void);
 
 #endif /* __FOC_H__ */

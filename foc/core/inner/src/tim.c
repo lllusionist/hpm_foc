@@ -64,7 +64,7 @@ static void pwm_fault_config(void)
 		    pwm_fault_recovery_on_fault_clear); // 软件清故障后恢复
 	}
 
-	pwmv2_enable_debug_mode(PWM); // 调试暂停时自动进入故障状态
+	// pwmv2_enable_debug_mode(PWM); // 调试暂停时自动进入故障状态
 }
 
 void pwm_init(void)
@@ -207,11 +207,6 @@ void pwm_init(void)
 	pwmv2_channel_enable_output(PWM, pwm_channel_3);
 	pwmv2_channel_enable_output(PWM, pwm_channel_4);
 	pwmv2_channel_enable_output(PWM, pwm_channel_5);
-
-	// 下桥低有效时打开下面三行
-	// pwmv2_enable_output_invert(PWM, pwm_channel_1);
-	// pwmv2_enable_output_invert(PWM, pwm_channel_3);
-	// pwmv2_enable_output_invert(PWM, pwm_channel_5);
 
 	// 锁定影子寄存器
 	pwmv2_shadow_register_lock(PWM);

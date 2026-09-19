@@ -5,7 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "foc.h"
-#include "mt6835.h"
+#include "encoder.h"
 
 #define byte0(dw_temp) (*(char *)(&dw_temp))
 #define byte1(dw_temp) (*((char *)(&dw_temp) + 1))

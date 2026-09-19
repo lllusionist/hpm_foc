@@ -69,10 +69,31 @@ void vofa_send(void)
 	vofa_send_data(2, FOC.Ic);
 	vofa_send_data(3, FOC.Ibus);
 
-	vofa_send_data(4, (float)MT6835.angle_raw);
-	vofa_send_data(5, MT6835.angle_rad);
-	vofa_send_data(6, MT6835.elec_angle);
-	vofa_send_data(7, MT6835.elec_speed_lpf);
+	vofa_send_data(4, (float)encoder.raw);
+	vofa_send_data(5, encoder.pos);
+	vofa_send_data(6, encoder.phase);
+	vofa_send_data(7, encoder.phase_vel);
 
 	vofa_sendframetail();
+}
+
+static void Vofa_task(void *argument)
+{
+	TickType_t last = xTaskGetTickCount();
+
+	(void)argument;
+
+	for (;;) {
+		vTaskDelayUntil(&last, pdMS_TO_TICKS(10)); // 100 Hz
+		vofa_send();
+	}
+}
+
+void vofa_start(void)
+{
+	if (xTaskCreate(Vofa_task, "vofa", 512, NULL, 5, NULL) != pdPASS) {
+		printf("vofa task create fail\n");
+		while (1) {
+		}
+	}
 }

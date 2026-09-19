@@ -2,6 +2,7 @@
 #define __USB_DRIVER_H__
 
 #include <stdint.h>
+#include "foc.h"
 
 #define USB_CMD_RESET_ALL_CONFIG 0x3B
 #define USB_CMD_SAVE_CONFIG 0x3F

@@ -121,16 +121,20 @@
             build_intermediate_directory="Output/$(Configuration)/Obj/$(ProjectName)/application/core/outer" />
           <folder Name="inc">
             <file file_name="../../core/outer/inc/foc.h" />
+            <file file_name="../../core/outer/inc/foc_cal.h" />
             <file file_name="../../core/outer/inc/foc_task.h" />
-            <file file_name="../../core/outer/inc/mt6835.h" />
+            <file file_name="../../core/outer/inc/config.h" />
+            <file file_name="../../core/outer/inc/encoder.h" />
             <file file_name="../../core/outer/inc/usb_driver.h" />
             <file file_name="../../core/outer/inc/util.h" />
             <file file_name="../../core/outer/inc/vofa.h" />
           </folder>
           <folder Name="src">
             <file file_name="../../core/outer/src/foc.c" />
+            <file file_name="../../core/outer/src/foc_cal.c" />
             <file file_name="../../core/outer/src/foc_task.c" />
-            <file file_name="../../core/outer/src/mt6835.c" />
+            <file file_name="../../core/outer/src/config.c" />
+            <file file_name="../../core/outer/src/encoder.c" />
             <file file_name="../../core/outer/src/usb_driver.c" />
             <file file_name="../../core/outer/src/util.c" />
             <file file_name="../../core/outer/src/vofa.c" />
