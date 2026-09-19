@@ -63,6 +63,28 @@ typedef struct {
 
 	volatile float Power_filt; // 功率 (W)
 
+	volatile float Vd_out;	  // 电流环输出电压 d 分量 (V)
+	volatile float Vq_out;	  // 电流环输出电压 q 分量 (V)
+	volatile bool saturated;  // 电压饱和标志
+
+	/* 校准用: 开环电流模式 (校准任务下发角度, 中断里跑电流环) */
+	volatile bool calib_mode;
+	volatile float calib_angle;	// 电角度 (rad)
+	volatile float calib_phase_vel; // 电角速度 (rad/s)
+	volatile float calib_id;	// d 轴目标 (A)
+	volatile float calib_iq;	// q 轴目标 (A)
+
+	/* 校准用: α 轴正弦电压注入 (电感测量, 解调累加在中断里做) */
+	volatile bool calib_vinj_mode;
+	volatile float vinj_omega; // 注入角频率 (rad/s)
+	volatile float vinj_amp;   // 正弦幅值 (V)
+	volatile float vinj_dc;	   // 直流偏置 (V)
+	volatile float inj_phase;  // 注入相位, 中断里推进
+	volatile bool vinj_acc;	   // 使能解调累加
+	volatile float vinj_sum_sin;
+	volatile float vinj_sum_cos;
+	volatile uint32_t vinj_samples;
+
 } foc_data_t;
 
 extern volatile foc_data_t FOC;

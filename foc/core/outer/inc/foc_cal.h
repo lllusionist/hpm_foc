@@ -17,20 +17,28 @@ typedef enum {
 typedef enum eCalibStep {
     CS_NULL = 0,
 
-    // // 电阻
-    // CS_MOTOR_R_START,
-    // CS_MOTOR_R_LOOP,
-    // CS_MOTOR_R_END,
+    // 电阻
+    CS_MOTOR_R_START,
+    CS_MOTOR_R_LOOP,
+    CS_MOTOR_R_END,
 
-    // // 电感
-    // CS_MOTOR_L_START,
-    // CS_MOTOR_L_LOOP,
-    // CS_MOTOR_L_END,
+    // 电感
+    CS_MOTOR_L_START,
+    CS_MOTOR_L_LOOP,
+    CS_MOTOR_L_END,
 
     // 极对数
     CS_DIR_PP_START,
     CS_DIR_PP_LOOP,
     CS_DIR_PP_END,
+
+    // 磁链测量 (开环电流 + 两点法)
+    CS_FLUX_START,
+    CS_FLUX_RAMP1,
+    CS_FLUX_MEAS1,
+    CS_FLUX_RAMP2,
+    CS_FLUX_MEAS2,
+    CS_FLUX_END,
 
     // 编码器校准
     CS_ENCODER_START,

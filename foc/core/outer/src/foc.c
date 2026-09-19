@@ -13,7 +13,7 @@ volatile foc_data_t FOC;
 	(VBUS_DIVIDER_RATIO * ADC_REF_VOLTAGE / ADC_RESOLUTION)
 
 /* 母线电压暂用常数; 等 VBUS 通道接进 ADC 后换成实测值 */
-#define VBUS_DEFAULT 24.0f
+#define VBUS_DEFAULT 12.0f
 
 void foc_adc_midpoint(void)
 {
@@ -167,6 +167,9 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	float v_d = i_d_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_d;
 	float v_q = i_q_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_q;
 
+	FOC.Vd_out = v_d;
+	FOC.Vq_out = v_q;
+
 	// voltage normalize = 1/(2/3*v_bus)
 	float v_to_mod = 1.5f / FOC.Vbus_filt;
 	float mod_vd = v_d * v_to_mod;
@@ -179,7 +182,9 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 		mod_vq *= factor;
 		FOC.current_ctrl_integral_d *= 0.99f;
 		FOC.current_ctrl_integral_q *= 0.99f;
+		FOC.saturated = true;
 	} else {
+		FOC.saturated = false;
 		FOC.current_ctrl_integral_d +=
 		    i_d_err * (FOC.current_ctrl_i_gain * CURRENT_MEASURE_PERIOD);
 		FOC.current_ctrl_integral_q +=
@@ -205,7 +210,34 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 void foc_adc_callback(void)
 {
-	if (!FOC.is_armed || (foc_get_stage() != RUN)) {
+	if (!FOC.is_armed) {
+		return;
+	}
+
+	// 校准: α 轴正弦电压注入 (电感测量)
+	if (FOC.calib_vinj_mode) {
+		FOC.inj_phase += FOC.vinj_omega * CURRENT_MEASURE_PERIOD;
+		if (FOC.inj_phase >= M_2PI) FOC.inj_phase -= M_2PI;
+
+		float s = sin_f32(FOC.inj_phase);
+		if (FOC.vinj_acc) {
+			float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+			FOC.vinj_sum_sin += ia * s;
+			FOC.vinj_sum_cos += ia * cos_f32(FOC.inj_phase);
+			FOC.vinj_samples++;
+		}
+		FOC_voltage(FOC.vinj_dc + FOC.vinj_amp * s, 0, 0);
+		return;
+	}
+
+	// 校准: 开环电流模式 (角度由校准状态机下发)
+	if (FOC.calib_mode) {
+		FOC_current(FOC.calib_id, FOC.calib_iq, FOC.calib_angle,
+			    FOC.calib_phase_vel);
+		return;
+	}
+
+	if (foc_get_stage() != RUN) {
 		return;
 	}
 
@@ -233,6 +265,25 @@ void foc_init(void)
 	FOC.phase_offset            = 0;
 	FOC.openloop_voltage        = 0;
 	FOC.openloop_angle          = 0;
+
+	FOC.Vd_out      = 0;
+	FOC.Vq_out      = 0;
+	FOC.saturated   = false;
+	FOC.calib_mode  = false;
+	FOC.calib_angle = 0;
+	FOC.calib_phase_vel = 0;
+	FOC.calib_id        = 0;
+	FOC.calib_iq        = 0;
+
+	FOC.calib_vinj_mode = false;
+	FOC.vinj_omega      = 0;
+	FOC.vinj_amp        = 0;
+	FOC.vinj_dc         = 0;
+	FOC.inj_phase       = 0;
+	FOC.vinj_acc        = false;
+	FOC.vinj_sum_sin    = 0;
+	FOC.vinj_sum_cos    = 0;
+	FOC.vinj_samples    = 0;
 	FOC.current_ctrl_integral_d = 0;
 	FOC.current_ctrl_integral_q = 0;
 	FOC.Power_filt              = 0;

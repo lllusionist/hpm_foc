@@ -18,6 +18,7 @@ typedef struct {
     int32_t  pole_pairs;                     // 极对数
     float    phase_resistance;               // 相电阻（Ω）
     float    phase_inductance;               // 相电感（H）
+    float    flux_linkage;                   // 永磁磁链 λ（Wb，峰值相磁链，校准得到）
     float    calib_current;                  // 校准电流（A）
     float    calib_voltage;                  // 校准电压（V）
     float    current_limit;                  // 电流限制（A）

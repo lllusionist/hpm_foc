@@ -105,6 +105,17 @@ static void exit_state(tFSMState state)
     }
 }
 
+// 用换算成安培的三相电流做过流判断 (FOC.Ia 是原始码值)
+static bool foc_over_current(void)
+{
+    float limit = Config.protect_over_current;
+    float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+    float ib = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
+    float ic = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
+
+    return (fabsf(ia) > limit) || (fabsf(ib) > limit) || (fabsf(ic) > limit);
+}
+
 static void Task_FOC(void *argument)
 {
     (void)argument;
@@ -135,17 +146,15 @@ static void Task_FOC(void *argument)
         case IDLE:
             break;
         case RUN:
-            if (ABS(FOC.Ia) > Config.protect_over_current || ABS(FOC.Ib) > Config.protect_over_current
-                || ABS(FOC.Ic) > Config.protect_over_current) {
-                FOC_disarm();
+            if (foc_over_current()) {
+                foc_disarm();
                 foc_request_stage(IDLE);
             }
             break;
         case CALIBRATION:
             calibration_loop();
-            if (ABS(FOC.Ia) > Config.protect_over_current || ABS(FOC.Ib) > Config.protect_over_current
-                || ABS(FOC.Ic) > Config.protect_over_current) {
-                FOC_disarm();
+            if (foc_over_current()) {
+                foc_disarm();
                 foc_request_stage(IDLE);
             }
             break;
