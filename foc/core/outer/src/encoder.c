@@ -1,4 +1,5 @@
 #include "encoder.h"
+#include "config.h"
 
 volatile tEncoder encoder;
 
@@ -59,7 +60,6 @@ static void encoder_txdma_callback(uint32_t channel)
 void ENCODER_reset(void)
 {
 	float bw = ENCODER_PLL_BW_HZ * 6.2831853f;
-	float period = 1.0f / (float)ENCODER_UPDATE_FREQ;
 
 	encoder.raw = 0;
 	encoder.count_in_cpr = 0;
@@ -74,7 +74,7 @@ void ENCODER_reset(void)
 	encoder.pll_pos = 0;
 	encoder.pll_vel = 0;
 	encoder.pll_kp = 2.0f * bw;
-	encoder.pll_ki = 0.25f * encoder.pll_kp * encoder.pll_kp * period;
+	encoder.pll_ki = 0.25f * encoder.pll_kp * encoder.pll_kp;
 	encoder.snap_threshold = ENCODER_PLL_SNAP_VEL;
 	encoder.need_init = 20;
 
@@ -184,7 +184,7 @@ void ENCODER_loop(void)
 	      ((uint32_t)encoder_rx_buf[4] & 0xF8U);
 	encoder.raw = raw;
 
-	if (ENCODER_DIR > 0) {
+	if (Config.encoder_dir == 1) {
 		corrected = raw;
 	} else {
 		corrected = ENCODER_MASK - raw;
@@ -210,10 +210,14 @@ void ENCODER_loop(void)
 	encoder.shadow_count += (int64_t)delta;
 	encoder.count_in_cpr_prev = corrected;
 
-	// 减零位后再算角度
-	count = (float)((corrected - (uint32_t)ENCODER_ANGLE_OFFSET) & ENCODER_MASK);
+	// 减零位 + 偏移表后再算角度 (校准结果)
+	uint32_t lut_index =
+	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
+	int32_t aligned_count = (int32_t)corrected - Config.encoder_offset -
+				Config.offset_lut[lut_index];
+	count = (float)((uint32_t)aligned_count & ENCODER_MASK);
 	encoder.pos = count / ENCODER_CPR_F;
-	encoder.phase = (float)(((uint32_t)count * ENCODER_POLE_PAIRS) &
+	encoder.phase = (float)(((uint32_t)count * (uint32_t)Config.pole_pairs) &
 				ENCODER_MASK) *
 			(6.2831853f / ENCODER_CPR_F);
 
@@ -242,7 +246,7 @@ void ENCODER_loop(void)
 
 	encoder.vel = encoder.pll_vel / ENCODER_CPR_F;
 	encoder.phase_vel =
-	    encoder.vel * 6.2831853f * (float)ENCODER_POLE_PAIRS;
+	    encoder.vel * 6.2831853f * (float)Config.pole_pairs;
 }
 
 // 先发起一帧再处理上一帧, 两者重叠所以周期是 2 个 tick

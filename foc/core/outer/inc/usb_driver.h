@@ -24,6 +24,12 @@
 #define USB_CMD_SET_CUR_KP 0x40
 #define USB_CMD_SET_CUR_KI 0x41
 
+/* 调试用临时命令 (定位 FOC 角度/方向问题后可删) */
+#define USB_CMD_DEBUG_PHASE_OFFSET 0x50 // float 电角度附加偏移 (rad)
+#define USB_CMD_DEBUG_ID 0x51		// float d 轴电流目标 (A)
+#define USB_CMD_DEBUG_OPENLOOP_V 0x52	// float 开环固定矢量幅值 (V), 0=关闭
+#define USB_CMD_DEBUG_OPENLOOP_ANGLE 0x53 // float 开环固定矢量电角度 (rad)
+
 #define USB_CMD_SET_VEL_KP 0x42
 #define USB_CMD_SET_VEL_KI 0x43
 

@@ -64,18 +64,19 @@ void vofa_sendframetail(void)
 void vofa_send(void)
 {
 	/* 通道顺序要和 VOFA+ 里配的一致; 这里是 8 通道 */
-	vofa_send_data(0, FOC.Ia);
-	vofa_send_data(1, FOC.Ib);
-	vofa_send_data(2, FOC.Ic);
-	vofa_send_data(3, FOC.Ibus);
-
-	vofa_send_data(4, (float)encoder.raw);
-	vofa_send_data(5, encoder.pos);
+	vofa_send_data(0, (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE); // A
+	vofa_send_data(1, (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE);
+	vofa_send_data(2, (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE);
+	vofa_send_data(3, FOC.Id);      // 电流环反馈
+	vofa_send_data(4, FOC.Iq);
+	vofa_send_data(5, FOC.Iq_set);  // 电流环目标
 	vofa_send_data(6, encoder.phase);
 	vofa_send_data(7, encoder.phase_vel);
 
 	vofa_sendframetail();
 }
+
+#define VOFA_PERIOD_MS 1 // 波形周期 (ms): 1 = 1kHz
 
 static void Vofa_task(void *argument)
 {
@@ -84,7 +85,7 @@ static void Vofa_task(void *argument)
 	(void)argument;
 
 	for (;;) {
-		vTaskDelayUntil(&last, pdMS_TO_TICKS(10)); // 100 Hz
+		vTaskDelayUntil(&last, pdMS_TO_TICKS(VOFA_PERIOD_MS));
 		vofa_send();
 	}
 }

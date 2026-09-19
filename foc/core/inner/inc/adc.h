@@ -7,8 +7,10 @@
 #include "hpm_clock_drv.h"
 #include "hpm_interrupt.h"
 #include "hpm_soc.h"
-#include "foc.h"
+
+typedef void (*adc_callback_t)(void);
 
 void adc_init(void);
+void adc_callback_set(adc_callback_t sink);
 
 #endif /* __ADC_H__ */

@@ -28,12 +28,10 @@
 #define ENCODER_CPR_HALF 8388608
 #define ENCODER_MASK 0x00FFFFFFU
 
-#define ENCODER_PLL_BW_HZ (100.0f)	// 环路带宽
-#define ENCODER_PLL_SNAP_VEL (273.0f)	// 约 1 转/分
+#define ENCODER_PLL_BW_HZ (100.0f) // 环路带宽
+#define ENCODER_PLL_SNAP_VEL (ENCODER_CPR_F / 60.0f) // 约 1 转/分
 
-#define ENCODER_DIR (1)			// 反装改 -1
-#define ENCODER_ANGLE_OFFSET (16663688)	// 要实测标定
-#define ENCODER_POLE_PAIRS (7U)
+// 方向/零位/极对数由校准结果 Config.encoder_dir/encoder_offset/pole_pairs 提供
 
 typedef struct sEncoder
 {

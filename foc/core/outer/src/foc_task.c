@@ -1,4 +1,5 @@
 #include "foc_task.h"
+#include <stdio.h>
 
 static tFSM sFSM;
 
@@ -8,7 +9,7 @@ static volatile uint8_t s_req_valid = 0;
 
 void foc_request_stage(tFSMState state)
 {
-    s_req       = state;
+    s_req = state;
     s_req_valid = 1;
 }
 
@@ -124,8 +125,17 @@ static void Task_FOC(void *argument)
         }
 
         switch (sFSM.state) {
-        case BOOT_UP:
-            break;
+        case BOOT_UP: {
+            // 调度器起来后标定一次电流零点 (必须在使能之前)
+            static bool midpoint_done;
+            if (!midpoint_done) {
+                midpoint_done = true;
+                foc_adc_midpoint();
+                printf("current midpoint: Ia=%.0f Ib=%.0f Ic=%.0f\n",
+                       FOC.Ia_midpoint, FOC.Ib_midpoint,
+                       FOC.Ic_midpoint);
+            }
+        } break;
         case IDLE:
             break;
         case RUN:

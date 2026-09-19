@@ -1,4 +1,5 @@
 #include "adc.h"
+#include "foc.h"
 
 #define ADC_IRQ IRQn_ADC0
 #define ADC_TRIG_CH ADC16_CONFIG_TRG0A
@@ -12,6 +13,8 @@
 
 static const uint8_t adc_ch_tab[ADC_TRIG_LEN] = {ADC_CH_IA, ADC_CH_IB,
 						 ADC_CH_IC};
+
+static adc_callback_t adc_callback;
 
 ATTR_PLACE_AT_FAST_RAM_WITH_ALIGNMENT(ADC_SOC_DMA_ADDR_ALIGNMENT)
 volatile adc16_pmt_dma_data_t adc_dma_buf[ADC_TRIG_LEN];
@@ -70,6 +73,11 @@ void adc_init(void)
 	trgm_output_config(HPM_TRGM0, TRGM_TRGOCFG_ADCX_PTRGI0A, &trgm_cfg);
 }
 
+void adc_callback_set(adc_callback_t sink)
+{
+	adc_callback = sink;
+}
+
 SDK_DECLARE_EXT_ISR_M(ADC_IRQ, isr_adc)
 void isr_adc(void)
 {
@@ -80,5 +88,9 @@ void isr_adc(void)
 		FOC.Ia = adc_dma_buf[0].result;
 		FOC.Ib = adc_dma_buf[1].result;
 		FOC.Ic = adc_dma_buf[2].result;
+
+		if(adc_callback) {
+			adc_callback();
+		}
 	}
 }
