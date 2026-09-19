@@ -50,7 +50,7 @@ void USB_parse_frame(UsbFrame *frame)
 
 	case USB_CMD_SET_TORQUE: {
 		float iq = data_to_float(&frame->data[0]);
-		FOC.Iq_set = -iq;
+		FOC.Iq_set = iq;
 		break;
 	}
 
