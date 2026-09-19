@@ -321,6 +321,7 @@ void calibration_loop(void)
         loop_count = 0;
         mCalibStep = CS_NULL;
         Config.calib_valid = true;
+        CONFIG_save_to_flash();
         foc_request_stage(IDLE);
     } break;
 

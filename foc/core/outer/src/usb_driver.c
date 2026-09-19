@@ -20,10 +20,28 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 	}
 
-	// 下面这些要等控制层移植过来
-	case USB_CMD_RESET_ALL_CONFIG: // CONFIG_clear_all_settings()
-	case USB_CMD_SAVE_CONFIG:      // CONFIG_save_to_flash()
-	case USB_CMD_SET_OP_MODE:      // CONTROLLER_set_op_mode(mode)
+	// 配置持久化 (擦写期间会关中断, 电机使能时禁止)
+	case USB_CMD_SAVE_CONFIG: {
+		if (FOC.is_armed) {
+			printf("cfg save: motor armed, refused\n");
+			break;
+		}
+		uint8_t ret = CONFIG_save_to_flash();
+		printf("cfg save: %s\n", (ret == 0) ? "ok" : "fail");
+		break;
+	}
+
+	case USB_CMD_RESET_ALL_CONFIG:
+		if (FOC.is_armed) {
+			printf("cfg reset: motor armed, refused\n");
+			break;
+		}
+		config_init();
+		CONFIG_save_to_flash();
+		printf("cfg reset\n");
+		break;
+
+	case USB_CMD_SET_OP_MODE: // CONTROLLER_set_op_mode(mode)
 		break;
 
 	case USB_CMD_CALIB_START:

@@ -2,7 +2,10 @@
 <session>
  <Bookmarks/>
  <Breakpoints groups="Breakpoints" active_group="Breakpoints">
-  <Exceptions/>
+  <BreakpointListItem trigger="" line="168" counter="0" hardwareBreakpoint="" isFunctionBreakpoint="false" action="" expression="" stopAll="false" group="Breakpoints" type="Breakpoint" state="2" filename="../../core/outer/src/foc_cal.c" useHWbreakpoint="false"/>
+  <Exceptions>
+   <Group group="" set=""/>
+  </Exceptions>
  </Breakpoints>
  <ExecutionProfileWindow/>
  <FrameBuffer>
@@ -31,9 +34,12 @@
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;inc"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;src"/>
+  <ProjectSessionItem path="foc;foc - hpm5e00evk;drivers"/>
+  <ProjectSessionItem path="foc;foc - hpm5e00evk;drivers;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;cherryusb"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;cherryusb;osal"/>
+  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS"/>
  </Project>
  <Register1>
   <RegisterWindow invisibleNodes="" visibleNodes="ABI, RV32I/pc;ABI, RV32I/ra;ABI, RV32I/sp;ABI, RV32I/gp;ABI, RV32I/tp;ABI, RV32I/a0;ABI, RV32I/a1;ABI, RV32I/a2;ABI, RV32I/a3;ABI, RV32I/a4;ABI, RV32I/a5;ABI, RV32I/a6;ABI, RV32I/a7;ABI, RV32I/t0;ABI, RV32I/t1;ABI, RV32I/t2;ABI, RV32I/t3;ABI, RV32I/t4;ABI, RV32I/t5;ABI, RV32I/t6;ABI, RV32I/s0;ABI, RV32I/s1;ABI, RV32I/s2;ABI, RV32I/s3;ABI, RV32I/s4;ABI, RV32I/s5;ABI, RV32I/s6;ABI, RV32I/s7;ABI, RV32I/s8;ABI, RV32I/s9;ABI, RV32I/s10;ABI, RV32I/s11;CPU, RV32I/pc;CPU, RV32I/x1;CPU, RV32I/x2;CPU, RV32I/x3;CPU, RV32I/x4;CPU, RV32I/x5;CPU, RV32I/x6;CPU, RV32I/x7;CPU, RV32I/x8;CPU, RV32I/x9;CPU, RV32I/x10;CPU, RV32I/x11;CPU, RV32I/x12;CPU, RV32I/x13;CPU, RV32I/x14;CPU, RV32I/x15;CPU, RV32I/x16;CPU, RV32I/x17;CPU, RV32I/x18;CPU, RV32I/x19;CPU, RV32I/x20;CPU, RV32I/x21;CPU, RV32I/x22;CPU, RV32I/x23;CPU, RV32I/x24;CPU, RV32I/x25;CPU, RV32I/x26;CPU, RV32I/x27;CPU, RV32I/x28;CPU, RV32I/x29;CPU, RV32I/x30;CPU, RV32I/x31" binaryNodes="" asciiNodes="" openNodes="ABI, RV32I;CPU, RV32I" name="foc - hpm5e00evk_Debug" decimalNodes="" octalNodes="" unsignedNodes=""/>
@@ -54,7 +60,11 @@
   <Trace enabled="Yes"/>
  </TraceWindow>
  <Watch1>
-  <Watches active="1" update="Never"/>
+  <Watches active="1" update="Five Seconds">
+   <Watchpoint expression="Config.pole_pairs" name="Config.pole_pairs" radix="-1" linenumber="59" filename="../../core/outer/src/foc_cal.c"/>
+   <Watchpoint expression="Config" name="Config" radix="-1" linenumber="164" filename="../../core/outer/src/foc_cal.c"/>
+   <Watchpoint expression="Config.encoder_offset" name="Config.encoder_offset" radix="-1" linenumber="0" filename=""/>
+  </Watches>
  </Watch1>
  <Watch2>
   <Watches active="0" update="Never"/>
@@ -66,11 +76,9 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="146" useTextEdit="1" path="../../core/inner/src/sys.c" left="0" top="105" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="25" useTextEdit="1" path="../../core/inner/src/main.c" left="0" top="6" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="28" useTextEdit="1" path="../../core/inner/inc/spi.h" left="0" top="28" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="16" y="9" useTextEdit="1" path="../../core/inner/inc/adc.h" left="0" top="0" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="25" y="14" useTextEdit="1" path="../../core/outer/src/foc_cal.c" left="0" selected="1" top="0" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="15" useTextEdit="1" path="../../core/inner/src/main.c" left="0" top="7" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="17" y="22" useTextEdit="1" path="../../core/outer/src/usb_driver.c" left="0" top="25" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="43" useTextEdit="1" path="../../core/outer/src/foc_cal.c" left="0" selected="1" top="34" codecName="Default"/>
  </Files>
  <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="D:/Desktop/FOC/foc/core/outer/src" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>

@@ -255,9 +255,6 @@ void foc_adc_callback(void)
 
 void foc_init(void)
 {
-	Config.phase_resistance = 5.0f;	   // 5Ω
-	Config.phase_inductance = 0.00164f; // 1.64mH
-
 	FOC.Vbus                    = VBUS_DEFAULT;
 	FOC.Vbus_filt               = VBUS_DEFAULT;
 	FOC.Id_set                  = 0;

@@ -63,6 +63,9 @@ typedef struct {
 
 extern tConfig Config;
 
-void config_init(void);
+void     config_init(void);
+uint32_t CONFIG_calculate_crc(const tConfig *cfg);
+uint8_t  CONFIG_save_to_flash(void);
+uint8_t  CONFIG_load_from_flash(void);
 
 #endif /* __CONFIG_H__ */
