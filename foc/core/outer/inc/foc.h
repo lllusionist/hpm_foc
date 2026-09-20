@@ -20,15 +20,19 @@
 #define FOC_IBUS_SCALE                                                         \
 	((3.3f / 65536.0f) / (FOC_IBUS_SHUNT_OHM * FOC_IBUS_AMP_GAIN))
 
-/* 母线电压: PF22(ADC1.IN14), 标称 20k/1k(=21:1), 实测按 16:1 折算 */
 #define FOC_VBUS_DIVIDER (16.0f)
-
-/* 三相电压: VA/VB/VC (ADC1), 分压比 (先按与母线同值占位) */
 #define FOC_VPHASE_DIVIDER (16.0f)
+
+/* 故障码 */
+#define FOC_FAULT_NONE 0
+#define FOC_FAULT_PHASE_OC 1     // 相过流
+#define FOC_FAULT_OVER_VOLTAGE 2 // 母线过压
+#define FOC_FAULT_UNDER_VOLTAGE 3 // 母线欠压
 
 typedef struct {
 
 	volatile bool is_armed;
+	volatile uint32_t fault_code; // 0=正常, 见 FOC_FAULT_*
 	
 	volatile float Ia;
 	volatile float Ib;

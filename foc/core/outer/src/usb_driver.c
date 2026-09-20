@@ -120,6 +120,17 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 	}
 
+	// 保护阈值 (改完用 0x3F 存 Flash)
+	case USB_CMD_SET_UNDER_VOLTAGE: {
+		Config.protect_under_voltage = data_to_float(&frame->data[0]);
+		break;
+	}
+
+	case USB_CMD_SET_OVER_VOLTAGE: {
+		Config.protect_over_voltage = data_to_float(&frame->data[0]);
+		break;
+	}
+
 	// 调试用: 定位 FOC 角度/方向问题
 	case USB_CMD_DEBUG_PHASE_OFFSET:
 		FOC.phase_offset = data_to_float(&frame->data[0]);

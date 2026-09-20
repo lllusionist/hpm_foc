@@ -175,6 +175,7 @@ void foc_arm(void)
 
 	enable_bldc_pwm_output();
 
+	FOC.fault_code = FOC_FAULT_NONE;
 	FOC.is_armed = true;
 
 	taskEXIT_CRITICAL();

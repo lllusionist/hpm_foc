@@ -107,7 +107,6 @@ static void exit_state(tFSMState state)
     }
 }
 
-// 用换算成安培的三相电流做过流判断 (FOC.Ia 是原始码值)
 static bool foc_over_current(void)
 {
     float limit = Config.protect_over_current;
@@ -116,6 +115,62 @@ static bool foc_over_current(void)
     float ic = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
 
     return (fabsf(ia) > limit) || (fabsf(ib) > limit) || (fabsf(ic) > limit);
+}
+
+// 保护: 相过流(立即) / 母线过压 / 母线欠压; 返回故障码, 0 = 正常
+static uint8_t foc_protection_check(void)
+{
+    static bool     uv_warned = false;
+    static uint32_t ov_cnt    = 0;
+    static uint32_t uv_cnt    = 0;
+
+    float vbus = FOC.Vbus;
+
+    bool uv_ok = (Config.protect_under_voltage < (FOC.Vbus_filt * 0.9f));
+
+    if (!uv_warned && (FOC.Vbus_filt > 1.0f) && !uv_ok) {
+        uv_warned = true;
+        printf("protect: UV threshold %dmV too high for bus %dmV, UV disabled\n",
+               (int)(Config.protect_under_voltage * 1000.0f),
+               (int)(FOC.Vbus_filt * 1000.0f));
+    }
+
+    if (foc_over_current()) {
+        return FOC_FAULT_PHASE_OC;
+    }
+
+    if (vbus > Config.protect_over_voltage) {
+        if (++ov_cnt >= 3U) {
+            return FOC_FAULT_OVER_VOLTAGE;
+        }
+    } else {
+        ov_cnt = 0;
+    }
+
+    if (uv_ok && (vbus < Config.protect_under_voltage)) {
+        if (++uv_cnt >= 20U) {
+            return FOC_FAULT_UNDER_VOLTAGE;
+        }
+    } else {
+        uv_cnt = 0;
+    }
+
+    return FOC_FAULT_NONE;
+}
+
+static void foc_check_and_trip(void)
+{
+    uint8_t fault = foc_protection_check();
+
+    if (fault != FOC_FAULT_NONE) {
+        FOC.fault_code = fault;
+        printf("FAULT %u: Vbus %dmV, I %.2fA (uv %dmV ov %dmV)\n",
+               (unsigned)fault, (int)(FOC.Vbus * 1000.0f),
+               (double)FOC.Iq, (int)(Config.protect_under_voltage * 1000.0f),
+               (int)(Config.protect_over_voltage * 1000.0f));
+        foc_disarm();
+        foc_request_stage(IDLE);
+    }
 }
 
 static void Task_FOC(void *argument)
@@ -159,24 +214,19 @@ static void Task_FOC(void *argument)
         case IDLE:
             break;
         case RUN:
-            if (foc_over_current()) {
-                foc_disarm();
-                foc_request_stage(IDLE);
-            }
+            foc_check_and_trip();
             break;
         case CALIBRATION:
             if (slow_tick) {
                 calibration_loop(); // 校准 1kHz
-            }            if (foc_over_current()) {
-                foc_disarm();
-                foc_request_stage(IDLE);
             }
+            foc_check_and_trip();
             break;
         default:
             break;
         }
 
-        CONTROLLER_loop(); // 外环 5kHz, 所有状态下都跑 (处理模式切换/回零请求)
+        CONTROLLER_loop(); // 外环 5kHz
 
         vTaskDelayUntil(&last, 2); // 2 tick @10kHz = 0.2ms
     }

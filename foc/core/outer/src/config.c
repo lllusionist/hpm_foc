@@ -67,8 +67,8 @@ void config_init(void)
     Config.profile_accel          = 50;
     Config.profile_decel          = 50;
     
-    Config.protect_under_voltage = 22.0f;
-    Config.protect_over_voltage  = 26.0f;
+    Config.protect_under_voltage = 9.0f;
+    Config.protect_over_voltage  = 15.0f;
     Config.protect_over_current  = 20.0f;
     Config.protect_i_bus_max     = 20.0f;
     
