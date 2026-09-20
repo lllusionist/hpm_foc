@@ -3,9 +3,7 @@
  <Bookmarks/>
  <Breakpoints groups="Breakpoints" active_group="Breakpoints">
   <BreakpointListItem trigger="" line="168" counter="0" hardwareBreakpoint="" isFunctionBreakpoint="false" action="" expression="" stopAll="false" group="Breakpoints" type="Breakpoint" state="2" filename="../../core/outer/src/foc_cal.c" useHWbreakpoint="false"/>
-  <Exceptions>
-   <Group group="" set=""/>
-  </Exceptions>
+  <Exceptions/>
  </Breakpoints>
  <ExecutionProfileWindow/>
  <FrameBuffer>
@@ -63,7 +61,7 @@
   <Watches active="1" update="Five Seconds">
    <Watchpoint expression="Config.pole_pairs" name="Config.pole_pairs" radix="-1" linenumber="59" filename="../../core/outer/src/foc_cal.c"/>
    <Watchpoint expression="Config" name="Config" radix="-1" linenumber="164" filename="../../core/outer/src/foc_cal.c"/>
-   <Watchpoint expression="Config.encoder_offset" name="Config.encoder_offset" radix="-1" linenumber="0" filename=""/>
+   <Watchpoint expression="Config.encoder_offset" name="Config.encoder_offset" radix="-1" linenumber="0" filename="../segger_embedded_studio"/>
   </Watches>
  </Watch1>
  <Watch2>
@@ -77,8 +75,8 @@
  </Watch4>
  <Files>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="15" useTextEdit="1" path="../../core/inner/src/main.c" left="0" top="7" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="17" y="22" useTextEdit="1" path="../../core/outer/src/usb_driver.c" left="0" top="25" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="43" useTextEdit="1" path="../../core/outer/src/foc_cal.c" left="0" selected="1" top="34" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="8" y="44" useTextEdit="1" path="../../core/outer/src/usb_driver.c" left="0" selected="1" top="33" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="43" useTextEdit="1" path="../../core/outer/src/foc_cal.c" left="0" top="34" codecName="Default"/>
  </Files>
  <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="D:/Desktop/FOC/foc/core/outer/src" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>

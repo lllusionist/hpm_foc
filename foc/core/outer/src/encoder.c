@@ -64,6 +64,7 @@ void ENCODER_reset(void)
 	encoder.raw = 0;
 	encoder.count_in_cpr = 0;
 	encoder.count_in_cpr_prev = 0;
+	encoder.count_aligned = 0;
 	encoder.shadow_count = 0;
 
 	encoder.pos = 0;
@@ -215,9 +216,11 @@ void ENCODER_loop(void)
 	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
 	int32_t aligned_count = (int32_t)corrected - Config.encoder_offset -
 				Config.offset_lut[lut_index];
-	count = (float)((uint32_t)aligned_count & ENCODER_MASK);
-	encoder.pos = count / ENCODER_CPR_F;
-	encoder.phase = (float)(((uint32_t)count * (uint32_t)Config.pole_pairs) &
+	encoder.count_aligned = (uint32_t)aligned_count & ENCODER_MASK;
+	count = (float)encoder.count_aligned;
+	// 多圈机械位置 (圈), 用于位置环/回零
+	encoder.pos = (float)encoder.shadow_count / ENCODER_CPR_F;
+	encoder.phase = (float)((encoder.count_aligned * (uint32_t)Config.pole_pairs) &
 				ENCODER_MASK) *
 			(6.2831853f / ENCODER_CPR_F);
 

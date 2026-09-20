@@ -1,4 +1,5 @@
 #include "foc_task.h"
+#include "foc_ctrl.h"
 #include <stdio.h>
 
 static tFSM sFSM;
@@ -74,6 +75,7 @@ static void enter_state(tFSMState state)
         pwm_output_low_sides();
         break;
     case RUN:
+        CONTROLLER_reset();
         foc_arm();
         break;
     case CALIBRATION:
@@ -161,6 +163,8 @@ static void Task_FOC(void *argument)
         default:
             break;
         }
+
+        CONTROLLER_loop(); // 所有状态下都跑, 处理模式切换/回零请求
 
         vTaskDelay(pdMS_TO_TICKS(1));
     }

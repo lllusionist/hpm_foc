@@ -1,7 +1,7 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
-#include "foc_cal.h"
+#include "foc_ctrl.h"
 #include "hpm_common.h"
 #include "hpm_crc32.h"
 #include <stdio.h>

@@ -9,6 +9,7 @@ typedef enum eFSMState {
     IDLE        = 1,
     RUN         = 2,
     CALIBRATION = 3,
+    ANTICOGGING = 4,
 } tFSMState;
 
 typedef struct sFSM

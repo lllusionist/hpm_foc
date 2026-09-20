@@ -7,13 +7,6 @@
 #include "encoder.h"
 #include "foc_task.h"
 
-typedef enum {
-    CONTROL_MODE_CURRENT_RAMP     = 0, // 电流斜坡
-    CONTROL_MODE_VELOCITY_RAMP    = 1, // 速度斜坡
-    CONTROL_MODE_POSITION_FILTER  = 2, // 位置滤波控制
-    CONTROL_MODE_POSITION_PROFILE = 3, // 轨迹规划
-} tControlMode;
-
 typedef enum eCalibStep {
     CS_NULL = 0,
 

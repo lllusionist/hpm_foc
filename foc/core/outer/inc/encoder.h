@@ -40,6 +40,7 @@ typedef struct sEncoder
 	uint32_t raw;		 // 传感器原始值
 	uint32_t count_in_cpr;	 // 方向修正后的单圈值
 	uint32_t count_in_cpr_prev; // 上一拍单圈值
+	uint32_t count_aligned;	 // 零位/偏移表修正后的单圈值
 
 	int64_t shadow_count;	 // 过零累计计数
 

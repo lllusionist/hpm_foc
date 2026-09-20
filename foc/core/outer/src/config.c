@@ -53,8 +53,8 @@ void config_init(void)
     
     Config.default_op_mode        = CONTROL_MODE_POSITION_FILTER;
     Config.pos_p_gain             = 30.0f;
-    Config.vel_p_gain             = 3.0f;
-    Config.vel_i_gain             = 10.0f;
+    Config.vel_p_gain             = 0.25f;
+    Config.vel_i_gain             = 0.01f;
     Config.current_ff_gain        = 0.001f;
     Config.current_ctrl_bw        = 1000;
     Config.anticogging_enable     = 1;

@@ -1,5 +1,6 @@
 #include "vofa.h"
 #include "cdc_acm.h"
+#include "foc_ctrl.h"
 #include "math.h"
 
 uint8_t send_buf[MAX_BUFFER_SIZE];
@@ -70,8 +71,8 @@ void vofa_send(void)
 	vofa_send_data(3, FOC.Id);      // 电流环反馈
 	vofa_send_data(4, FOC.Iq);
 	vofa_send_data(5, FOC.Iq_set);  // 电流环目标
-	vofa_send_data(6, encoder.phase);
-	vofa_send_data(7, encoder.phase_vel);
+	vofa_send_data(6, Controller.vel_setpoint); // 速度环目标 (rps)
+	vofa_send_data(7, encoder.vel);             // 速度反馈 (rps)
 
 	vofa_sendframetail();
 }

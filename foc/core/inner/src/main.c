@@ -9,6 +9,7 @@
 #include "vofa.h"
 #include "config.h"
 #include "flash.h"
+#include "foc_ctrl.h"
 #include "foc_task.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -31,6 +32,7 @@ int main(void)
 	encoder_app_start();
 	vofa_start();
 	foc_init();
+	CONTROLLER_init();
 	foc_app_start();
 
 	vTaskStartScheduler();
