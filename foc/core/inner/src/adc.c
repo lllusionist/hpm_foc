@@ -77,11 +77,20 @@ void adc_init(void)
 }
 
 
+/*======================== 三相电压 / 母线电压 (ADC1) ========================*/
+/* VA PF16/IN8, VB PF18/IN11, VC PF19/IN13, Vbus PF22/IN14 */
+#define ADC1_CH_VA (8U)
+#define ADC1_CH_VB (11U)
+#define ADC1_CH_VC (13U)
 #define ADC1_CH_VBUS (14U)
 #define ADC1_TRIG_CH ADC16_CONFIG_TRG0A
+#define ADC1_QUEUE_LEN (4U)
 
 ATTR_PLACE_AT_FAST_RAM_WITH_ALIGNMENT(ADC_SOC_DMA_ADDR_ALIGNMENT)
-volatile adc16_pmt_dma_data_t adc1_dma_buf[1];
+volatile adc16_pmt_dma_data_t adc1_dma_buf[ADC1_QUEUE_LEN];
+
+static const uint8_t adc1_ch_tab[ADC1_QUEUE_LEN] = {ADC1_CH_VA, ADC1_CH_VB,
+						   ADC1_CH_VC, ADC1_CH_VBUS};
 
 void adc1_init(void)
 {
@@ -102,42 +111,57 @@ void adc1_init(void)
 
 	adc16_get_channel_default_config(&ch_cfg);
 	ch_cfg.sample_cycle = ADC_SAMPLE_CYCLE;
-	ch_cfg.ch = ADC1_CH_VBUS;
-	adc16_init_channel(HPM_ADC1, &ch_cfg);
+	for (uint8_t i = 0; i < ADC1_QUEUE_LEN; i++) {
+		ch_cfg.ch = adc1_ch_tab[i];
+		adc16_init_channel(HPM_ADC1, &ch_cfg);
+	}
 
 	pmt_cfg.trig_ch = ADC1_TRIG_CH;
-	pmt_cfg.trig_len = 1U;
-	pmt_cfg.adc_ch[0] = ADC1_CH_VBUS;
-	pmt_cfg.inten[0] = false; // 不要中断
+	pmt_cfg.trig_len = ADC1_QUEUE_LEN;
+	for (uint8_t i = 0; i < ADC1_QUEUE_LEN; i++) {
+		pmt_cfg.adc_ch[i] = adc1_ch_tab[i];
+		pmt_cfg.inten[i] = false; // 不要中断
+	}
 	adc16_set_pmt_config(HPM_ADC1, &pmt_cfg);
 	adc16_init_pmt_dma(HPM_ADC1, (uint32_t)adc1_dma_buf);
 	adc16_enable_pmt_queue(HPM_ADC1, ADC1_TRIG_CH);
 
+	// 电压输入设为模拟脚
+	HPM_IOC->PAD[IOC_PAD_PF16].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
+	HPM_IOC->PAD[IOC_PAD_PF18].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
+	HPM_IOC->PAD[IOC_PAD_PF19].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
 	HPM_IOC->PAD[IOC_PAD_PF22].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
 }
 
-/* 软件触发一次转换并取回结果 (转换约 0.5us, 等不到就返回 0) */
-uint16_t adc1_read_vbus_raw(void)
+/* 软件触发一次, 依次采 VA/VB/VC/VBUS (转换约 0.5us, 等不到就不更新输出) */
+void adc1_read_all(uint16_t *va, uint16_t *vb, uint16_t *vc, uint16_t *vbus)
 {
-	adc1_dma_buf[0].adc_ch = 0U; // 清通道标记, 用来判断这一次的结果到了没
+	for (uint8_t i = 0; i < ADC1_QUEUE_LEN; i++) {
+		adc1_dma_buf[i].adc_ch = 0U; // 清标记, 用来判断这一次的结果到了没
+	}
 
 	if (adc16_trigger_pmt_by_sw(HPM_ADC1, ADC1_TRIG_CH) != status_success) {
-		return 0U;
+		return;
 	}
 
 	for (uint32_t i = 0; i < 20000U; i++) {
-		if (adc1_dma_buf[0].adc_ch == ADC1_CH_VBUS) {
-			return (uint16_t)adc1_dma_buf[0].result;
+		// 队列最后一项到了, 说明 4 项都写完了
+		if (adc1_dma_buf[ADC1_QUEUE_LEN - 1U].adc_ch == ADC1_CH_VBUS) {
+			*va   = (uint16_t)adc1_dma_buf[0].result;
+			*vb   = (uint16_t)adc1_dma_buf[1].result;
+			*vc   = (uint16_t)adc1_dma_buf[2].result;
+			*vbus = (uint16_t)adc1_dma_buf[3].result;
+			return;
 		}
 	}
-
-	return 0U;
 }
 
 void adc_callback_set(adc_callback_t sink)
 {
 	adc_callback = sink;
-}SDK_DECLARE_EXT_ISR_M(ADC_IRQ, isr_adc)
+}
+
+SDK_DECLARE_EXT_ISR_M(ADC_IRQ, isr_adc)
 void isr_adc(void)
 {
 	uint32_t st = adc16_get_status_flags(HPM_ADC0);

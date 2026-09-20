@@ -21,13 +21,23 @@ void foc_adc_midpoint(void)
 	float adc_b_sum = 0;
 	float adc_c_sum = 0;
 	float adc_bus_sum = 0;
+	float adc_va_sum = 0;
+	float adc_vb_sum = 0;
+	float adc_vc_sum = 0;
 	float times = 0;
 
 	for (uint8_t i = 0; i < 32; i++) {
+		uint16_t va, vb, vc, vbus_raw;
+
+		adc1_read_all(&va, &vb, &vc, &vbus_raw);
+
 		adc_a_sum += FOC.Ia;
 		adc_b_sum += FOC.Ib;
 		adc_c_sum += FOC.Ic;
 		adc_bus_sum += FOC.Ibus;
+		adc_va_sum += (float)va;
+		adc_vb_sum += (float)vb;
+		adc_vc_sum += (float)vc;
 		times += 1;
 		sys_delay_ms(1);
 	}
@@ -35,11 +45,24 @@ void foc_adc_midpoint(void)
 	FOC.Ib_midpoint = adc_b_sum / times;
 	FOC.Ic_midpoint = adc_c_sum / times;
 	FOC.Ibus_midpoint = adc_bus_sum / times;
+	FOC.Va_midpoint = adc_va_sum / times;
+	FOC.Vb_midpoint = adc_vb_sum / times;
+	FOC.Vc_midpoint = adc_vc_sum / times;
 }
 
-void foc_update_vbus(void)
+/* 三相电压 + 母线电压: 1kHz 软件触发 ADC1 采一组, 换算 + 滤波 */
+void foc_update_voltages(void)
 {
-	float vbus = (float)adc1_read_vbus_raw() * (3.3f / 65536.0f) *
+	uint16_t va, vb, vc, vbus_raw;
+	const float k = (3.3f / 65536.0f) * FOC_VPHASE_DIVIDER;
+
+	adc1_read_all(&va, &vb, &vc, &vbus_raw);
+
+	FOC.Va = ((float)va - FOC.Va_midpoint) * k;
+	FOC.Vb = ((float)vb - FOC.Vb_midpoint) * k;
+	FOC.Vc = ((float)vc - FOC.Vc_midpoint) * k;
+
+	float vbus = (float)vbus_raw * (3.3f / 65536.0f) *
 		     FOC_VBUS_DIVIDER;
 
 	if ((vbus > 2.0f) && (vbus < 70.0f)) {

@@ -145,7 +145,7 @@ static void Task_FOC(void *argument)
         }
 
         if (slow_tick) {
-            foc_update_vbus(); // 母线电压 1kHz
+            foc_update_voltages(); // 三相/母线电压 1kHz
         }
 
         switch (sFSM.state) {

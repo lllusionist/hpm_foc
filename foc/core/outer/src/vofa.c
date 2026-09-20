@@ -70,7 +70,7 @@ void vofa_sendframetail(void)
  * vofa 任务按 1ms 把攒下的多个样本打包进同一包 USB 发出,
  * 上位机/VOFA+ 仍按帧尾逐个解析 -> 有效采样率 = 采样分频, 与 USB 包率解耦.
  */
-#define VOFA_NCH        18
+#define VOFA_NCH        21
 #define VOFA_RING       64                                       /* 环形缓冲样本数 */
 #define VOFA_BATCH_MAX  (MAX_BUFFER_SIZE / (VOFA_NCH * 4 + 4))    /* 单包最多样本数 */
 
@@ -98,6 +98,9 @@ static void vofa_snapshot(float *d)
 	d[15] = encoder.phase_vel;      // 电角速度 (rad/s)
 	d[16] = (FOC.Ibus - FOC.Ibus_midpoint) * FOC_IBUS_SCALE; // 母线电流瞬时值 (A)
 	d[17] = FOC.Ibus_filt;          // 母线电流滤波值 (A)
+	d[18] = FOC.Va;                 // A 相电压 (V)
+	d[19] = FOC.Vb;                 // B 相电压 (V)
+	d[20] = FOC.Vc;                 // C 相电压 (V)
 }
 
 /* 由 ADC 中断按分频调用 */

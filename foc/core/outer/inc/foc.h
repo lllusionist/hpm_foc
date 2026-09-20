@@ -20,7 +20,11 @@
 #define FOC_IBUS_SCALE                                                         \
 	((3.3f / 65536.0f) / (FOC_IBUS_SHUNT_OHM * FOC_IBUS_AMP_GAIN))
 
+/* 母线电压: PF22(ADC1.IN14), 标称 20k/1k(=21:1), 实测按 16:1 折算 */
 #define FOC_VBUS_DIVIDER (16.0f)
+
+/* 三相电压: VA/VB/VC (ADC1), 分压比 (先按与母线同值占位) */
+#define FOC_VPHASE_DIVIDER (16.0f)
 
 typedef struct {
 
@@ -36,6 +40,10 @@ typedef struct {
 	volatile float Ib_midpoint;
 	volatile float Ic_midpoint;
 	volatile float Ibus_midpoint;
+
+	volatile float Va_midpoint;
+	volatile float Vb_midpoint;
+	volatile float Vc_midpoint;
 
 	volatile float Va;
 	volatile float Vb;
@@ -100,7 +108,7 @@ typedef struct {
 extern volatile foc_data_t FOC;
 
 void foc_adc_midpoint(void);
-void foc_update_vbus(void);
+void foc_update_voltages(void);
 void FOC_voltage(float Vd, float Vq, float phase);
 void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel);
 void FOC_update_current_ctrl_gain(float bw);
