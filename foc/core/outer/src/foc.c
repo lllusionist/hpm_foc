@@ -2,6 +2,7 @@
 #include "adc.h"
 #include "encoder.h"
 #include "foc_task.h"
+#include "vofa.h"
 
 volatile foc_data_t FOC;
 
@@ -168,13 +169,14 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	float v_q = i_q_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_q;
 
 	// 反电势前馈 + d/q 交叉解耦 (校准模式不启用, 保证磁链标定模型不变)
-	if (!FOC.calib_mode) {
+	if (FOC.ff_enable && !FOC.calib_mode) {
 		v_d += -phase_vel * Config.phase_inductance * i_q;
 		v_q += phase_vel * (Config.phase_inductance * i_d + Config.flux_linkage);
 	}
 
 	FOC.Vd_out = v_d;
 	FOC.Vq_out = v_q;
+	FOC.Vmag   = sqrtf(SQ(v_d) + SQ(v_q));
 
 	// voltage normalize = 1/(2/3*v_bus)
 	float v_to_mod = 1.5f / FOC.Vbus_filt;
@@ -219,6 +221,14 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 void foc_adc_callback(void)
 {
+	/* 波形采样: 40kHz 8 分频 -> 5kHz, 攒批由 vofa 任务发送 */
+	static uint8_t vofa_div = 0;
+
+	if (++vofa_div >= VOFA_SAMPLE_DECIM) {
+		vofa_div = 0;
+		vofa_push_sample();
+	}
+
 	if (!FOC.is_armed) {
 		return;
 	}
@@ -274,8 +284,10 @@ void foc_init(void)
 
 	FOC.Vd_out      = 0;
 	FOC.Vq_out      = 0;
+	FOC.Vmag        = 0;
 	FOC.torque      = 0;
 	FOC.saturated   = false;
+	FOC.ff_enable   = true;
 	FOC.calib_mode  = false;
 	FOC.calib_angle = 0;
 	FOC.calib_phase_vel = 0;

@@ -29,6 +29,7 @@
 #define USB_CMD_DEBUG_ID 0x51		// float d 轴电流目标 (A)
 #define USB_CMD_DEBUG_OPENLOOP_V 0x52	// float 开环固定矢量幅值 (V), 0=关闭
 #define USB_CMD_DEBUG_OPENLOOP_ANGLE 0x53 // float 开环固定矢量电角度 (rad)
+#define USB_CMD_DEBUG_FF 0x54		  // float 1=开/0=关 反电势前馈+解耦
 
 #define USB_CMD_SET_VEL_KP 0x42
 #define USB_CMD_SET_VEL_KI 0x43

@@ -139,6 +139,10 @@ void USB_parse_frame(UsbFrame *frame)
 		FOC.openloop_angle = data_to_float(&frame->data[0]);
 		break;
 
+	case USB_CMD_DEBUG_FF:
+		FOC.ff_enable = (data_to_float(&frame->data[0]) > 0.5f);
+		break;
+
 	case USB_CMD_ANTICOGGING_START: // 未移植
 	default:
 		break;

@@ -66,7 +66,9 @@ typedef struct {
 
 	volatile float Vd_out;	  // 电流环输出电压 d 分量 (V)
 	volatile float Vq_out;	  // 电流环输出电压 q 分量 (V)
+	volatile float Vmag;	  // 指令电压幅值 |V| (V)
 	volatile bool saturated;  // 电压饱和标志
+	volatile bool ff_enable;  // 反电势前馈/解耦使能 (调试用)
 
 	/* 校准用: 开环电流模式 (校准任务下发角度, 中断里跑电流环) */
 	volatile bool calib_mode;

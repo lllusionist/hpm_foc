@@ -14,7 +14,11 @@
 
 #define MAX_BUFFER_SIZE 1024
 
+/* 波形采样率 = ADC 中断频率 / VOFA_SAMPLE_DECIM (40kHz/8 = 5kHz), 攒批后由 vofa 任务整包发出 */
+#define VOFA_SAMPLE_DECIM 8
+
 void vofa_start(void);
+void vofa_push_sample(void);
 void vofa_send_data(uint8_t num, float data);
 void vofa_sendframetail(void);
 void vofa_Receive(uint8_t *Buf, uint16_t *Len);

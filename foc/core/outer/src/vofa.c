@@ -62,23 +62,89 @@ void vofa_sendframetail(void)
 	cnt = 0; // 每次发送完帧尾都需要清零
 }
 
-void vofa_send(void)
-{
-	/* 通道顺序要和 VOFA+ 里配的一致; 这里是 8 通道 */
-	vofa_send_data(0, (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE); // A
-	vofa_send_data(1, (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE);
-	vofa_send_data(2, (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE);
-	vofa_send_data(3, FOC.Id);      // 电流环反馈
-	vofa_send_data(4, FOC.Iq);
-	vofa_send_data(5, FOC.Iq_set);  // 电流环目标
-	vofa_send_data(6, Controller.vel_setpoint); // 速度环目标 (rps)
-	vofa_send_data(7, encoder.vel);             // 速度反馈 (rps)
-	vofa_send_data(8, FOC.torque);              // 转矩估算 (N·m)
+/*================================ 批量发送 ====================================*/
+/*
+ * USB CDC 全速每秒只能搬约 1000 个包, 单样本发送时 1kHz 已是上限,
+ * 提速只会被 cdc_acm_transmit 丢包(抽帧).
+ * 因此: ADC 中断按 VOFA_SAMPLE_DECIM 分频采样进环形缓冲(默认 5kHz),
+ * vofa 任务按 1ms 把攒下的多个样本打包进同一包 USB 发出,
+ * 上位机/VOFA+ 仍按帧尾逐个解析 -> 有效采样率 = 采样分频, 与 USB 包率解耦.
+ */
+#define VOFA_NCH        16
+#define VOFA_RING       64                                       /* 环形缓冲样本数 */
+#define VOFA_BATCH_MAX  (MAX_BUFFER_SIZE / (VOFA_NCH * 4 + 4))    /* 单包最多样本数 */
 
-	vofa_sendframetail();
+static float vofa_ring[VOFA_RING][VOFA_NCH];
+static volatile uint16_t vofa_head = 0;
+static volatile uint16_t vofa_tail = 0;
+
+static void vofa_snapshot(float *d)
+{
+	d[0] = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE; // A
+	d[1] = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
+	d[2] = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
+	d[3] = FOC.Id;      // 电流环反馈
+	d[4] = FOC.Iq;
+	d[5] = FOC.Iq_set;  // 电流环目标
+	d[6] = Controller.vel_setpoint; // 速度环目标 (rps)
+	d[7] = encoder.vel;             // 速度反馈 (rps)
+	d[8] = FOC.torque;              // 转矩估算 (N·m)
+	d[9] = FOC.Vbus_filt;           // 母线电压 (V)
+	d[10] = FOC.Vmag;               // 指令电压幅值 |V| (V)
+	d[11] = FOC.saturated ? 1.0f : 0.0f; // 电压饱和标志
+	d[12] = FOC.Vd_out;             // d 轴指令电压 (V)
+	d[13] = FOC.Vq_out;             // q 轴指令电压 (V)
+	d[14] = encoder.phase;          // 电角度 (rad)
+	d[15] = encoder.phase_vel;      // 电角速度 (rad/s)
 }
 
-#define VOFA_PERIOD_MS 1 // 波形周期 (ms): 1 = 1kHz
+/* 由 ADC 中断按分频调用 */
+void vofa_push_sample(void)
+{
+	uint16_t next = (uint16_t)((vofa_head + 1U) % VOFA_RING);
+
+	if (next == vofa_tail) { /* 满: 丢最旧 */
+		vofa_tail = (uint16_t)((vofa_tail + 1U) % VOFA_RING);
+	}
+
+	vofa_snapshot(vofa_ring[vofa_head]);
+	vofa_head = next;
+}
+
+static uint8_t *vofa_pack(uint8_t *p, const float *d)
+{
+	uint8_t i;
+
+	for (i = 0; i < VOFA_NCH; i++) {
+		memcpy(p, &d[i], 4);
+		p += 4;
+	}
+
+	*p++ = 0x00;
+	*p++ = 0x00;
+	*p++ = 0x80;
+	*p++ = 0x7f;
+
+	return p;
+}
+
+void vofa_send(void)
+{
+	uint8_t *p = send_buf;
+	uint16_t n = 0;
+
+	while ((vofa_tail != vofa_head) && (n < VOFA_BATCH_MAX)) {
+		p = vofa_pack(p, vofa_ring[vofa_tail]);
+		vofa_tail = (uint16_t)((vofa_tail + 1U) % VOFA_RING);
+		n++;
+	}
+
+	if (n > 0U) {
+		vofa_transmit(send_buf, (uint16_t)(p - send_buf));
+	}
+}
+
+#define VOFA_PERIOD_MS 1 // USB 发包周期 (ms): 1 = 1kHz
 
 static void Vofa_task(void *argument)
 {
