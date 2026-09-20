@@ -11,7 +11,7 @@
 #define PWM HPM_PWM0
 #define PWM_FREQ_HZ (40000U)	// 载波频率
 #define CURRENT_MEASURE_PERIOD (float) (1.0f / (float) PWM_FREQ_HZ)
-#define PWM_DEAD_TIME_NS (500U) // 死区(ns)
+#define PWM_DEAD_TIME_NS (10U) // 死区(ns) FD6288自带100ns死区时间
 #define PWM_MIN_ON_NS (1000U)	// 最小导通脉宽(ns)
 
 void pwm_init(void);
