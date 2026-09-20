@@ -144,6 +144,10 @@ static void Task_FOC(void *argument)
             }
         }
 
+        if (slow_tick) {
+            foc_update_vbus(); // 母线电压 1kHz
+        }
+
         switch (sFSM.state) {
         case BOOT_UP: {
             static bool midpoint_done;
@@ -163,8 +167,7 @@ static void Task_FOC(void *argument)
         case CALIBRATION:
             if (slow_tick) {
                 calibration_loop(); // 校准 1kHz
-            }
-            if (foc_over_current()) {
+            }            if (foc_over_current()) {
                 foc_disarm();
                 foc_request_stage(IDLE);
             }

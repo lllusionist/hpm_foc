@@ -11,6 +11,8 @@
 typedef void (*adc_callback_t)(void);
 
 void adc_init(void);
+void adc1_init(void);
+uint16_t adc1_read_vbus_raw(void);
 void adc_callback_set(adc_callback_t sink);
 
 #endif /* __ADC_H__ */
