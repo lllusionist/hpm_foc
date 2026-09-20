@@ -120,9 +120,16 @@ static bool foc_over_current(void)
 
 static void Task_FOC(void *argument)
 {
+    TickType_t last = xTaskGetTickCount();
+    uint32_t   tick = 0;
+
     (void)argument;
 
     for (;;) {
+        // 5kHz 任务, 校准每 5 拍调一次 = 1kHz
+        tick++;
+        bool slow_tick = ((tick % 5U) == 0U);
+
         if (s_req_valid) {
             s_req_valid           = 0;
             sFSM.state_next       = s_req;
@@ -154,7 +161,9 @@ static void Task_FOC(void *argument)
             }
             break;
         case CALIBRATION:
-            calibration_loop();
+            if (slow_tick) {
+                calibration_loop(); // 校准 1kHz
+            }
             if (foc_over_current()) {
                 foc_disarm();
                 foc_request_stage(IDLE);
@@ -164,15 +173,15 @@ static void Task_FOC(void *argument)
             break;
         }
 
-        CONTROLLER_loop(); // 所有状态下都跑, 处理模式切换/回零请求
+        CONTROLLER_loop(); // 外环 5kHz, 所有状态下都跑 (处理模式切换/回零请求)
 
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelayUntil(&last, 2); // 2 tick @10kHz = 0.2ms
     }
 }
 
 void foc_app_start(void)
 {
-    if (xTaskCreate(Task_FOC, "foc", 512, NULL, 10, NULL) != pdPASS) {
+    if (xTaskCreate(Task_FOC, "foc", 512, NULL, 15, NULL) != pdPASS) {
         printf("foc task create fail\n");
         while (1) {
         }

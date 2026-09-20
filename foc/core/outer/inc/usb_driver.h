@@ -33,6 +33,8 @@
 #define USB_CMD_SET_VEL_KP 0x42
 #define USB_CMD_SET_VEL_KI 0x43
 
+#define USB_CMD_SET_POS_KP 0x44 // float 位置环 Kp
+
 typedef struct {
 	uint8_t id;
 	uint8_t data[4];

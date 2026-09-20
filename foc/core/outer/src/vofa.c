@@ -73,6 +73,7 @@ void vofa_send(void)
 	vofa_send_data(5, FOC.Iq_set);  // 电流环目标
 	vofa_send_data(6, Controller.vel_setpoint); // 速度环目标 (rps)
 	vofa_send_data(7, encoder.vel);             // 速度反馈 (rps)
+	vofa_send_data(8, FOC.torque);              // 转矩估算 (N·m)
 
 	vofa_sendframetail();
 }

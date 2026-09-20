@@ -6,7 +6,7 @@
 
 tController Controller;
 
-#define CTRL_PERIOD (1.0f / 1000.0f) // Task_FOC 周期 (1kHz)
+#define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
 
 void CONTROLLER_update_input_pos_filter_gain(float bw)
 {

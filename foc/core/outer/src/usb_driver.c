@@ -115,6 +115,11 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 	}
 
+	case USB_CMD_SET_POS_KP: {
+		Config.pos_p_gain = data_to_float(&frame->data[0]);
+		break;
+	}
+
 	// 调试用: 定位 FOC 角度/方向问题
 	case USB_CMD_DEBUG_PHASE_OFFSET:
 		FOC.phase_offset = data_to_float(&frame->data[0]);

@@ -62,6 +62,7 @@ typedef struct {
 	volatile float current_ctrl_i_gain; // 电流环 I
 
 	volatile float Power_filt; // 功率 (W)
+	volatile float torque;	   // 转矩估算 (N·m)
 
 	volatile float Vd_out;	  // 电流环输出电压 d 分量 (V)
 	volatile float Vq_out;	  // 电流环输出电压 q 分量 (V)

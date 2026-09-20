@@ -167,6 +167,12 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	float v_d = i_d_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_d;
 	float v_q = i_q_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_q;
 
+	// 反电势前馈 + d/q 交叉解耦 (校准模式不启用, 保证磁链标定模型不变)
+	if (!FOC.calib_mode) {
+		v_d += -phase_vel * Config.phase_inductance * i_q;
+		v_q += phase_vel * (Config.phase_inductance * i_d + Config.flux_linkage);
+	}
+
 	FOC.Vd_out = v_d;
 	FOC.Vq_out = v_q;
 
@@ -204,6 +210,9 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	UTILS_LP_FAST(FOC.Iq_filt, FOC.Iq, 0.01f);
 	FOC.Id = i_d;
 	UTILS_LP_FAST(FOC.Id_filt, FOC.Id, 0.01f);
+
+	// 转矩估算 (表贴式: T = 1.5·p·λ·iq)
+	FOC.torque = 1.5f * (float)Config.pole_pairs * Config.flux_linkage * i_q;
 
 	FOC.Power_filt = 1.5f * (v_d * i_d + v_q * i_q);
 }
@@ -265,6 +274,7 @@ void foc_init(void)
 
 	FOC.Vd_out      = 0;
 	FOC.Vq_out      = 0;
+	FOC.torque      = 0;
 	FOC.saturated   = false;
 	FOC.calib_mode  = false;
 	FOC.calib_angle = 0;
