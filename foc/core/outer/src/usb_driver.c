@@ -19,10 +19,11 @@ void USB_parse_frame(UsbFrame *frame)
 
 	// 中断里只记请求, 由 1kHz 控制任务执行
 	case USB_CMD_SET_OP_MODE: {
-		tControlMode mode = (tControlMode)frame->data[0];
-		if (mode <= CONTROL_MODE_POSITION_PROFILE) {
-			Controller.op_mode_req     = mode;
+		int mode = (int)data_to_float(&frame->data[0]);
+		if (mode >= 0 && mode <= CONTROL_MODE_POSITION_PROFILE) {
+			Controller.op_mode_req     = (tControlMode)mode;
 			Controller.op_mode_pending = true;
+			Config.default_op_mode     = mode;
 		}
 		break;
 	}
