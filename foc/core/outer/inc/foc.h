@@ -28,9 +28,6 @@
 #define FOC_FAULT_PHASE_OC 1	  // 相过流
 #define FOC_FAULT_OVER_VOLTAGE 2  // 母线过压
 #define FOC_FAULT_UNDER_VOLTAGE 3 // 母线欠压
-#define FOC_FAULT_ISUM 4
-
-#define FOC_ISUM_TH (0.3f)
 
 typedef struct {
 
