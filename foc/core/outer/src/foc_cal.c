@@ -62,6 +62,9 @@ void calibration_loop(void)
 {
     float time = (float)loop_count / (float)CAL_LOOP_HZ;
     float voltage_calc = Config.phase_resistance * Config.calib_current;
+    float drag_v       = voltage_calc;
+    if (drag_v < 0.2f) drag_v = 0.2f;
+    if (drag_v > (Config.calib_voltage * 0.9f)) drag_v = Config.calib_voltage * 0.9f;
 
     // encoder
     float calib_phase_vel = 12.0f * M_PI; // 角速度
@@ -130,13 +133,16 @@ void calibration_loop(void)
 
     case CS_MOTOR_L_START:
         l_v_dc  = Config.calib_current * Config.phase_resistance;
+        FOC.calib_l_freq = Config.current_ctrl_bw;
+        if (FOC.calib_l_freq < 100.0f) FOC.calib_l_freq = 1000.0f;
         l_v_amp = (Config.phase_resistance > 1.0f) ? 3.0f : 1.5f;
+        l_v_amp = l_v_amp * (FOC.calib_l_freq / 1000.0f);
         if ((l_v_dc + l_v_amp) > (Config.calib_voltage * 0.9f)) {
             l_v_amp = (Config.calib_voltage * 0.9f) - l_v_dc;
             if (l_v_amp < 0.5f) l_v_amp = 0.5f;
         }
         loop_count          = 0;
-        FOC.vinj_omega      = 2.0f * M_PI * L_INJECT_HZ;
+        FOC.vinj_omega      = 2.0f * M_PI * FOC.calib_l_freq;
         FOC.vinj_amp        = l_v_amp;
         FOC.vinj_dc         = l_v_dc;
         FOC.inj_phase       = 0;
@@ -171,7 +177,7 @@ void calibration_loop(void)
         float xl = (z > Config.phase_resistance)
                        ? sqrtf(SQ(z) - SQ(Config.phase_resistance))
                        : 0.001f;
-        Config.phase_inductance = xl / (2.0f * M_PI * L_INJECT_HZ);
+        Config.phase_inductance = xl / (2.0f * M_PI * FOC.calib_l_freq);
         FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 
         printf("ind: %.6f H (Iamp=%.3f Z=%.3f Vdc=%.3f Vamp=%.3f)\n",
@@ -186,7 +192,7 @@ void calibration_loop(void)
         if (loop_count == 0) {
             foc_arm();
         }
-        FOC_voltage(voltage_calc * time, 0, 0.0f);
+        FOC_voltage(drag_v * time, 0, 0.0f);
         if (time >= 2.0f) {
             loop_count = 0;
             encoder.shadow_count = 0;
@@ -196,7 +202,7 @@ void calibration_loop(void)
         break;
     case CS_DIR_PP_LOOP:
         phase_set += calib_phase_vel / (float)CAL_LOOP_HZ;
-        FOC_voltage(voltage_calc, 0, phase_set);
+        FOC_voltage(drag_v, 0, phase_set);
         if (phase_set >= total_calib_cycles * M_2PI) {
             pwm_output_low_sides();
             mCalibStep = CS_DIR_PP_END;
@@ -355,7 +361,7 @@ void calibration_loop(void)
             next_sample_time = 0;
             mCalibStep = CS_ENCODER_CCW_LOOP;
         }
-        FOC_voltage(voltage_calc, 0, phase_set);
+        FOC_voltage(drag_v, 0, phase_set);
         break;
     case CS_ENCODER_CCW_LOOP:
         if (sample_count >= 0) {
@@ -373,7 +379,7 @@ void calibration_loop(void)
                 sample_count--;
             }
             phase_set -= calib_phase_vel / (float)CAL_LOOP_HZ;
-            FOC_voltage(voltage_calc, 0, phase_set);
+            FOC_voltage(drag_v, 0, phase_set);
         } else {
             pwm_output_low_sides();
             sample_count = 0;
