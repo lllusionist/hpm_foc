@@ -95,13 +95,30 @@ void USB_parse_frame(UsbFrame *frame)
 	// 现在就能用: 在线调电流环 PI
 	case USB_CMD_SET_CUR_KP: {
 		float Cur_Kp = data_to_float(&frame->data[0]);
+		if (Cur_Kp < 0.0f) Cur_Kp = 0.0f;
+		if (Cur_Kp > 1.0e5f) Cur_Kp = 1.0e5f;
 		FOC.current_ctrl_p_gain = Cur_Kp;
+		Config.current_kp = Cur_Kp;
+		Config.current_gain_magic = CONFIG_MAGIC;
 		break;
 	}
 
 	case USB_CMD_SET_CUR_KI: {
 		float Cur_Ki = data_to_float(&frame->data[0]);
+		if (Cur_Ki < 0.0f) Cur_Ki = 0.0f;
+		if (Cur_Ki > 1.0e7f) Cur_Ki = 1.0e7f;
 		FOC.current_ctrl_i_gain = Cur_Ki;
+		Config.current_ki = Cur_Ki;
+		Config.current_gain_magic = CONFIG_MAGIC;
+		break;
+	}
+
+	case USB_CMD_SET_CUR_BW: {
+		float bw = data_to_float(&frame->data[0]);
+		if (bw < 50.0f) bw = 50.0f;
+		if (bw > 2000.0f) bw = 2000.0f;
+		Config.current_ctrl_bw = bw;
+		FOC_update_current_ctrl_gain(bw);
 		break;
 	}
 

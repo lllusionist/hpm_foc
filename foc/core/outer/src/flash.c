@@ -10,7 +10,7 @@
 #define FLASH_XPI_OPT_OPT0 (0x00000006U)
 #define FLASH_XPI_OPT_OPT1 (0x00001000U)
 
-#define FLASH_CFG_BUF_SIZE (1024U)
+#define FLASH_CFG_BUF_SIZE 1024U
 
 static xpi_nor_config_t s_nor_config;
 static bool s_inited;

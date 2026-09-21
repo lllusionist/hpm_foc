@@ -59,6 +59,11 @@ typedef struct {
     int32_t  cogging_map_valid;              // 齿槽补偿表有效标志
     
     uint32_t crc32;                          // 结构体整体CRC32校验
+
+    /* 以下字段在 crc32 之后, 不参与上面的 CRC: 旧 Flash 记录仍能通过校验 */
+    uint32_t current_gain_magic;             // current_kp/ki 有效标志
+    float    current_kp;                     // 电流环 Kp（V/A）
+    float    current_ki;                     // 电流环 Ki（V/(A·s)）
 } tConfig;
 
 extern tConfig Config;

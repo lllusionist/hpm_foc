@@ -145,19 +145,20 @@ void CONTROLLER_loop(void)
             Controller.home_pending = false;
             CONTROLLER_set_home();
         }
-        if (Controller.config_cmd_pending != 0U) {
-            uint8_t cmd = Controller.config_cmd_pending;
-            Controller.config_cmd_pending = 0;
-            if (FOC.is_armed) {
-                printf("cfg cmd: motor armed, refused\n");
-            } else if (cmd == 1U) {
-                printf("cfg save: %s\n",
-                       (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
-            } else if (cmd == 2U) {
-                config_init();
-                CONFIG_save_to_flash();
-                printf("cfg reset\n");
-            }
+    }
+
+    if (Controller.config_cmd_pending != 0U) {
+        uint8_t cmd = Controller.config_cmd_pending;
+        Controller.config_cmd_pending = 0;
+        if (FOC.is_armed) {
+            printf("cfg cmd: motor armed, refused\n");
+        } else if (cmd == 1U) {
+            printf("cfg save: %s\n",
+                   (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
+        } else if (cmd == 2U) {
+            config_init();
+            CONFIG_save_to_flash();
+            printf("cfg reset\n");
         }
     }
 

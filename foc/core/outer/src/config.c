@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <string.h>
 #include "config.h"
 #include "util.h"
@@ -8,7 +9,7 @@ tConfig Config;
 /* CRC 覆盖除末尾 crc32 字段以外的全部内容 */
 uint32_t CONFIG_calculate_crc(const tConfig *cfg)
 {
-    return util_crc32((const uint8_t *)cfg, sizeof(tConfig) - sizeof(uint32_t));
+    return util_crc32((const uint8_t *)cfg, offsetof(tConfig, crc32));
 }
 
 uint8_t CONFIG_save_to_flash(void)
@@ -76,6 +77,10 @@ void config_init(void)
     
     Config.cogging_map_crc = 0;
     Config.cogging_map_valid = 0;
+    
+    Config.current_gain_magic = 0;
+    Config.current_kp = 0.0f;
+    Config.current_ki = 0.0f;
     
     Config.crc32 = CONFIG_calculate_crc(&Config);
 }

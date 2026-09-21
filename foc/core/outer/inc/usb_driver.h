@@ -23,6 +23,7 @@
 
 #define USB_CMD_SET_CUR_KP 0x40
 #define USB_CMD_SET_CUR_KI 0x41
+#define USB_CMD_SET_CUR_BW 0x58
 
 
 #define USB_CMD_SET_VEL_KP 0x42
