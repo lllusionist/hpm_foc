@@ -207,26 +207,6 @@ void usbd_cdc_acm_set_dtr(uint8_t busid, uint8_t intf, bool dtr)
     }
 }
 
-void cdc_acm_data_send_with_dtr_test(uint8_t busid)
-{
-    ep_tx_busy_flag = true;
-    write_buffer[0] = 'h';
-    write_buffer[1] = 'p';
-    write_buffer[2] = 'm';
-    write_buffer[3] = 'i';
-    write_buffer[4] = 'c';
-    write_buffer[5] = 'r';
-    write_buffer[6] = 'o';
-    write_buffer[7] = 0x0D;
-    write_buffer[8] = 0x0A;
-    //memset(&write_buffer[9], 'a', 2037);
-    //write_buffer[2046] = 0x0D;
-    //write_buffer[2047] = 0x0A;
-    usbd_ep_start_write(busid, CDC_IN_EP, &write_buffer[0], 10);
-    while (ep_tx_busy_flag) {
-    }
-}
-
 void cdc_acm_transmit(uint8_t *buf, uint16_t len)
 {
     /* 上一包还没发完就直接丢掉这一包 —— 这里是任务/中断调的, 绝不能在这里等 */

@@ -3,17 +3,22 @@
 
 #define ADC_IRQ IRQn_ADC0
 #define ADC_TRIG_CH ADC16_CONFIG_TRG0A
-#define ADC_TRIG_LEN (4U)
+#define ADC_TRIG_LEN (3U) /* 只采三相电流 (Ibus 在零矢量采样无意义, 去掉) */
 
-#define ADC_CH_IA (0U)
-#define ADC_CH_IB (1U)
-#define ADC_CH_IC (2U)
-#define ADC_CH_IBUS (3U)
+#define ADC_CH_IA (0U)	 /* PF27 */
+#define ADC_CH_IB (1U)	 /* PF26 */
+#define ADC_CH_IC (2U)	 /* PF21 */
+#define ADC_CH_IBUS (3U) /* PF20 (不再参与快队列) */
 
-#define ADC_SAMPLE_CYCLE (20U)
+/*
+ * 采样保持周期 20 -> 10:
+ * 三路是串行转换的, 采样时间越短整队完成越早, 越不容易撞上开关沿
+ * (实测队列里最后转换的那一相最容易采到开关暂态)
+ */
+#define ADC_SAMPLE_CYCLE (10U)
 
 static const uint8_t adc_ch_tab[ADC_TRIG_LEN] = {ADC_CH_IA, ADC_CH_IB,
-						 ADC_CH_IC, ADC_CH_IBUS};
+						 ADC_CH_IC};
 
 static adc_callback_t adc_callback;
 
@@ -134,26 +139,28 @@ void adc1_init(void)
 }
 
 /* 软件触发一次, 依次采 VA/VB/VC/VBUS (转换约 0.5us, 等不到就不更新输出) */
-void adc1_read_all(uint16_t *va, uint16_t *vb, uint16_t *vc, uint16_t *vbus)
+bool adc1_read_all(uint16_t *va, uint16_t *vb, uint16_t *vc, uint16_t *vbus)
 {
 	for (uint8_t i = 0; i < ADC1_QUEUE_LEN; i++) {
 		adc1_dma_buf[i].adc_ch = 0U; // 清标记, 用来判断这一次的结果到了没
 	}
 
 	if (adc16_trigger_pmt_by_sw(HPM_ADC1, ADC1_TRIG_CH) != status_success) {
-		return;
+		return false;
 	}
 
-	for (uint32_t i = 0; i < 20000U; i++) {
+	for (uint32_t i = 0; i < 4000U; i++) {
 		// 队列最后一项到了, 说明 4 项都写完了
 		if (adc1_dma_buf[ADC1_QUEUE_LEN - 1U].adc_ch == ADC1_CH_VBUS) {
 			*va   = (uint16_t)adc1_dma_buf[0].result;
 			*vb   = (uint16_t)adc1_dma_buf[1].result;
 			*vc   = (uint16_t)adc1_dma_buf[2].result;
 			*vbus = (uint16_t)adc1_dma_buf[3].result;
-			return;
+			return true;
 		}
 	}
+
+	return false;
 }
 
 void adc_callback_set(adc_callback_t sink)
@@ -171,7 +178,10 @@ void isr_adc(void)
 		FOC.Ia = adc_dma_buf[0].result;
 		FOC.Ib = adc_dma_buf[1].result;
 		FOC.Ic = adc_dma_buf[2].result;
-		FOC.Ibus = adc_dma_buf[3].result;
+
+		FOC.isum = ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
+			    (FOC.Ic - FOC.Ic_midpoint)) *
+			   FOC_CURRENT_SCALE;
 
 		if(adc_callback) {
 			adc_callback();

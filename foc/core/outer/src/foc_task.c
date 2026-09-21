@@ -123,6 +123,7 @@ static uint8_t foc_protection_check(void)
     static bool     uv_warned = false;
     static uint32_t ov_cnt    = 0;
     static uint32_t uv_cnt    = 0;
+    static uint32_t isum_cnt  = 0;
 
     float vbus = FOC.Vbus;
 
@@ -137,6 +138,14 @@ static uint8_t foc_protection_check(void)
 
     if (foc_over_current()) {
         return FOC_FAULT_PHASE_OC;
+    }
+
+    if ((FOC.isum > FOC_ISUM_TH) || (FOC.isum < -FOC_ISUM_TH)) {
+        if (++isum_cnt >= 200U) {
+            return FOC_FAULT_ISUM;
+        }
+    } else {
+        isum_cnt = 0;
     }
 
     if (vbus > Config.protect_over_voltage) {

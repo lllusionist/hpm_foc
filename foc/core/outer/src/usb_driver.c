@@ -131,28 +131,6 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 	}
 
-	// 调试用: 定位 FOC 角度/方向问题
-	case USB_CMD_DEBUG_PHASE_OFFSET:
-		FOC.phase_offset = data_to_float(&frame->data[0]);
-		break;
-
-	case USB_CMD_DEBUG_ID: {
-		float id = data_to_float(&frame->data[0]);
-		FOC.Id_set = id;
-		break;
-	}
-
-	case USB_CMD_DEBUG_OPENLOOP_V:
-		FOC.openloop_voltage = data_to_float(&frame->data[0]);
-		break;
-
-	case USB_CMD_DEBUG_OPENLOOP_ANGLE:
-		FOC.openloop_angle = data_to_float(&frame->data[0]);
-		break;
-
-	case USB_CMD_DEBUG_FF:
-		FOC.ff_enable = (data_to_float(&frame->data[0]) > 0.5f);
-		break;
 
 	case USB_CMD_ANTICOGGING_START: // 未移植
 	default:

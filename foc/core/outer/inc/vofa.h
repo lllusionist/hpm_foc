@@ -19,9 +19,6 @@
 
 void vofa_start(void);
 void vofa_push_sample(void);
-void vofa_send_data(uint8_t num, float data);
-void vofa_sendframetail(void);
-void vofa_Receive(uint8_t *Buf, uint16_t *Len);
-float vofa_cmd_parse(uint8_t *cmdBuf, char *arg);
 void vofa_send(void);
+void vofa_transmit(uint8_t *buf, uint16_t len);
 #endif /* __VOFA_H__ */

@@ -217,8 +217,19 @@ void pwm_init(void)
 	pwmv2_start_pwm_output_sync(PWM, 0x07);	    // 同时启动
 }
 
+/*
+ * 占空比上限(给低边采样窗口留余量):
+ * 下桥低边导通窗口 = (1-占空比)*半周期, 三相串行采样时越靠后的通道越危险,
+ * 0.96 让最小窗口 >= 周期的 4% (~1us @40kHz).
+ */
+#define PWM_DUTY_MAX_LIMIT (0.96f)
+
 void pwm_set_duty(float du, float dv, float dw)
 {
+	if (du > PWM_DUTY_MAX_LIMIT) du = PWM_DUTY_MAX_LIMIT;
+	if (dv > PWM_DUTY_MAX_LIMIT) dv = PWM_DUTY_MAX_LIMIT;
+	if (dw > PWM_DUTY_MAX_LIMIT) dw = PWM_DUTY_MAX_LIMIT;
+
 	uint32_t half = reload >> 1;
 	uint32_t hu = (uint32_t)(du * (float)reload) >> 1; // 每相导通宽度的一半
 	uint32_t hv = (uint32_t)(dv * (float)reload) >> 1;

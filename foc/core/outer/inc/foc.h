@@ -25,9 +25,12 @@
 
 /* 故障码 */
 #define FOC_FAULT_NONE 0
-#define FOC_FAULT_PHASE_OC 1     // 相过流
-#define FOC_FAULT_OVER_VOLTAGE 2 // 母线过压
+#define FOC_FAULT_PHASE_OC 1	  // 相过流
+#define FOC_FAULT_OVER_VOLTAGE 2  // 母线过压
 #define FOC_FAULT_UNDER_VOLTAGE 3 // 母线欠压
+#define FOC_FAULT_ISUM 4
+
+#define FOC_ISUM_TH (0.3f)
 
 typedef struct {
 
@@ -88,6 +91,8 @@ typedef struct {
 	volatile float Vmag;	  // 指令电压幅值 |V| (V)
 	volatile bool saturated;  // 电压饱和标志
 	volatile bool ff_enable;  // 反电势前馈/解耦使能 (调试用)
+
+	volatile float isum;
 
 	/* 校准用: 开环电流模式 (校准任务下发角度, 中断里跑电流环) */
 	volatile bool calib_mode;

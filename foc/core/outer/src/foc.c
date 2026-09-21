@@ -7,7 +7,7 @@
 volatile foc_data_t FOC;
 
 /* ADC */
-#define VBUS_DIVIDER_RATIO 21.0f // (10K+10K+1K)/1K = 21
+#define VBUS_DIVIDER_RATIO 16.0f
 #define ADC_REF_VOLTAGE 3.3f	 // ADC参考电压3.3V
 #define ADC_RESOLUTION 65536.0f	 // 16位ADC分辨率
 #define VBUS_SCALE_FACTOR                                                      \
@@ -29,7 +29,9 @@ void foc_adc_midpoint(void)
 	for (uint8_t i = 0; i < 32; i++) {
 		uint16_t va, vb, vc, vbus_raw;
 
-		adc1_read_all(&va, &vb, &vc, &vbus_raw);
+		if (!adc1_read_all(&va, &vb, &vc, &vbus_raw)) {
+			continue;
+		}
 
 		adc_a_sum += FOC.Ia;
 		adc_b_sum += FOC.Ib;
@@ -56,7 +58,9 @@ void foc_update_voltages(void)
 	uint16_t va, vb, vc, vbus_raw;
 	const float k = (3.3f / 65536.0f) * FOC_VPHASE_DIVIDER;
 
-	adc1_read_all(&va, &vb, &vc, &vbus_raw);
+	if (!adc1_read_all(&va, &vb, &vc, &vbus_raw)) {
+		return;
+	}
 
 	FOC.Va = ((float)va - FOC.Va_midpoint) * k;
 	FOC.Vb = ((float)vb - FOC.Vb_midpoint) * k;
