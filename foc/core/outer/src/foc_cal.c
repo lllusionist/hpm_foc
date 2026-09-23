@@ -1,6 +1,7 @@
 #include <string.h>
 #include "foc_cal.h"
 #include "encoder.h"
+#include "foc_task.h"
 
 #define CAL_LOOP_HZ (1000U)
 #define SAMPLES_PER_PPAIR (128U)
@@ -36,6 +37,13 @@ static float l_v_dc, l_v_amp; // 电感注入的直流偏置/正弦幅值
 
 void calibration_start(void)
 {
+	if (!FOC.adc_ready) {
+		FOC.fault_code = FOC_FAULT_ADC;
+		foc_request_stage(IDLE);
+		mCalibStep = CS_NULL;
+		return;
+	}
+
     Config.encoder_dir = +1;
     Config.calib_valid = false;
     FOC.calib_mode     = false;

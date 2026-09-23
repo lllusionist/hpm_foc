@@ -28,11 +28,17 @@
 #define FOC_FAULT_PHASE_OC 1	  // 相过流
 #define FOC_FAULT_OVER_VOLTAGE 2  // 母线过压
 #define FOC_FAULT_UNDER_VOLTAGE 3 // 母线欠压
+#define FOC_FAULT_ADC 4
 
 typedef struct {
 
 	volatile bool is_armed;
 	volatile uint32_t fault_code; // 0=正常, 见 FOC_FAULT_*
+	volatile bool adc_ready;
+	volatile uint32_t adc_current_frames;
+	volatile uint32_t adc_current_missed;
+	volatile uint32_t adc_voltage_missed;
+	volatile uint32_t adc_ibus_missed;
 	
 	volatile float Ia;
 	volatile float Ib;
@@ -114,7 +120,7 @@ typedef struct {
 
 extern volatile foc_data_t FOC;
 
-void foc_adc_midpoint(void);
+bool foc_adc_midpoint(void);
 void foc_update_voltages(void);
 void FOC_voltage(float Vd, float Vq, float phase);
 void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel);

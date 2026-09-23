@@ -74,9 +74,12 @@ static void enter_state(tFSMState state)
         foc_disarm();
         pwm_output_low_sides();
         break;
-    case RUN:
-        CONTROLLER_reset();
-        foc_arm();
+	case RUN:
+		CONTROLLER_reset();
+		foc_arm();
+		if (!FOC.is_armed) {
+			foc_request_stage(IDLE);
+		}
         break;
     case CALIBRATION:
         calibration_start();
@@ -160,9 +163,35 @@ static uint8_t foc_protection_check(void)
 
 static void foc_check_and_trip(void)
 {
-    uint8_t fault = foc_protection_check();
+	static uint32_t current_frames;
+	static uint32_t current_missed_count;
+	uint8_t fault = foc_protection_check();
+	float vbus = FOC.Vbus;
 
-    if (fault != FOC_FAULT_NONE) {
+	if ((vbus <= 2.0f) || (vbus >= 70.0f)) {
+		fault = FOC_FAULT_ADC;
+	}
+
+	if (FOC.adc_current_missed >= 3U) {
+		fault = FOC_FAULT_ADC;
+	}
+	if (FOC.adc_current_frames == current_frames) {
+		if (++current_missed_count >= 3U) {
+			fault = FOC_FAULT_ADC;
+		}
+	} else {
+		current_missed_count = 0U;
+		current_frames = FOC.adc_current_frames;
+	}
+
+	if (FOC.adc_voltage_missed >= 3U) {
+		fault = FOC_FAULT_ADC;
+	}
+	if (FOC.adc_ibus_missed >= 3U) {
+		fault = FOC_FAULT_ADC;
+	}
+
+	if (fault != FOC_FAULT_NONE) {
         FOC.fault_code = fault;
         printf("FAULT %u: Vbus %dmV, I %.2fA (uv %dmV ov %dmV)\n",
                (unsigned)fault, (int)(FOC.Vbus * 1000.0f),
@@ -204,12 +233,16 @@ static void Task_FOC(void *argument)
         }
 
         switch (sFSM.state) {
-        case BOOT_UP: {
-            static bool midpoint_done;
-            if (!midpoint_done) {
-                midpoint_done = true;
-                foc_adc_midpoint();
-            }
+	case BOOT_UP: {
+		static bool midpoint_done;
+		if (!midpoint_done) {
+			midpoint_done = true;
+			if (!FOC.adc_ready && !foc_adc_midpoint()) {
+				FOC.fault_code = FOC_FAULT_ADC;
+				printf("ADC midpoint calibration failed\n");
+				foc_request_stage(IDLE);
+			}
+		}
         } break;
         case IDLE:
             break;

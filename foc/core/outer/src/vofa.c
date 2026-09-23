@@ -12,7 +12,7 @@ uint8_t send_buf[MAX_BUFFER_SIZE];
  * 多个样本打包进同一包 USB 发出; 上位机仍按帧尾逐个解析,
  * 有效采样率 = 采样分频, 与 USB 包率解耦.
  */
-#define VOFA_NCH        21
+#define VOFA_NCH        22
 #define VOFA_RING       64 /* 环形缓冲样本数 */
 #define VOFA_BATCH_MAX  (MAX_BUFFER_SIZE / (VOFA_NCH * 4 + 4))
 
@@ -48,6 +48,7 @@ static void vofa_snapshot(float *d)
 	d[18] = FOC.Vb;					       // B 相电压 (V)
 	d[19] = FOC.Vc;					       // C 相电压 (V)
 	d[20] = (float)FOC.fault_code;			       // 故障码
+	d[21] = FOC.Ibus_filt;			       // 母线电流 (A)
 }
 
 /* 由 ADC 中断按分频调用 */

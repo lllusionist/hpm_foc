@@ -15,52 +15,77 @@ volatile foc_data_t FOC;
 
 #define VBUS_DEFAULT 12.0f
 
-void foc_adc_midpoint(void)
+bool foc_adc_midpoint(void)
 {
 	float adc_a_sum = 0;
 	float adc_b_sum = 0;
 	float adc_c_sum = 0;
-	float adc_bus_sum = 0;
+	float adc_ibus_sum = 0;
 	float adc_va_sum = 0;
 	float adc_vb_sum = 0;
 	float adc_vc_sum = 0;
-	float times = 0;
+	uint32_t times = 0;
+	uint32_t ibus_times = 0;
 
 	for (uint8_t i = 0; i < 32; i++) {
 		uint16_t va, vb, vc, vbus_raw;
+		uint16_t ia, ib, ic;
+		uint16_t ibus_raw;
 
-		if (!adc1_read_all(&va, &vb, &vc, &vbus_raw)) {
+		if (!adc1_read_all(&va, &vb, &vc, &vbus_raw) ||
+		    !adc_current_snapshot(&ia, &ib, &ic)) {
+			sys_delay_ms(1);
 			continue;
 		}
 
-		adc_a_sum += FOC.Ia;
-		adc_b_sum += FOC.Ib;
-		adc_c_sum += FOC.Ic;
-		adc_bus_sum += FOC.Ibus;
+		adc_a_sum += ia;
+		adc_b_sum += ib;
+		adc_c_sum += ic;
+		if (adc1_read_ibus(&ibus_raw)) {
+			adc_ibus_sum += ibus_raw;
+			ibus_times++;
+		}
 		adc_va_sum += (float)va;
 		adc_vb_sum += (float)vb;
 		adc_vc_sum += (float)vc;
 		times += 1;
 		sys_delay_ms(1);
 	}
+	if (times < 16U || ibus_times < 16U) {
+		return false;
+	}
 	FOC.Ia_midpoint = adc_a_sum / times;
 	FOC.Ib_midpoint = adc_b_sum / times;
 	FOC.Ic_midpoint = adc_c_sum / times;
-	FOC.Ibus_midpoint = adc_bus_sum / times;
+	FOC.Ibus_midpoint = adc_ibus_sum / ibus_times;
 	FOC.Va_midpoint = adc_va_sum / times;
 	FOC.Vb_midpoint = adc_vb_sum / times;
 	FOC.Vc_midpoint = adc_vc_sum / times;
+	FOC.adc_ready = true;
+	return true;
 }
 
 /* 三相电压 + 母线电压: 1kHz 软件触发 ADC1 采一组, 换算 + 滤波 */
 void foc_update_voltages(void)
 {
 	uint16_t va, vb, vc, vbus_raw;
+	uint16_t ibus_raw;
 	const float k = (3.3f / 65536.0f) * FOC_VPHASE_DIVIDER;
 
+	if (adc1_read_ibus(&ibus_raw)) {
+		FOC.Ibus = ibus_raw;
+		FOC.adc_ibus_missed = 0U;
+		float ibus = ((float)ibus_raw - FOC.Ibus_midpoint) * FOC_IBUS_SCALE;
+		UTILS_LP_FAST(FOC.Ibus_filt, ibus, 0.1f);
+	} else {
+		FOC.adc_ibus_missed++;
+	}
+
 	if (!adc1_read_all(&va, &vb, &vc, &vbus_raw)) {
+		FOC.adc_voltage_missed++;
 		return;
 	}
+	FOC.adc_voltage_missed = 0;
 
 	FOC.Va = ((float)va - FOC.Va_midpoint) * k;
 	FOC.Vb = ((float)vb - FOC.Vb_midpoint) * k;
@@ -68,11 +93,8 @@ void foc_update_voltages(void)
 
 	float vbus = (float)vbus_raw * (3.3f / 65536.0f) *
 		     FOC_VBUS_DIVIDER;
-
-	if ((vbus > 2.0f) && (vbus < 70.0f)) {
-		FOC.Vbus = vbus;
-		UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
-	}
+	FOC.Vbus = vbus;
+	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
 void FOC_voltage(float Vd, float Vq, float phase)
@@ -160,6 +182,10 @@ void foc_disarm(void)
 
 void foc_arm(void)
 {
+	if (!FOC.adc_ready) {
+		FOC.fault_code = FOC_FAULT_ADC;
+		return;
+	}
 	if (FOC.is_armed) {
 		return;
 	}
@@ -269,13 +295,6 @@ void foc_adc_callback(void)
 	/* 波形采样: 40kHz 8 分频 -> 5kHz, 攒批由 vofa 任务发送 */
 	static uint8_t vofa_div = 0;
 
-	/*
-	 * 母线电流: 采样点落在零矢量(电流在桥内续流), 只有运放输出自带 RC 滤波
-	 * (或运放带宽远低于 40kHz) 时, 这里的读数才是有意义的平均值.
-	 */
-	float ibus = (FOC.Ibus - FOC.Ibus_midpoint) * FOC_IBUS_SCALE;
-	UTILS_LP_FAST(FOC.Ibus_filt, ibus, 0.005f);
-
 	if (++vofa_div >= VOFA_SAMPLE_DECIM) {
 		vofa_div = 0;
 		vofa_push_sample();
@@ -367,7 +386,14 @@ void foc_init(void)
 	} else {
 		FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 	}
+	FOC.adc_ready = false;
+	FOC.adc_current_frames = 0U;
+	FOC.adc_current_missed = 0U;
+	FOC.adc_voltage_missed = 0U;
+	FOC.adc_ibus_missed = 0U;
 	adc1_init();
-	foc_adc_midpoint();
+	if (!foc_adc_midpoint()) {
+		FOC.fault_code = FOC_FAULT_ADC;
+	}
 	adc_callback_set(foc_adc_callback);
 }

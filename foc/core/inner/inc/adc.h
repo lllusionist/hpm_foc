@@ -13,6 +13,8 @@ typedef void (*adc_callback_t)(void);
 void adc_init(void);
 void adc1_init(void);
 bool adc1_read_all(uint16_t *va, uint16_t *vb, uint16_t *vc, uint16_t *vbus);
+bool adc1_read_ibus(uint16_t *ibus);
+bool adc_current_snapshot(uint16_t *ia, uint16_t *ib, uint16_t *ic);
 void adc_callback_set(adc_callback_t sink);
 
 #endif /* __ADC_H__ */
