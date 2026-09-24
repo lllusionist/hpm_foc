@@ -50,7 +50,9 @@ class AdcContractTests(unittest.TestCase):
         self.assertIn("FOC.adc_current_missed", TASK)
         self.assertIn("FOC.adc_voltage_missed", TASK)
         self.assertIn("FOC.adc_voltage_missed >= 3U", TASK)
-        self.assertIn("FOC.adc_current_frames == current_frames", TASK)
+        # 帧停更判据必须基于真实时间, 否则任务补跑会误报
+        self.assertIn("xTaskGetTickCount() - last_change_tick", TASK)
+        self.assertNotIn("current_missed_count", TASK)
         self.assertIn("!FOC.is_armed", TASK)
         self.assertIn("if (!FOC.adc_ready)", (ROOT / "core/outer/src/foc_cal.c").read_text(encoding="utf-8"))
 

@@ -163,10 +163,11 @@ static uint8_t foc_protection_check(void)
 
 static void foc_check_and_trip(void)
 {
-	static uint32_t current_frames;
-	static uint32_t current_missed_count;
-	uint8_t fault = foc_protection_check();
-	float vbus = FOC.Vbus;
+	static uint32_t   last_frames;
+	static TickType_t last_change_tick;
+	uint8_t  fault = foc_protection_check();
+	float    vbus  = FOC.Vbus;
+	uint32_t frames;
 
 	if ((vbus <= 2.0f) || (vbus >= 70.0f)) {
 		fault = FOC_FAULT_ADC;
@@ -175,13 +176,19 @@ static void foc_check_and_trip(void)
 	if (FOC.adc_current_missed >= 3U) {
 		fault = FOC_FAULT_ADC;
 	}
-	if (FOC.adc_current_frames == current_frames) {
-		if (++current_missed_count >= 3U) {
-			fault = FOC_FAULT_ADC;
-		}
-	} else {
-		current_missed_count = 0U;
-		current_frames = FOC.adc_current_frames;
+
+	/*
+	 * 电流帧停更判据必须按真实时间, 不能按调用次数:
+	 * 任务超时后 vTaskDelayUntil 会连续补跑多拍, 这些调用间隔只有几微秒,
+	 * 帧数当然不变, 用"连续 N 次相等"会误报 (校准里的阻塞 printf 就会触发)。
+	 */
+	frames = FOC.adc_current_frames;
+	if (frames != last_frames) {
+		last_frames        = frames;
+		last_change_tick   = xTaskGetTickCount();
+	} else if ((xTaskGetTickCount() - last_change_tick) >
+		   pdMS_TO_TICKS(10)) {
+		fault = FOC_FAULT_ADC;
 	}
 
 	if (FOC.adc_voltage_missed >= 3U) {
