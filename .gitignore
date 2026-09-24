@@ -45,6 +45,10 @@ Thumbs.db
 *~
 *.lnk
 
+# ===== Python =====
+__pycache__/
+*.pyc
+
 # ===== 注意 =====
 # foc/hpm_sdk_localized_for_hpm5e00evk/ 是刻意纳入跟踪的（BSD-3-Clause，
 # 随包带 LICENSE，可再分发），这样别人克隆后无需安装 SDK 即可编译。
