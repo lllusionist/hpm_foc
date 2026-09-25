@@ -20,5 +20,6 @@
 void vofa_start(void);
 void vofa_push_sample(void);
 void vofa_send(void);
+void vofa_request_config(void);
 void vofa_transmit(uint8_t *buf, uint16_t len);
 #endif /* __VOFA_H__ */

@@ -2,6 +2,7 @@
 #include "util.h"
 #include "foc_task.h"
 #include "foc_ctrl.h"
+#include "vofa.h"
 
 void USB_parse_frame(UsbFrame *frame)
 {
@@ -148,6 +149,10 @@ void USB_parse_frame(UsbFrame *frame)
 		Config.protect_over_voltage = data_to_float(&frame->data[0]);
 		break;
 	}
+
+	case USB_CMD_GET_CONFIG:
+		vofa_request_config();
+		break;
 
 
 	case USB_CMD_ANTICOGGING_START: // 未移植

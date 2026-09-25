@@ -1,9 +1,46 @@
 #include "vofa.h"
 #include "cdc_acm.h"
 #include "foc_ctrl.h"
+#include "config.h"
 #include "math.h"
+#include "stdio.h"
+#include "string.h"
 
 uint8_t send_buf[MAX_BUFFER_SIZE];
+
+/* 读取设备参数的请求标志 (由 USB 命令置位, 在 vofa 任务包边界发出, 避免拆包) */
+static volatile uint8_t cfg_dump_req = 0;
+
+void vofa_request_config(void)
+{
+	cfg_dump_req = 1;
+}
+
+/* 以一行 ASCII 回传当前参数: $FOCFG,KEY=VAL,...\n */
+static void vofa_send_config(void)
+{
+	static char line[320];
+	int n = snprintf(
+		line, sizeof(line),
+		"$FOCFG,CLIM=%.5g,VLIM=%.5g,POSKP=%.5g,VELKP=%.5g,VELKI=%.5g,"
+		"CURBW=%.5g,CURKP=%.5g,CURKI=%.5g,UV=%.5g,OV=%.5g,"
+		"OP=%ld,INV=%ld,PP=%ld,TW=%.5g,PW=%.5g,VRR=%.5g,CRR=%.5g,"
+		"PFBW=%.5g,CAL=%ld\n",
+		Config.current_limit, Config.velocity_limit, Config.pos_p_gain,
+		Config.vel_p_gain, Config.vel_i_gain, Config.current_ctrl_bw,
+		Config.current_kp, Config.current_ki, Config.protect_under_voltage,
+		Config.protect_over_voltage, (long)Config.default_op_mode,
+		(long)Config.invert_motor_dir, (long)Config.pole_pairs,
+		Config.target_velcity_window, Config.target_position_window,
+		Config.velocity_ramp_rate, Config.current_ramp_rate,
+		Config.position_filter_bw, (long)Config.calib_valid);
+	if (n > 0) {
+		if (n > (int)sizeof(line) - 1) {
+			n = (int)sizeof(line) - 1;
+		}
+		vofa_transmit((uint8_t *)line, (uint16_t)n);
+	}
+}
 
 /*================================ 批量发送 ====================================*/
 /*
@@ -108,6 +145,10 @@ static void Vofa_task(void *argument)
 	for (;;) {
 		vTaskDelayUntil(&last, pdMS_TO_TICKS(VOFA_PERIOD_MS));
 		vofa_send();
+		if (cfg_dump_req) {
+			cfg_dump_req = 0;
+			vofa_send_config();
+		}
 	}
 }
 

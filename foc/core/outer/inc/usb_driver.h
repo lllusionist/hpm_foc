@@ -35,6 +35,9 @@
 #define USB_CMD_SET_UNDER_VOLTAGE 0x56
 #define USB_CMD_SET_OVER_VOLTAGE 0x57
 
+/* 读取设备当前参数: 固件以一行 ASCII($FOCFG,...) 回传, 由 vofa 任务在包边界发出 */
+#define USB_CMD_GET_CONFIG 0x3E
+
 typedef struct {
 	uint8_t id;
 	uint8_t data[4];
