@@ -19,7 +19,7 @@ from .buffers import DataStore
 from .protocol import CMD, MODES
 from .serial_io import SerialIO, HAVE_SERIAL
 from .plot import PlotWidget, OverviewWidget
-from .panels import TitleBar, LeftPanel, RightDataPanel, StatusBarWidget, ChannelDialog, num
+from .panels import TitleBar, LeftPanel, RightDataPanel, StatusBarWidget, ChannelDialog, num, TargetSlider
 from .recorder import Recorder, write_csv, default_dir, make_filename
 
 CMD_NAME = {v: k for k, v in CMD.items()}
@@ -84,6 +84,7 @@ class MainWindow(QWidget):
         self._wire()
         self.left.apply_stepper_cfg(self.cfg.get("steppers") or {})
         self._update_target_defs()
+        self._apply_saved_view()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -231,7 +232,8 @@ class MainWindow(QWidget):
         self.ent_target.setFixedWidth(72)
         self.ent_target.setAlignment(Qt.AlignCenter)
         row2.addWidget(self.ent_target)
-        self.sld_target = QSlider(Qt.Horizontal)
+        self.sld_target = TargetSlider()
+        self.sld_target.setMinimumHeight(34)
         row2.addWidget(self.sld_target, 1)
         self.btn_send_target = QToolButton()
         self.btn_send_target.setText("➤")
@@ -273,7 +275,7 @@ class MainWindow(QWidget):
         self.btn_auto.clicked.connect(self.autoscale_all)
         self.btn_send_target.clicked.connect(self._send_target_now)
         self.sld_target.valueChanged.connect(self._on_target_slider)
-        self.sld_target.sliderReleased.connect(self._send_target_now)
+        self.sld_target.jumped.connect(self._on_target_jump)
         self.ent_target.returnPressed.connect(self._send_target_now)
 
         self.right.visChanged.connect(self._on_vis_changed)
@@ -315,7 +317,8 @@ class MainWindow(QWidget):
         try:
             self.io.open(dev)
         except Exception as e:
-            QMessageBox.critical(self, "打开失败", str(e))
+            import traceback
+            QMessageBox.critical(self, "打开失败", "%s\n\n%s" % (e, traceback.format_exc()))
             return
         self.demo = False
         self._set_conn_ui(True)
@@ -471,6 +474,7 @@ class MainWindow(QWidget):
         self._target_key = key
         self._target_step = step
         self.lbl_target.setText(label)
+        self.sld_target.set_scale(step, 3)
         self.sld_target.blockSignals(True)
         self.sld_target.setMinimum(int(round(lo / step)))
         self.sld_target.setMaximum(int(round(hi / step)))
@@ -498,7 +502,20 @@ class MainWindow(QWidget):
             v = float(self.ent_target.text() or 0)
         except ValueError:
             return
+        step = self._target_step or 1.0
+        iv = int(round(v / step))
+        iv = min(max(iv, self.sld_target.minimum()), self.sld_target.maximum())
+        v = iv * step
+        # 同步滑条位置 (不回触发发送)
+        self.sld_target.blockSignals(True)
+        self.sld_target.setValue(iv)
+        self.sld_target.blockSignals(False)
+        self.ent_target.setText(num(v, 3))
         self.send(CMD.get(self._target_key, CMD["velocity"]), v)
+
+    def _on_target_jump(self, iv):
+        self.ent_target.setText(num(iv * self._target_step, 3))
+        self._send_target_now()
 
     # ================= 显示控制 =================
     def clear_data(self):
@@ -644,6 +661,13 @@ class MainWindow(QWidget):
 
     # ================= 主循环 =================
     def _tick(self):
+        try:
+            self._tick_impl()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    def _tick_impl(self):
         if self.io.link_lost and self.io.is_open():
             self.io.close()
             self._set_conn_ui(False)
@@ -774,12 +798,43 @@ class MainWindow(QWidget):
             "split": self.split.sizes(),
             "channels": self.model.to_cfg(),
             "steppers": self.left.stepper_cfg(),
+            "view": {
+                "top": {"t_span": self.plot_top.t_span,
+                        "y": [self.plot_top.y_min, self.plot_top.y_max]},
+                "main": {"t_span": self.plot_main.t_span,
+                         "y": [self.plot_main.y_min, self.plot_main.y_max]},
+            },
         }
         try:
             with open(CFG_PATH, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=1)
         except Exception:
             pass
+
+    def _apply_saved_view(self):
+        """沿用上次保存的 X 轴缩放(显示时长)与 Y 轴缩放, 启动即生效."""
+        v = self.cfg.get("view") or {}
+        for key, plot in (("top", self.plot_top), ("main", self.plot_main)):
+            d = v.get(key)
+            if not isinstance(d, dict):
+                continue
+            try:
+                ts = float(d.get("t_span"))
+                if ts > 0:
+                    plot.t_span = min(ts, plot.max_span)
+            except (TypeError, ValueError):
+                pass
+            y = d.get("y")
+            if isinstance(y, list) and len(y) == 2:
+                try:
+                    y0, y1 = float(y[0]), float(y[1])
+                    if y1 > y0:
+                        plot.y_min, plot.y_max = y0, y1
+                except (TypeError, ValueError):
+                    pass
+            plot.follow = True
+            plot._auto_pending = False
+            plot.update()
 
     def _restore_geometry(self):
         w = self.cfg.get("window")

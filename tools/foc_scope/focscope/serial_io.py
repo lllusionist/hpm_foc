@@ -69,7 +69,16 @@ class SerialIO:
             raise RuntimeError("未安装 pyserial: pip install pyserial")
         self.close()
         self.link_lost = False
-        self.ser = serial.Serial(dev, self.baud, timeout=0.05)
+        last = None
+        for _ in range(4):
+            try:
+                self.ser = serial.Serial(dev, self.baud, timeout=0.05)
+                break
+            except Exception as e:
+                last = e
+                time.sleep(0.15)
+        if self.ser is None:
+            raise last if last else RuntimeError("打开串口失败")
         self.running = True
         self.thread = threading.Thread(target=self._reader, daemon=True)
         self.thread.start()
@@ -83,6 +92,10 @@ class SerialIO:
                 pass
             self.ser = None
         if self.thread:
+            try:
+                self.thread.join(timeout=0.3)
+            except Exception:
+                pass
             self.thread = None
 
     def is_open(self):

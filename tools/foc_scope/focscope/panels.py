@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """界面组件: 标题栏 / 左侧控制面板 / 右侧数据面板 / 底部状态栏 / 通道设置对话框."""
-from PySide6.QtCore import Qt, Signal, QRectF
+from PySide6.QtCore import Qt, Signal, QRectF, QPointF
 from PySide6.QtGui import QColor, QPainter, QPixmap, QPen, QBrush, QFont, QIcon
 from PySide6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QToolButton, QComboBox, QLineEdit,
     QVBoxLayout, QHBoxLayout, QGridLayout, QSlider, QScrollArea, QDialog,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QAbstractItemView,
-    QSizePolicy, QDoubleSpinBox,
+    QSizePolicy, QDoubleSpinBox, QStyle, QToolTip,
 )
 
 from . import theme
@@ -156,6 +156,73 @@ class _DblLabel(QLabel):
 
     def mouseDoubleClickEvent(self, ev):
         self.doubleClicked.emit()
+
+
+class TargetSlider(QSlider):
+    """目标值滑条: 悬停显示光标处数值; 点击/拖动直接跳到该位置."""
+
+    jumped = Signal(int)   # 鼠标释放时的最终值 (int, 需 ×scale)
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.scale = 1.0
+        self.decimals = 3
+        self._dragging = False
+        self.setMouseTracking(True)
+
+    def set_scale(self, scale, decimals=3):
+        self.scale = float(scale) if scale else 1.0
+        self.decimals = decimals
+
+    def _value_at(self, x):
+        hw = self.style().pixelMetric(QStyle.PM_SliderLength, None, self)
+        span = max(1, self.width() - hw)
+        pos = int(x - hw / 2)
+        return self.style().sliderValueFromPosition(self.minimum(), self.maximum(), pos, span)
+
+    def _fmt(self, iv):
+        return num(iv * self.scale, self.decimals)
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        # 0 处的小圆点标记: 内白外蓝圈, 位于进度条下方
+        if self.minimum() <= 0 <= self.maximum():
+            hw = self.style().pixelMetric(QStyle.PM_SliderLength, None, self)
+            span = max(1, self.width() - hw)
+            x = hw / 2.0 + self.style().sliderPositionFromValue(
+                self.minimum(), self.maximum(), 0, span)
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing, True)
+            p.setPen(QPen(QColor(theme.ACCENT), 1.6))
+            p.setBrush(QBrush(QColor("#ffffff")))
+            r = 3.5
+            p.drawEllipse(QPointF(x, self.height() - 6.0), r, r)
+            p.end()
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self._dragging = True
+            self.setValue(self._value_at(ev.position().x()))
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._dragging:
+            self.setValue(self._value_at(ev.position().x()))
+            ev.accept()
+            return
+        v = self._value_at(ev.position().x())
+        QToolTip.showText(ev.globalPosition().toPoint(), self._fmt(v), self)
+        super().mouseMoveEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton and self._dragging:
+            self._dragging = False
+            self.jumped.emit(self.value())
+            ev.accept()
+            return
+        super().mouseReleaseEvent(ev)
 
 
 class Stepper(QWidget):

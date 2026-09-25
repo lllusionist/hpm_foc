@@ -228,8 +228,38 @@ class PlotWidget(QWidget):
         if not self._cursor or self.store.total == 0:
             return
         mx, my = self._cursor
-        if not (x0 <= mx <= x1 and y0 <= my <= y1):
+        inside = x0 <= mx <= x1 and y0 <= my <= y1
+        in_yband = (mx < x0 or mx > x1) and (y0 <= my <= y1)
+        in_xband = (my < y0 or my > y1) and (x0 <= mx <= x1)
+
+        # 鼠标在 Y 轴刻度区: 画一条横线并显示该处数值
+        if in_yband:
+            p.setPen(self._pen(theme.ACCENT, 1.0))
+            p.drawLine(QPointF(x0, my), QPointF(x1, my))
+            val = ymin + (y1 - my) / max(1e-12, ysc)
+            p.setFont(QFont(theme.MONO, 9))
+            fm = p.fontMetrics()
+            txt = self._fmt(val, 0.0001)
+            tw = fm.horizontalAdvance(txt)
+            r = QRectF(x1 + 3, my - fm.height() / 2.0 - 1, tw + 8, fm.height() + 2)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QBrush(QColor(255, 255, 255, 210)))
+            p.drawRoundedRect(r, 3, 3)
+            p.setPen(self._pen(theme.ACCENT, 1.0))
+            p.drawText(QRectF(x1 + 6, my - fm.height() / 2.0, RM - 8, fm.height()),
+                       Qt.AlignLeft | Qt.AlignVCenter, txt)
             return
+
+        # 鼠标在 X 轴刻度区: 画一条竖线
+        if in_xband:
+            xk = min(max(mx, x0), x1)
+            p.setPen(self._pen(theme.ACCENT, 1.0))
+            p.drawLine(QPointF(xk, y0), QPointF(xk, y1))
+            return
+
+        if not inside:
+            return
+
         tcur = tL + (mx - x0) / max(1e-12, xsc)
         k = int(round(tcur * self.store.fs))
         k = max(self.store.base, min(k, self.store.total - 1))
@@ -237,7 +267,8 @@ class PlotWidget(QWidget):
         p.setPen(self._pen("#e05555", 1.0))
         p.drawLine(QPointF(xk, y0), QPointF(xk, y1))
 
-        lines = ["t = %.5f s" % (k / self.store.fs)]
+        # 读数: 时间行 + 各通道 (按波形颜色)
+        entries = [("t = %.5f s" % (k / self.store.fs), theme.FG_DIM)]
         for c in self.channels:
             s = self.store.sample_at(c, k)
             if s is None:
@@ -247,21 +278,23 @@ class PlotWidget(QWidget):
             p.setPen(Qt.NoPen)
             yk = y1 - (vv - ymin) * ysc
             p.drawEllipse(QPointF(xk, yk), 2.6, 2.6)
-            lines.append("%-8s %s" % (self.model.short_name(c), self._fmt(vv, 0.0001)))
+            entries.append(("%-8s %s" % (self.model.short_name(c), self._fmt(vv, 0.0001)),
+                            self.model.color[c]))
 
         font = QFont(theme.MONO, 9)
         p.setFont(font)
         fm = p.fontMetrics()
-        w = max(fm.horizontalAdvance(s) for s in lines) + 16
-        h = fm.height() * len(lines) + 12
+        w = max(fm.horizontalAdvance(s) for s, _ in entries) + 16
+        h = fm.height() * len(entries) + 12
         bx = min(xk + 14, x1 - w - 2)
         by = min(max(my - h // 2, y0 + 2), y1 - h - 2)
-        p.setPen(QPen(QColor("#5a5a2a"), 1))
-        p.setBrush(QBrush(QColor(50, 50, 38, 235)))
+        # 透明背景 (不遮挡波形), 只留淡边框
+        p.setPen(self._pen(theme.BORDER, 1.0))
+        p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(QRectF(bx, by, w, h), 5, 5)
         ty = by + 6
-        for i, s in enumerate(lines):
-            p.setPen(QPen(QColor(theme.FG if i == 0 else theme.FG_DIM)))
+        for s, col in entries:
+            p.setPen(QPen(QColor(col)))
             p.drawText(QPointF(bx + 8, ty + fm.ascent()), s)
             ty += fm.height()
 
@@ -274,8 +307,9 @@ class PlotWidget(QWidget):
             ph = max(1, y1 - y0)
             dx = ev.position().x() - self._drag[0]
             dy = ev.position().y() - self._drag[1]
-            self.t_right = self._drag[2] - dx / pw * self.t_span
-            self.follow = False
+            # 跟随状态下拖动只改 Y 缩放, 不平移时间 (避免暂停实时滚动)
+            if not self.follow:
+                self.t_right = self._drag[2] - dx / pw * self.t_span
             span = self._drag[4] - self._drag[3]
             self.y_min = self._drag[3] + dy / ph * span
             self.y_max = self._drag[4] + dy / ph * span
