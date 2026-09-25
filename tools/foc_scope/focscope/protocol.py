@@ -11,12 +11,14 @@ CMD = {
     "opmode": 0x20, "enable": 0x21, "disable": 0x22,
     "torque": 0x23, "velocity": 0x24, "position": 0x25,
     "calib": 0x27, "home": 0x2D, "save": 0x3F, "reset": 0x3B,
+    "getcfg": 0x3E,
     "curkp": 0x40, "curki": 0x41, "velkp": 0x42, "velki": 0x43, "poskp": 0x44,
     "curbw": 0x58,
     "uv": 0x56, "ov": 0x57,
 }
 
 TAIL = b"\x00\x00\x80\x7f"
+CFG_MAGIC = b"$FOCFG,"
 NCH = 22
 
 # 运行模式

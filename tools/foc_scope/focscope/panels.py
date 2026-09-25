@@ -12,6 +12,9 @@ from PySide6.QtWidgets import (
 from . import theme
 from .channels import CHANNELS, NCH, STATUS_ITEMS, FAULT_TEXT
 from .vofa_source import source_info
+from .fwconfig import load as _load_fw
+
+_FW = _load_fw()
 
 
 def num(v, dec=3):
@@ -135,8 +138,8 @@ class TitleBar(QFrame):
     def mouseMoveEvent(self, ev):
         if self._drag and (ev.buttons() & Qt.LeftButton):
             w = self.window()
-            if w.isMaximized():
-                w.showNormal()
+            if getattr(w, "_is_max", False):
+                w.restore_from_max()
                 self._drag = ev.globalPosition().toPoint() - w.frameGeometry().topLeft()
             w.move(ev.globalPosition().toPoint() - self._drag)
 
@@ -144,8 +147,7 @@ class TitleBar(QFrame):
         self._drag = None
 
     def mouseDoubleClickEvent(self, ev):
-        w = self.window()
-        w.showNormal() if w.isMaximized() else w.showMaximized()
+        self.request_max.emit()
 
 
 class _DblLabel(QLabel):
@@ -202,7 +204,7 @@ class Stepper(QWidget):
         self.minus.clicked.connect(lambda: self._bump(-1))
         self.plus.clicked.connect(lambda: self._bump(1))
         self.send.clicked.connect(self._emit_sent)
-        self.edit.returnPressed.connect(self._emit_sent)
+        self.edit.editingFinished.connect(self._emit_sent)   # 回车或失焦自动下发
 
     def _bump(self, sign):
         try:
@@ -233,6 +235,13 @@ class Stepper(QWidget):
             self.edit.setText(num(v, self.dec))
         except ValueError:
             pass
+
+    def set_value(self, v):
+        try:
+            v = min(self.hi, max(self.lo, float(v)))
+        except (TypeError, ValueError):
+            return
+        self.edit.setText(num(v, self.dec))
 
     def open_range_dialog(self):
         win = QDialog(self.window())
@@ -343,24 +352,27 @@ class LeftPanel(QWidget):
         cf, cv = card("驱动器参数")
         self.steppers = {}
         params = [
-            ("curkp", "电流环Kp", 0.0, 0.0, 100.0, 0.001, 3),
-            ("curki", "电流环Ki", 0.0, 0.0, 10000.0, 0.001, 3),
-            ("curbw", "电流带宽Hz", 1000.0, 0.0, 5000.0, 0.001, 3),
-            ("velkp", "速度环Kp", 0.25, 0.0, 100.0, 0.001, 3),
-            ("velki", "速度环Ki", 0.01, 0.0, 100.0, 0.001, 3),
-            ("poskp", "位置环Kp", 30.0, 0.0, 1000.0, 0.001, 3),
+            ("curkp", "电流环Kp", _FW.get_float("current_kp", 0.0), 0.0, 100.0, 0.001, 3),
+            ("curki", "电流环Ki", _FW.get_float("current_ki", 0.0), 0.0, 10000.0, 0.001, 3),
+            ("curbw", "电流带宽Hz", _FW.get_float("current_ctrl_bw", 1000.0), 0.0, 5000.0, 0.001, 3),
+            ("velkp", "速度环Kp", _FW.get_float("vel_p_gain", 0.10), 0.0, 100.0, 0.001, 3),
+            ("velki", "速度环Ki", _FW.get_float("vel_i_gain", 0.01), 0.0, 100.0, 0.001, 3),
+            ("poskp", "位置环Kp", _FW.get_float("pos_p_gain", 30.0), 0.0, 1000.0, 0.001, 3),
         ]
         for key, label, default, lo, hi, step, dec in params:
             s = Stepper(label, default, lo, hi, step, dec)
             self.steppers[key] = s
             cv.addWidget(s)
+        self.btn_read = QPushButton("从设备读取参数")
+        self.btn_read.setToolTip("发送读取命令, 用设备当前参数回填各输入框")
+        cv.addWidget(self.btn_read)
         lay.addWidget(cf)
 
         # ---- 保护阈值 ----
         cf, cv = card("保护阈值")
         for key, label, default, lo, hi, step, dec in (
-            ("uv", "欠压 V", 0.0, 0.0, 60.0, 0.001, 3),
-            ("ov", "过压 V", 0.0, 0.0, 60.0, 0.001, 3),
+            ("uv", "欠压 V", _FW.get_float("protect_under_voltage", 9.0), 0.0, 60.0, 0.001, 3),
+            ("ov", "过压 V", _FW.get_float("protect_over_voltage", 15.0), 0.0, 60.0, 0.001, 3),
         ):
             s = Stepper(label, default, lo, hi, step, dec)
             self.steppers[key] = s
@@ -637,7 +649,12 @@ class ChannelDialog(QDialog):
             src = "已自动绑定固件 vofa.c · %d 通道" % cnt
         else:
             src = "未找到 vofa.c, 使用内置默认通道 · %d 通道" % NCH
-        self.lbl_src = QLabel("通道来源: " + src)
+        text = "通道来源: " + src
+        extra = _FW.summary()
+        if extra:
+            text += "   |   参数来源: " + extra
+        self.lbl_src = QLabel(text)
+        self.lbl_src.setWordWrap(True)
         self.lbl_src.setStyleSheet("color:%s;background:transparent;" % theme.FG_FAINT)
         if path:
             self.lbl_src.setToolTip(path)

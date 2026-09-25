@@ -6,14 +6,15 @@ import os
 import time
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QStandardPaths
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider,
-    QSplitter, QLineEdit, QToolButton, QFrame, QMessageBox, QButtonGroup,
+    QSplitter, QLineEdit, QToolButton, QFrame, QMessageBox, QButtonGroup, QScrollArea,
 )
 
 from . import theme
-from .channels import ChannelModel, FAULT_TEXT, NCH, CHANNELS, index_of
+from .channels import ChannelModel, FAULT_TEXT, NCH, CHANNELS, index_of, STATUS_ITEMS
+from .fwconfig import load as _load_fw
 from .buffers import DataStore
 from .protocol import CMD, MODES
 from .serial_io import SerialIO, HAVE_SERIAL
@@ -24,15 +25,20 @@ from .recorder import Recorder, write_csv, default_dir, make_filename
 CMD_NAME = {v: k for k, v in CMD.items()}
 
 CFG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scope_cfg.json")
-DEFAULT_FS = 5000.0        # 固件 VOFA 采样率 = 40kHz/8
 EDGE = 5
 
+# 从固件源码自动读取限幅/采样率 (读不到用默认)
+_FW = _load_fw()
+_CUR_LIM = _FW.get_float("current_limit", 8.0)
+_VEL_LIM = _FW.get_float("velocity_limit", 30.0)
+DEFAULT_FS = _FW.fs or 5000.0
+
 TARGET_DEFS = {
-    # (标签, 命令键, 最小, 最大, 步长) —— 与固件单位/限幅一致
-    0: ("目标电流 (A)",    "torque",   -8.0,    8.0,    0.001),  # current_limit 默认 8A
-    1: ("目标速度 (rps)",  "velocity", -30.0,   30.0,   0.001),  # velocity_limit 默认 30rps
-    2: ("目标位置 (rad)",  "position", 0.0,     6.2832, 0.001),  # 0~2π rad
-    3: ("目标位置 (rad)",  "position", 0.0,     6.2832, 0.001),  # 轨迹模式同样走位置
+    # (标签, 命令键, 最小, 最大, 步长) —— 量程取自固件 current_limit / velocity_limit
+    0: ("目标电流 (A)",    "torque",   -_CUR_LIM, _CUR_LIM, 0.001),
+    1: ("目标速度 (rps)",  "velocity", -_VEL_LIM, _VEL_LIM, 0.001),
+    2: ("目标位置 (rad)",  "position", 0.0,      6.2832,   0.001),
+    3: ("目标位置 (rad)",  "position", 0.0,      6.2832,   0.001),
 }
 
 
@@ -59,19 +65,25 @@ class MainWindow(QWidget):
         self.io = SerialIO()
         self._enabled = False
         self._mode = None
+        self._cur_lim = float(self.cfg.get("cur_limit", _CUR_LIM))
+        self._vel_lim = float(self.cfg.get("vel_limit", _VEL_LIM))
         self._frozen = False
         self._last_tx = 0.0
         self._last_fault = 0
         self._fault_idx = index_of("fault")
+        self._cfg_wait_until = 0.0
         self._demo_t = 0.0
         self._stat_t = time.time()
         self._stat_frames = 0
         self._resize_edge = None
         self._resize_geo = None
+        self._is_max = False
+        self._normal_geo = None
 
         self._build()
         self._wire()
         self.left.apply_stepper_cfg(self.cfg.get("steppers") or {})
+        self._update_target_defs()
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
@@ -90,6 +102,8 @@ class MainWindow(QWidget):
         outer.setSpacing(0)
         root = QFrame()
         root.setObjectName("Root")
+        self._outer = outer
+        self._root = root
         root.setStyleSheet("QFrame#Root{background:%s;border:1px solid %s;border-radius:8px;}" %
                            (theme.BG, theme.BORDER))
         outer.addWidget(root)
@@ -106,7 +120,13 @@ class MainWindow(QWidget):
         body.setContentsMargins(8, 8, 8, 8)
         body.setSpacing(8)
         self.left = LeftPanel()
-        body.addWidget(self.left)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        left_scroll.setFrameShape(QFrame.NoFrame)
+        left_scroll.setWidget(self.left)
+        left_scroll.setFixedWidth(318)
+        body.addWidget(left_scroll)
         body.addWidget(self._build_center(), 1)
         self.right = RightDataPanel(self.model)
         body.addWidget(self.right)
@@ -235,8 +255,9 @@ class MainWindow(QWidget):
 
         self.left.btn_connect.clicked.connect(self.connect)
         self.left.btn_disconnect.clicked.connect(self.disconnect)
-        self.left.btn_save.clicked.connect(lambda: self.send(CMD["save"]))
+        self.left.btn_save.clicked.connect(self.save_to_flash)
         self.left.btn_reset.clicked.connect(self.reset_defaults)
+        self.left.btn_read.clicked.connect(self.request_config)
         for key, s in self.left.steppers.items():
             s.changed.connect(lambda v, k=key: self._stepper_send(k, v))
             s.sent.connect(lambda v, k=key: self.send(CMD[k], v))
@@ -301,6 +322,8 @@ class MainWindow(QWidget):
         # 连接后把当前选择的运行模式下发给固件 (未选择模式则不发送)
         if self._mode is not None:
             self.send(CMD["opmode"], float(self._mode))
+        # 连接后自动读取一次设备参数
+        self.request_config()
 
     def disconnect(self):
         self.io.close()
@@ -352,6 +375,59 @@ class MainWindow(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if r == QMessageBox.Yes:
             self.send(CMD["reset"])
+
+    # ================= 读取/保存设备参数 =================
+    def save_to_flash(self):
+        if not self.io.is_open():
+            return
+        # 先把界面当前参数全部下发, 再保存, 确保 Flash 与界面一致
+        for key, s in self.left.steppers.items():
+            self.send(CMD[key], s.value())
+        self.send(CMD["save"])
+        self.statusbar.flash("已下发当前参数并保存到 Flash")
+
+    def request_config(self):
+        if not self.io.is_open():
+            return
+        self.send(CMD["getcfg"])
+        self._cfg_wait_until = time.time() + 1.5
+        self.statusbar.flash("正在读取设备参数…")
+
+    def _update_target_defs(self):
+        TARGET_DEFS[0] = ("目标电流 (A)", "torque", -self._cur_lim, self._cur_lim, 0.001)
+        TARGET_DEFS[1] = ("目标速度 (rps)", "velocity", -self._vel_lim, self._vel_lim, 0.001)
+        if self._mode is not None:
+            self._apply_target(self._mode)
+
+    def _apply_device_config(self, line):
+        if not line.startswith("$FOCFG"):
+            return
+        self._cfg_wait_until = 0.0
+        body = line.split(",", 1)[1] if "," in line else ""
+        kv = {}
+        for part in body.split(","):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                try:
+                    kv[k.strip().upper()] = float(v)
+                except ValueError:
+                    pass
+        mapping = {"CURKP": "curkp", "CURKI": "curki", "CURBW": "curbw",
+                   "VELKP": "velkp", "VELKI": "velki", "POSKP": "poskp",
+                   "UV": "uv", "OV": "ov"}
+        got = 0
+        for k, sk in mapping.items():
+            if k in kv and sk in self.left.steppers:
+                self.left.steppers[sk].set_value(kv[k])
+                got += 1
+        if "CLIM" in kv:
+            self._cur_lim = max(0.001, kv["CLIM"])
+        if "VLIM" in kv:
+            self._vel_lim = max(0.001, kv["VLIM"])
+        if "CLIM" in kv or "VLIM" in kv:
+            self._update_target_defs()
+        self._save_cfg_later()
+        self.statusbar.flash("已读取设备参数: %d 项" % got)
 
     def enable(self):
         self._set_enabled(True)
@@ -572,6 +648,11 @@ class MainWindow(QWidget):
             self.io.close()
             self._set_conn_ui(False)
             self.title.set_connected(False, "已断开 · 可重连")
+        for line in self.io.poll_config():
+            self._apply_device_config(line)
+        if self._cfg_wait_until and time.time() > self._cfg_wait_until:
+            self._cfg_wait_until = 0.0
+            self.statusbar.flash("未收到设备参数回应 (固件可能未烧录带读取命令的版本)")
         frames = self._collect()
         # 录制独立于“曲线冻结”: 冻结只停绘图, 不影响记录
         if self.recorder.is_active():
@@ -650,12 +731,13 @@ class MainWindow(QWidget):
             self.lbl_fault.setText(txt)
             self.lbl_fault.setStyleSheet("color:%s;background:transparent;font-weight:600;" %
                                          (theme.GREEN if code == 0 else theme.RED))
-        # 状态灯
+        # 状态灯 (故障码来自固件解析)
         w = self.left.status_widgets
         self._set_dot(w["enabled"], theme.GREEN if self._enabled else theme.FG_FAINT)
         self._set_dot(w["ok"], theme.GREEN if code == 0 else theme.FG_FAINT)
-        for key, codev in (("f_oc", 1), ("f_ov", 2), ("f_uv", 3), ("f_adc", 4)):
-            self._set_dot(w[key], theme.RED if code == codev else theme.FG_FAINT)
+        for key, _name, kind in STATUS_ITEMS:
+            if isinstance(kind, int):
+                self._set_dot(w[key], theme.RED if code == kind else theme.FG_FAINT)
 
     @staticmethod
     def _set_dot(lb, color):
@@ -679,11 +761,15 @@ class MainWindow(QWidget):
 
     def save_cfg(self):
         g = self.geometry()
+        if self._is_max and self._normal_geo is not None:
+            g = self._normal_geo
         cfg = {
             "window": [g.x(), g.y(), g.width(), g.height()],
             "max_span": self.max_span,
             "cache_span": self.cache_span,
             "fs": self.fs,
+            "cur_limit": self._cur_lim,
+            "vel_limit": self._vel_lim,
             "record_max_sec": self.record_max_sec,
             "split": self.split.sizes(),
             "channels": self.model.to_cfg(),
@@ -700,14 +786,52 @@ class MainWindow(QWidget):
         if isinstance(w, list) and len(w) == 4:
             try:
                 self.setGeometry(int(w[0]), int(w[1]), int(w[2]), int(w[3]))
+                self._clamp_to_screen()
                 return
             except Exception:
                 pass
         self.resize(1360, 840)
+        self._clamp_to_screen()
+
+    def _clamp_to_screen(self):
+        """把窗口限制在当前屏幕的工作区内 (不超出任务栏)."""
+        g = self.geometry()
+        scr = QGuiApplication.screenAt(g.center()) or QGuiApplication.primaryScreen()
+        if scr is None:
+            return
+        a = scr.availableGeometry()
+        w = min(g.width(), a.width())
+        h = min(g.height(), a.height())
+        x = min(max(g.x(), a.x()), a.x() + a.width() - w)
+        y = min(max(g.y(), a.y()), a.y() + a.height() - h)
+        if (x, y, w, h) != (g.x(), g.y(), g.width(), g.height()):
+            self.setGeometry(x, y, w, h)
 
     # ================= 无边框缩放 =================
     def _toggle_max(self):
-        self.showNormal() if self.isMaximized() else self.showMaximized()
+        if self._is_max:
+            self.restore_from_max()
+        else:
+            self._normal_geo = self.geometry()
+            self._is_max = True
+            scr = self.screen()
+            if scr is not None:
+                self.setGeometry(scr.availableGeometry())   # 工作区, 不含任务栏
+            self._outer.setContentsMargins(0, 0, 0, 0)
+            self._root.setStyleSheet(
+                "QFrame#Root{background:%s;border:none;border-radius:0;}" % theme.BG)
+
+    def restore_from_max(self):
+        if not self._is_max:
+            return
+        self._is_max = False
+        self._outer.setContentsMargins(EDGE, EDGE, EDGE, EDGE)
+        self._root.setStyleSheet(
+            "QFrame#Root{background:%s;border:1px solid %s;border-radius:8px;}" %
+            (theme.BG, theme.BORDER))
+        if self._normal_geo is not None:
+            self.setGeometry(self._normal_geo)
+        self._clamp_to_screen()
 
     def _edge_at(self, pos):
         r = self.rect()

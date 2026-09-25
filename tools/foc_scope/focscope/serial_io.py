@@ -4,7 +4,7 @@ import queue
 import threading
 import time
 
-from .protocol import JustfloatParser, pack_cmd
+from .protocol import JustfloatParser, pack_cmd, CFG_MAGIC
 
 try:
     import serial
@@ -21,6 +21,7 @@ class SerialIO:
         self.thread = None
         self.running = False
         self.q = queue.Queue(maxsize=20000)
+        self.cfg_q = queue.Queue()
         self._lock = threading.Lock()
         self._parser = JustfloatParser()
         self.rx_bytes = 0
@@ -104,8 +105,48 @@ class SerialIO:
             return False
 
     # ---------- 接收 ----------
+    def _feed(self, data):
+        for vals in self._parser.feed(data):
+            try:
+                self.q.put_nowait(vals)
+            except queue.Full:
+                self.dropped += 1
+
+    def _ingest(self, buf, data):
+        """并入新数据, 先剥离 $FOCFG 配置行, 其余按 Justfloat 解析."""
+        buf += data
+        m = len(CFG_MAGIC)
+        while True:
+            idx = buf.find(CFG_MAGIC)
+            if idx < 0:
+                # 仅在末尾可能是 magic 前缀时保留少量字节, 其余立即解析
+                hold = 0
+                for k in range(min(m - 1, len(buf)), 0, -1):
+                    if buf[-k:] == CFG_MAGIC[:k]:
+                        hold = k
+                        break
+                if hold:
+                    self._feed(bytes(buf[:-hold]))
+                    del buf[-hold:]
+                else:
+                    if buf:
+                        self._feed(bytes(buf))
+                        del buf[:]
+                break
+            if idx > 0:
+                self._feed(bytes(buf[:idx]))
+                del buf[:idx]
+            end = buf.find(b"\n")
+            if end < 0:
+                break
+            line = bytes(buf[:end]).decode("ascii", "ignore").strip()
+            del buf[:end + 1]
+            if line:
+                self.cfg_q.put(line)
+
     def _reader(self):
         self._parser.reset()
+        buf = bytearray()
         while self.running and self.ser:
             try:
                 data = self.ser.read(4096)
@@ -115,11 +156,16 @@ class SerialIO:
             if not data:
                 continue
             self.rx_bytes += len(data)
-            for vals in self._parser.feed(data):
-                try:
-                    self.q.put_nowait(vals)
-                except queue.Full:
-                    self.dropped += 1
+            self._ingest(buf, data)
+
+    def poll_config(self):
+        out = []
+        while True:
+            try:
+                out.append(self.cfg_q.get_nowait())
+            except queue.Empty:
+                break
+        return out
 
     def poll(self, maxn=20000):
         out = []

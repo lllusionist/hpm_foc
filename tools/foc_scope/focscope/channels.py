@@ -42,8 +42,17 @@ CHANNELS = [(s, d, u, theme.CURVE[i % len(theme.CURVE)])
 NCH = len(CHANNELS)
 FROM_VOFA = _parsed is not None
 
-# 故障码 (固件 foc.h FOC_FAULT_*)
-FAULT_TEXT = {0: "无", 1: "相过流", 2: "母线过压", 3: "母线欠压", 4: "ADC故障"}
+# 故障码/状态灯 (自动从固件 foc.h 的 FOC_FAULT_* 读取, 读不到用内置表)
+from .fwconfig import load as _load_fw
+
+_FW = _load_fw()
+_DEFAULT_FAULT_TEXT = {0: "无", 1: "相过流", 2: "母线过压", 3: "母线欠压", 4: "ADC故障"}
+FAULT_TEXT = dict(_FW.faults) if _FW.faults else dict(_DEFAULT_FAULT_TEXT)
+
+
+def _fault_text(suffix, default_code, default_text):
+    code = _FW.fault_code(suffix, default_code)
+    return _FW.faults.get(code, default_text)
 
 
 def index_of(name):
@@ -65,15 +74,14 @@ def indices_of(*names):
             out.append(i)
     return out
 
-# 驱动器状态灯: (键, 显示名, 类型)
-#   类型 enabled=本地使能状态; fault=等于某故障码; ok=fault==0
+# 驱动器状态灯: (键, 显示名, 类型)  类型 int=故障码; str=特殊含义
 STATUS_ITEMS = [
     ("enabled", "电机使能", "enabled"),
     ("ok",      "运行正常", "ok"),
-    ("f_oc",    "相过流",   1),
-    ("f_ov",    "母线过压", 2),
-    ("f_uv",    "母线欠压", 3),
-    ("f_adc",   "ADC故障",  4),
+    ("f_oc",  _fault_text("PHASE_OC", 1, "相过流"),        _FW.fault_code("PHASE_OC", 1)),
+    ("f_ov",  _fault_text("OVER_VOLTAGE", 2, "母线过压"),  _FW.fault_code("OVER_VOLTAGE", 2)),
+    ("f_uv",  _fault_text("UNDER_VOLTAGE", 3, "母线欠压"), _FW.fault_code("UNDER_VOLTAGE", 3)),
+    ("f_adc", _fault_text("ADC", 4, "ADC故障"),            _FW.fault_code("ADC", 4)),
 ]
 
 
