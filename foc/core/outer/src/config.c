@@ -5,7 +5,7 @@
 #include "flash.h"
 
 tConfig Config;
-#define debug 1
+#define debug 0
 
 /*
  * 标定开关 (debug=1): 关掉所有斜坡/前馈, 便于用阶跃响应标定外环。
