@@ -307,8 +307,8 @@ class PlotWidget(QWidget):
             ph = max(1, y1 - y0)
             dx = ev.position().x() - self._drag[0]
             dy = ev.position().y() - self._drag[1]
-            # 跟随状态下拖动只改 Y 缩放, 不平移时间 (避免暂停实时滚动)
-            if not self.follow:
+            # 跟随中(未暂停)拖动只改 Y 缩放; 已暂停(冻结)或已平移时, 左右拖动平移时间
+            if self.frozen or not self.follow:
                 self.t_right = self._drag[2] - dx / pw * self.t_span
             span = self._drag[4] - self._drag[3]
             self.y_min = self._drag[3] + dy / ph * span
