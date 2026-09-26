@@ -31,17 +31,17 @@ void CONTROLLER_reset(void)
 {
     taskENTER_CRITICAL();
 
-    float pos_meas = encoder.pos;
+    float th_meas = (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
 
-    Controller.input_position = pos_meas;
+    Controller.input_position = th_meas;
     Controller.input_velocity = 0.0f;
     Controller.input_current  = 0.0f;
 
-    Controller.input_position_buffer = pos_meas;
+    Controller.input_position_buffer = th_meas;
     Controller.input_velocity_buffer = 0.0f;
     Controller.input_current_buffer  = 0.0f;
 
-    Controller.pos_setpoint = pos_meas;
+    Controller.pos_setpoint = th_meas;
     Controller.vel_setpoint = 0.0f;
     Controller.cur_setpoint = 0.0f;
 
@@ -166,7 +166,6 @@ void CONTROLLER_loop(void)
         return;
     }
 
-    const float pos_meas       = encoder.pos;
     const float vel_meas       = encoder.vel; // rps
     float       vel_des        = 0.0f;
 
@@ -194,17 +193,19 @@ void CONTROLLER_loop(void)
 
     case CONTROL_MODE_POSITION_FILTER:
     case CONTROL_MODE_POSITION_PROFILE: {
-        // 二阶位置跟踪滤波
-        float delta_pos = Controller.input_position - Controller.pos_setpoint;
-        float delta_vel = Controller.input_velocity - Controller.vel_setpoint;
-        float accel     = Controller.input_pos_filter_kp * delta_pos +
-                      Controller.input_pos_filter_ki * delta_vel;
-        Controller.cur_setpoint = Config.current_ff_gain * accel;
-        Controller.vel_setpoint += CTRL_PERIOD * accel;
-        Controller.pos_setpoint += CTRL_PERIOD * Controller.vel_setpoint;
+        // 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad
+        float th_meas = (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
+        float perr    = Controller.input_position - th_meas;
+        while (perr > 3.14159265f)  perr -= 6.2831853f;   // 最短路径卷绕到 [-π, π]
+        while (perr < -3.14159265f) perr += 6.2831853f;
+
+        Controller.cur_setpoint = 0.0f;
+        Controller.vel_setpoint = 0.0f;
+        Controller.pos_setpoint = th_meas;
+        vel_des = Config.pos_p_gain * perr;               // 位置 P -> 速度目标
 
         if (!Controller.target_reached) {
-            if (ABS(Controller.input_position - pos_meas) < Config.target_position_window) {
+            if (ABS(perr) < Config.target_position_window) {
                 Controller.target_reached = true;
             }
         }
@@ -214,12 +215,9 @@ void CONTROLLER_loop(void)
         break;
     }
 
-    vel_des = Controller.vel_setpoint;
-
-    // 位置环 P
-    if (Controller.ctrl_mode >= CONTROL_MODE_POSITION_FILTER) {
-        float pos_err = Controller.pos_setpoint - pos_meas;
-        vel_des += Config.pos_p_gain * pos_err;
+    // 速度模式用轨迹速度; 位置模式的 vel_des 已在上面按单圈角度 P 给出
+    if (Controller.ctrl_mode < CONTROL_MODE_POSITION_FILTER) {
+        vel_des = Controller.vel_setpoint;
     }
 
     // 速度限幅

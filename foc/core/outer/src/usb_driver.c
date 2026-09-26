@@ -66,8 +66,9 @@ void USB_parse_frame(UsbFrame *frame)
 	case USB_CMD_SET_POSITION: {
 		float position = data_to_float(&frame->data[0]);
 
-		if (position < 0.0f) position = 0.0f;
-		if (position > 2.0f * 3.14159265f) position = 2.0f * 3.14159265f;
+		/* 位置为单圈机械角(rad), 允许正负, 限幅到 [-π, π] */
+		if (position > 3.14159265f) position = 3.14159265f;
+		if (position < -3.14159265f) position = -3.14159265f;
 
 		if (Config.invert_motor_dir) {
 			Controller.input_position_buffer = -position;
