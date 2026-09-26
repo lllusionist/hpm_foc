@@ -304,10 +304,15 @@ class Stepper(QWidget):
             pass
 
     def set_value(self, v):
+        """回填设备值; 若超出现有量程则自动扩大量程, 不夹死显示."""
         try:
-            v = min(self.hi, max(self.lo, float(v)))
+            v = float(v)
         except (TypeError, ValueError):
             return
+        if v > self.hi:
+            self.hi = v
+        if v < self.lo:
+            self.lo = v
         self.edit.setText(num(v, self.dec))
 
     def open_range_dialog(self):
@@ -419,8 +424,8 @@ class LeftPanel(QWidget):
         cf, cv = card("驱动器参数")
         self.steppers = {}
         params = [
-            ("curkp", "电流环Kp", _FW.get_float("current_kp", 0.0), 0.0, 100.0, 0.001, 3),
-            ("curki", "电流环Ki", _FW.get_float("current_ki", 0.0), 0.0, 10000.0, 0.001, 3),
+            ("curkp", "电流环Kp", _FW.get_float("current_kp", 0.0), 0.0, 100000.0, 0.001, 3),
+            ("curki", "电流环Ki", _FW.get_float("current_ki", 0.0), 0.0, 10000000.0, 0.001, 3),
             ("curbw", "电流带宽Hz", _FW.get_float("current_ctrl_bw", 1000.0), 0.0, 5000.0, 0.001, 3),
             ("velkp", "速度环Kp", _FW.get_float("vel_p_gain", 0.10), 0.0, 100.0, 0.001, 3),
             ("velki", "速度环Ki", _FW.get_float("vel_i_gain", 0.01), 0.0, 100.0, 0.001, 3),

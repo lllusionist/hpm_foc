@@ -37,8 +37,8 @@ TARGET_DEFS = {
     # (标签, 命令键, 最小, 最大, 步长) —— 量程取自固件 current_limit / velocity_limit
     0: ("目标电流 (A)",    "torque",   -_CUR_LIM, _CUR_LIM, 0.001),
     1: ("目标速度 (rps)",  "velocity", -_VEL_LIM, _VEL_LIM, 0.001),
-    2: ("目标位置 (rad)",  "position", 0.0,      6.2832,   0.001),
-    3: ("目标位置 (rad)",  "position", 0.0,      6.2832,   0.001),
+    2: ("目标角度 (rad)",  "position", -3.14159, 3.14159, 0.001),   # 单圈角度, 0 居中
+    3: ("目标角度 (rad)",  "position", -3.14159, 3.14159, 0.001),
 }
 
 
@@ -383,9 +383,12 @@ class MainWindow(QWidget):
     def save_to_flash(self):
         if not self.io.is_open():
             return
-        # 先把界面当前参数全部下发, 再保存, 确保 Flash 与界面一致
-        for key, s in self.left.steppers.items():
-            self.send(CMD[key], s.value())
+        # 先把界面当前参数全部下发, 再保存, 确保 Flash 与界面一致。
+        # 电流带宽会按 R/L 重算 Kp/Ki, 所以先发带宽, 再发电流环 Kp/Ki(手动值优先)。
+        keys = list(self.left.steppers.keys())
+        order = (["curbw"] if "curbw" in keys else []) + [k for k in keys if k != "curbw"]
+        for key in order:
+            self.send(CMD[key], self.left.steppers[key].value())
         self.send(CMD["save"])
         self.statusbar.flash("已下发当前参数并保存到 Flash")
 
@@ -430,7 +433,11 @@ class MainWindow(QWidget):
         if "CLIM" in kv or "VLIM" in kv:
             self._update_target_defs()
         self._save_cfg_later()
-        self.statusbar.flash("已读取设备参数: %d 项" % got)
+        kvk = kv.get("CURKI")
+        msg = "已读取设备参数: %d 项" % got
+        if kvk is not None:
+            msg += " (设备Ki=%g)" % kvk
+        self.statusbar.flash(msg)
 
     def enable(self):
         self._set_enabled(True)

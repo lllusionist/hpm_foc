@@ -61,13 +61,14 @@ class PlotWidget(QWidget):
                 s = self.store.sample_at(c, k)
                 if s is not None:
                     v = s * self.model.gain[c] + self.model.off[c]
-                    if v < lo:
-                        lo = v
-                    if v > hi:
-                        hi = v
-                    found = True
+                    if math.isfinite(v):
+                        if v < lo:
+                            lo = v
+                        if v > hi:
+                            hi = v
+                        found = True
                 k += stride
-        if not found:
+        if not found or not (math.isfinite(lo) and math.isfinite(hi)):
             return
         if hi - lo < 1e-9:
             hi += 0.5
@@ -109,7 +110,11 @@ class PlotWidget(QWidget):
         return LM, TM, max(LM + 10, w - RM), max(TM + 10, h - BM)
 
     def _nice_step(self, span, px):
+        if not math.isfinite(span) or span <= 0:
+            return 1.0
         rough = span / max(2.0, px / 70.0)
+        if not math.isfinite(rough) or rough <= 0:
+            return 1.0
         p = 10.0 ** math.floor(math.log10(max(1e-12, rough)))
         m = rough / p
         m = 1.0 if m < 1.5 else 2.0 if m < 3 else 5.0 if m < 7 else 10.0
@@ -152,8 +157,15 @@ class PlotWidget(QWidget):
             self.t_right = self.store.t_right()
         if self.t_span > self.max_span:
             self.t_span = self.max_span
+        if not (math.isfinite(self.t_span) and self.t_span > 0):
+            self.t_span = 0.5
+        if not math.isfinite(self.t_right):
+            self.t_right = self.t_span
         tL = self.t_right - self.t_span
         ymin, ymax = self.y_min, self.y_max
+        if not (math.isfinite(ymin) and math.isfinite(ymax) and ymax > ymin):
+            ymin, ymax = -1.0, 1.0
+            self.y_min, self.y_max = ymin, ymax
         yspan = max(1e-12, ymax - ymin)
         ysc = ph / yspan
         xsc = pw / max(1e-12, self.t_span)
@@ -174,13 +186,15 @@ class PlotWidget(QWidget):
                 if envelope:
                     for imn, vmin, imx, vmax in self.store.envelope(c, k0, k1, ncol):
                         for ki, vi in ((imn, vmin), (imx, vmax)):
-                            poly.append(QPointF(x0 + (ki / self.store.fs - tL) * xsc,
-                                                y1 - (vi * g + o - ymin) * ysc))
+                            yy = y1 - (vi * g + o - ymin) * ysc
+                            if math.isfinite(yy):
+                                poly.append(QPointF(x0 + (ki / self.store.fs - tL) * xsc, yy))
                 else:
                     base_k, vals = self.store.raw(c, k0, k1)
                     for j, vv in enumerate(vals):
-                        poly.append(QPointF(x0 + ((base_k + j) / self.store.fs - tL) * xsc,
-                                            y1 - (vv * g + o - ymin) * ysc))
+                        yy = y1 - (vv * g + o - ymin) * ysc
+                        if math.isfinite(yy):
+                            poly.append(QPointF(x0 + ((base_k + j) / self.store.fs - tL) * xsc, yy))
                 if poly.size() >= 2:
                     p.drawPolyline(poly)
             p.restore()
@@ -196,33 +210,40 @@ class PlotWidget(QWidget):
         p.setPen(QPen(QColor(theme.PLOT_GRID), 1))
         font = QFont(theme.MONO, 8)
         p.setFont(font)
-        t = math.ceil(tL / tstep) * tstep
-        first = True
-        while t <= self.t_right + 1e-12:
-            gx = x0 + (t - tL) / self.t_span * pw
-            p.setPen(self._pen(theme.PLOT_GRID, 1.0))
-            p.drawLine(QPointF(gx, y0), QPointF(gx, y1))
-            p.setPen(self._pen(theme.FG_DIM, 1.0))
-            label = self._fmt(t, tstep)
-            if first:
-                label = label + " s"
-                first = False
-            p.drawText(QRectF(gx - 40, y0 - TM + 2, 80, TM - 2),
-                       Qt.AlignHCenter | Qt.AlignVCenter, label)
-            p.drawText(QRectF(gx - 40, y1 + 2, 80, BM - 2),
-                       Qt.AlignHCenter | Qt.AlignVCenter, self._fmt(t, tstep))
-            t += tstep
+        if math.isfinite(tstep) and tstep > 0 and math.isfinite(tL) \
+                and math.isfinite(self.t_right) and self.t_span > 0:
+            t = math.ceil(tL / tstep) * tstep
+            first = True
+            n = 0
+            while t <= self.t_right + 1e-12 and n < 200:
+                gx = x0 + (t - tL) / self.t_span * pw
+                p.setPen(self._pen(theme.PLOT_GRID, 1.0))
+                p.drawLine(QPointF(gx, y0), QPointF(gx, y1))
+                p.setPen(self._pen(theme.FG_DIM, 1.0))
+                label = self._fmt(t, tstep)
+                if first:
+                    label = label + " s"
+                    first = False
+                p.drawText(QRectF(gx - 40, y0 - TM + 2, 80, TM - 2),
+                           Qt.AlignHCenter | Qt.AlignVCenter, label)
+                p.drawText(QRectF(gx - 40, y1 + 2, 80, BM - 2),
+                           Qt.AlignHCenter | Qt.AlignVCenter, self._fmt(t, tstep))
+                t += tstep
+                n += 1
 
         ystep = self._nice_step(ymax - ymin, y1 - y0)
-        v = math.ceil(ymin / ystep) * ystep
-        while v <= ymax + 1e-12:
-            gy = y1 - (v - ymin) / (ymax - ymin) * (y1 - y0)
-            p.setPen(self._pen(theme.PLOT_GRID, 1.0))
-            p.drawLine(QPointF(x0, gy), QPointF(x1, gy))
-            p.setPen(self._pen(theme.FG_DIM, 1.0))
-            p.drawText(QRectF(x1 + 6, gy - 9, RM - 8, 18),
-                       Qt.AlignLeft | Qt.AlignVCenter, self._fmt(v, ystep))
-            v += ystep
+        if math.isfinite(ystep) and ystep > 0:
+            v = math.ceil(ymin / ystep) * ystep
+            n = 0
+            while v <= ymax + 1e-12 and n < 200:
+                gy = y1 - (v - ymin) / (ymax - ymin) * (y1 - y0)
+                p.setPen(self._pen(theme.PLOT_GRID, 1.0))
+                p.drawLine(QPointF(x0, gy), QPointF(x1, gy))
+                p.setPen(self._pen(theme.FG_DIM, 1.0))
+                p.drawText(QRectF(x1 + 6, gy - 9, RM - 8, 18),
+                           Qt.AlignLeft | Qt.AlignVCenter, self._fmt(v, ystep))
+                v += ystep
+                n += 1
 
     def _draw_cursor(self, p, x0, y0, x1, y1, tL, xsc, ysc, ymin):
         if not self._cursor or self.store.total == 0:
@@ -455,7 +476,7 @@ class OverviewWidget(QWidget):
                     lo = a
                 if b > hi:
                     hi = b
-        if lo == float("inf"):
+        if (lo == float("inf")) or not (math.isfinite(lo) and math.isfinite(hi)):
             lo, hi = -1.0, 1.0
         if hi - lo < 1e-9:
             hi += 1.0
