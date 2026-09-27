@@ -677,9 +677,11 @@ class MainWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "频谱不可用", str(e))
             return
-        if getattr(self, "_spec_dlg", None) is not None:
-            self._spec_dlg.raise_()
-            self._spec_dlg.activateWindow()
+        d = getattr(self, "_spec_dlg", None)
+        if d is not None:
+            d.show()
+            d.raise_()
+            d.activateWindow()
             return
         self._spec_dlg = SpectrumDialog(self.store, self.model, self)
         self._spec_dlg.show()
@@ -690,9 +692,11 @@ class MainWindow(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "矢量图不可用", str(e))
             return
-        if getattr(self, "_vec_dlg", None) is not None:
-            self._vec_dlg.raise_()
-            self._vec_dlg.activateWindow()
+        d = getattr(self, "_vec_dlg", None)
+        if d is not None:
+            d.show()
+            d.raise_()
+            d.activateWindow()
             return
         self._vec_dlg = VectorDialog(self.store, self.model, self)
         self._vec_dlg.show()

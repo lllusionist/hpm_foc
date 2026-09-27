@@ -77,8 +77,9 @@ class SpectrumCanvas(_Canvas):
             dmin = min(dmin, float(db[1:].min()) if len(db) > 1 else -120.0)
             dmax = max(dmax, float(db.max()))
         fmax = fmax or (self.store.fs / 2.0)
-        dmax = min(dmax, 60.0)
-        dmin = max(dmin, dmax - 120.0)
+        if (not math.isfinite(dmax)) or dmax <= dmin:
+            dmax, dmin = 0.0, -90.0
+        dmin = max(dmin, dmax - 100.0)
         self.freq_max, self.db_min, self.db_max = fmax, dmin, dmax
 
         # grid
@@ -102,6 +103,8 @@ class SpectrumCanvas(_Canvas):
         p.drawText(QRectF(x0 + 6, y0 + 2, 240, 16), Qt.AlignLeft, "频谱 (单边, Hann)")
 
         dspan = max(1e-6, dmax - dmin)
+        p.save()
+        p.setClipRect(QRectF(x0, y0, pw, ph))
         for c, fr, db in curves:
             p.setPen(QPen(QColor(self.model.color[c]), 1.0))
             poly = QPolygonF()
@@ -112,6 +115,7 @@ class SpectrumCanvas(_Canvas):
                     poly.append(QPointF(xx, yy))
             if poly.size() >= 2:
                 p.drawPolyline(poly)
+        p.restore()
 
         # legend
         ty = y0 + 20
@@ -146,6 +150,15 @@ class SpectrumDialog(QDialog):
     def _refresh(self):
         self.canvas.compute()
         self.canvas.update()
+
+    def showEvent(self, ev):
+        if not self._timer.isActive():
+            self._timer.start(800)
+        super().showEvent(ev)
+
+    def closeEvent(self, ev):
+        self._timer.stop()
+        super().closeEvent(ev)
 
 
 class VectorCanvas(_Canvas):
@@ -212,6 +225,8 @@ class VectorCanvas(_Canvas):
         p.drawText(QRectF(x0, y0 - TM, 200, TM), Qt.AlignLeft, ylabel + "  (X-Y)")
 
         if xs is not None and len(xs) > 1:
+            p.save()
+            p.setClipRect(QRectF(x0, y0, pw, ph))
             p.setPen(QPen(QColor(theme.ACCENT), 1.0))
             poly = QPolygonF()
             n = len(xs)
@@ -226,10 +241,10 @@ class VectorCanvas(_Canvas):
             if poly.size() >= 2:
                 p.drawPolyline(poly)
             lx, ly = float(xs[-1]) * sc, float(ys[-1]) * sc
-            if abs(lx) < pw and abs(ly) < ph:
-                p.setBrush(QBrush(QColor(theme.RED)))
-                p.setPen(Qt.NoPen)
-                p.drawEllipse(QPointF(cx + lx, cy - ly), 3.5, 3.5)
+            p.setBrush(QBrush(QColor(theme.RED)))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QPointF(cx + lx, cy - ly), 3.5, 3.5)
+            p.restore()
 
         p.setPen(QPen(QColor(theme.BORDER), 1))
         p.setBrush(Qt.NoBrush)
@@ -250,6 +265,7 @@ class VectorDialog(QDialog):
         self.cmb.addItems(["d-q 电流", "α-β 电流"])
         self.cmb.currentIndexChanged.connect(self._on_mode)
         row.addWidget(self.cmb)
+        self.cmb.setCurrentIndex(1)          # 默认 α-β (电流空间矢量, 圆形)
         row.addStretch(1)
         v.addLayout(row)
         self._timer = QTimer(self)
@@ -260,3 +276,12 @@ class VectorDialog(QDialog):
         self.canvas.mode = "ab" if idx == 1 else "dq"
         self.canvas.span = 1.0
         self.canvas.update()
+
+    def showEvent(self, ev):
+        if not self._timer.isActive():
+            self._timer.start(200)
+        super().showEvent(ev)
+
+    def closeEvent(self, ev):
+        self._timer.stop()
+        super().closeEvent(ev)
