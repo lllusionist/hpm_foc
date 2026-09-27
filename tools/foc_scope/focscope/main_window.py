@@ -10,6 +10,7 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider,
     QSplitter, QLineEdit, QToolButton, QFrame, QMessageBox, QButtonGroup, QScrollArea,
+    QFileDialog,
 )
 
 from . import theme
@@ -129,7 +130,7 @@ class MainWindow(QWidget):
         left_scroll.setFixedWidth(318)
         body.addWidget(left_scroll)
         body.addWidget(self._build_center(), 1)
-        self.right = RightDataPanel(self.model)
+        self.right = RightDataPanel(self.model, self.store)
         body.addWidget(self.right)
         v.addLayout(body, 1)
 
@@ -251,6 +252,9 @@ class MainWindow(QWidget):
     def _wire(self):
         self.title.request_settings.connect(self.open_settings)
         self.title.request_clear.connect(self.clear_data)
+        self.title.request_spectrum.connect(self.open_spectrum)
+        self.title.request_vector.connect(self.open_vector)
+        self.title.request_replay.connect(self.open_replay)
         self.title.request_min.connect(self.showMinimized)
         self.title.request_max.connect(self._toggle_max)
         self.title.request_close.connect(self.close)
@@ -665,6 +669,69 @@ class MainWindow(QWidget):
                 self.fs = fs
                 self.store.fs = fs
             self._save_cfg_later()
+
+    # ================= 分析窗口 =================
+    def open_spectrum(self):
+        try:
+            from .dialogs import SpectrumDialog
+        except Exception as e:
+            QMessageBox.critical(self, "频谱不可用", str(e))
+            return
+        if getattr(self, "_spec_dlg", None) is not None:
+            self._spec_dlg.raise_()
+            self._spec_dlg.activateWindow()
+            return
+        self._spec_dlg = SpectrumDialog(self.store, self.model, self)
+        self._spec_dlg.show()
+
+    def open_vector(self):
+        try:
+            from .dialogs import VectorDialog
+        except Exception as e:
+            QMessageBox.critical(self, "矢量图不可用", str(e))
+            return
+        if getattr(self, "_vec_dlg", None) is not None:
+            self._vec_dlg.raise_()
+            self._vec_dlg.activateWindow()
+            return
+        self._vec_dlg = VectorDialog(self.store, self.model, self)
+        self._vec_dlg.show()
+
+    def open_replay(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "打开波形记录", default_dir(), "CSV (*.csv);;所有文件 (*)")
+        if not path:
+            return
+        try:
+            from .analysis import load_csv
+            fs, names, arr = load_csv(path)
+        except Exception as e:
+            QMessageBox.critical(self, "载入失败", str(e))
+            return
+        self.disconnect()
+        self.demo = False
+        self.store.clear()
+        rows = arr.shape[0]
+        for r in range(rows):
+            row = list(arr[r, 1:1 + NCH])
+            if len(row) < NCH:
+                row += [0.0] * (NCH - len(row))
+            self.store.append(tuple(row[:NCH]))
+        if fs and fs > 0:
+            self.fs = fs
+            self.store.fs = fs
+        dur = self.store.total / self.fs if self.fs > 0 else 0.0
+        self.store.max_span = max(self.store.max_span, dur)
+        self.store.cache_span = max(self.store.cache_span, dur)
+        for p in (self.plot_top, self.plot_main):
+            p.max_span = max(p.max_span, dur)
+            p.t_span = min(max(dur, 0.1), p.max_span)
+            p.follow = False
+            p.t_right = dur
+            p._auto_pending = True
+        self._sync_plots()
+        self.autoscale_all()
+        self.statusbar.flash("已载入记录: %d 点 / %.2fs" % (self.store.total, dur))
 
     # ================= 主循环 =================
     def _tick(self):

@@ -52,6 +52,9 @@ def card(title):
 class TitleBar(QFrame):
     request_settings = Signal()
     request_clear = Signal()
+    request_spectrum = Signal()
+    request_vector = Signal()
+    request_replay = Signal()
     request_min = Signal()
     request_max = Signal()
     request_close = Signal()
@@ -77,11 +80,14 @@ class TitleBar(QFrame):
         for text, tip, sig in (
             ("⚙", "通道设置", self.request_settings),
             ("⌫", "清空数据", self.request_clear),
+            ("频谱", "FFT 频谱", self.request_spectrum),
+            ("矢量", "矢量图 (dq/αβ)", self.request_vector),
+            ("回放", "打开波形记录 CSV", self.request_replay),
         ):
             b = QToolButton()
             b.setText(text)
             b.setToolTip(tip)
-            b.setFixedSize(28, 26)
+            b.setFixedSize(28 if len(text) == 1 else 40, 26)
             b.setStyleSheet("color:%s;background:transparent;border:none;border-radius:6px;"
                             "QToolButton:hover{background:#eceff4;}" % theme.FG_DIM)
             if sig:
@@ -525,17 +531,29 @@ class LeftPanel(QWidget):
 class RightDataPanel(QWidget):
     visChanged = Signal()
 
-    def __init__(self, model, parent=None):
+    def __init__(self, model, store=None, parent=None):
         super().__init__(parent)
         self.model = model
+        self.store = store
+        self.stat_mode = False
         self.setFixedWidth(300)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
         lay.setSpacing(6)
 
+        head = QHBoxLayout()
         title = QLabel("数据")
         title.setObjectName("CardTitle")
-        lay.addWidget(title)
+        head.addWidget(title)
+        head.addStretch(1)
+        self.btn_stat = QPushButton("统计")
+        self.btn_stat.setCheckable(True)
+        self.btn_stat.setObjectName("Toggle")
+        self.btn_stat.setFixedWidth(52)
+        self.btn_stat.setToolTip("显示 min / max / 均值 (自上次清空起)")
+        self.btn_stat.toggled.connect(self._on_stat)
+        head.addWidget(self.btn_stat)
+        lay.addLayout(head)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -615,23 +633,40 @@ class RightDataPanel(QWidget):
         self.v.addWidget(row)
         return val
 
+    def _on_stat(self, on):
+        self.stat_mode = bool(on)
+        self.update()
+
     def update_values(self, vals):
         power = None
+        stat = self.stat_mode and self.store is not None
         for i in range(NCH):
             v = vals[i] if i < len(vals) else None
-            if i == len(CHANNELS) - 1:
-                pass
+            sname = CHANNELS[i][0] if i < len(CHANNELS) else ""
+            if stat:
+                st = self.store.stats(i)
+                if st is None:
+                    self.rows[i].setText("-")
+                else:
+                    g, o = self.model.gain[i], self.model.off[i]
+                    lo, hi = st[0], st[1]
+                    if g < 0:
+                        lo, hi = hi, lo
+                    self.rows[i].setText("%s/%s/%s" % (num(lo * g + o, 3),
+                                                       num(hi * g + o, 3),
+                                                       num(st[2] * g + o, 3)))
+                continue
             if v is None:
                 self.rows[i].setText("-")
-            elif CHANNELS[i][0] == "fault":
+            elif sname.startswith("fault"):
                 self.rows[i].setText(FAULT_TEXT.get(int(round(v)), "?"))
-            elif CHANNELS[i][0] == "sat":
+            elif sname.startswith("sat"):
                 self.rows[i].setText("1" if v > 0.5 else "0")
             else:
                 self.rows[i].setText(num(v))
-            if CHANNELS[i][0] == "Vbus":
+            if sname.startswith("Vbus"):
                 power = v
-            elif CHANNELS[i][0] == "Ibus" and power is not None:
+            elif sname.startswith("Ibus") and power is not None:
                 p = power * v
                 self.power_val.setText(num(p, 3))
                 power = None

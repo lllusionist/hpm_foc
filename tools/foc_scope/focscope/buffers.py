@@ -20,6 +20,8 @@ class DataStore:
         self.base = 0
         self.total = 0
         self.nch = 0
+        # 运行统计 (自上次 reset 起): min / max / sum / 样本数
+        self.reset_stats()
 
     # ---------- 写入 ----------
     def append(self, vals):
@@ -27,15 +29,35 @@ class DataStore:
         if n > self.nch:
             self.nch = n
         for c in range(self.nch):
-            self.bufs[c].append(vals[c] if c < n else 0.0)
+            val = vals[c] if c < n else 0.0
+            self.bufs[c].append(val)
+            if val < self.st_min[c]:
+                self.st_min[c] = val
+            if val > self.st_max[c]:
+                self.st_max[c] = val
+            self.st_sum[c] += val
+        self.st_n += 1
         self.total += 1
         self.trim()
+
+    def reset_stats(self):
+        self.st_min = [float("inf")] * NCH
+        self.st_max = [float("-inf")] * NCH
+        self.st_sum = [0.0] * NCH
+        self.st_n = 0
+
+    def stats(self, c):
+        """返回 (min, max, mean) 原始值; 无样本返回 None."""
+        if self.st_n <= 0 or self.st_min[c] == float("inf"):
+            return None
+        return (self.st_min[c], self.st_max[c], self.st_sum[c] / self.st_n)
 
     def clear(self):
         for b in self.bufs:
             del b[:]
         self.base = 0
         self.total = 0
+        self.reset_stats()
 
     def trim(self):
         if not self.bufs[0]:
