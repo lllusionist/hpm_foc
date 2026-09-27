@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""分析窗口: 频谱 (FFT) 与 矢量图 (dq / αβ)."""
+"""分析窗口: 频谱 (FFT) 与 矢量图 (dq / αβ).
+
+数据在定时器里算好缓存, paintEvent 只负责画缓存, 避免每次重绘都重算 FFT.
+"""
 import math
 
 from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
@@ -15,7 +18,14 @@ from .channels import index_of, NCH
 LM, RM, TM, BM = 56, 16, 26, 30
 
 
-def _recent(store, c, maxn=32768):
+def _pen(color, width=1.0):
+    pen = QPen(QColor(color))
+    pen.setWidthF(width)
+    pen.setCosmetic(True)          # 非 cosmetic 宽笔/密折线极慢
+    return pen
+
+
+def _recent(store, c, maxn=16384):
     b = store.bufs[c]
     if not b:
         return None
@@ -39,15 +49,80 @@ class SpectrumCanvas(_Canvas):
         super().__init__(parent)
         self.store = store
         self.model = model
-        self.channels = []
-        self.freq_max = 0.0
-        self.db_min, self.db_max = -120.0, 20.0
+        self.curves = []
+        self.polys = []
+        self.freq_max = 1.0
+        self.db_min, self.db_max = -90.0, 0.0
 
     def compute(self):
-        self.channels = self.model.shown_channels()
-        if not self.channels:
-            self.channels = [i for i in range(NCH) if self.store.bufs[i]][:1]
-        return self.channels
+        chans = self.model.shown_channels()
+        if not chans:
+            chans = [i for i in range(NCH) if self.store.bufs[i]][:1]
+        curves = []
+        fmax = 0.0
+        dmin, dmax = 1e9, -1e9
+        for c in chans:
+            x = _recent(self.store, c)
+            if x is None or len(x) < 16:
+                continue
+            g, o = self.model.gain[c], self.model.off[c]
+            fr, amp = analysis.fft_magnitude(x * g + o, self.store.fs)
+            if fr is None:
+                continue
+            db = analysis.to_db(amp)
+            curves.append((c, fr, db))
+            fmax = max(fmax, float(fr[-1]))
+            if len(db) > 1:
+                dmin = min(dmin, float(db[1:].min()))
+            dmax = max(dmax, float(db.max()))
+        if not curves:
+            fmax, dmin, dmax = self.store.fs / 2.0, -90.0, 0.0
+        else:
+            fmax = fmax or self.store.fs / 2.0
+            if dmax <= dmin:
+                dmax, dmin = 0.0, -90.0
+            dmin = max(dmin, dmax - 100.0)
+        self.curves, self.freq_max, self.db_min, self.db_max = curves, fmax, dmin, dmax
+        self._build_polys()
+        self.update()
+
+    def _build_polys(self):
+        x0, y0, x1, y1 = self._rect()
+        pw, ph = x1 - x0, y1 - y0
+        self.polys = []
+        if pw < 20 or ph < 20:
+            return
+        fmax = self.freq_max or 1.0
+        dmin, dmax = self.db_min, self.db_max
+        dspan = max(1e-6, dmax - dmin)
+        ncol = max(1, int(pw))
+        for c, fr, db in self.curves:
+            poly = QPolygonF()
+            n = len(fr)
+            if n > 2 * ncol:
+                stepf = n / float(ncol)
+                for col in range(ncol):
+                    s = int(col * stepf)
+                    e = int((col + 1) * stepf)
+                    if e <= s:
+                        e = s + 1
+                    if e > n:
+                        e = n
+                    k = s + int(analysis.np.argmax(db[s:e]))
+                    yy = y1 - (float(db[k]) - dmin) / dspan * ph
+                    if math.isfinite(yy):
+                        poly.append(QPointF(x0 + fr[k] / fmax * pw, yy))
+            else:
+                for k in range(n):
+                    yy = y1 - (float(db[k]) - dmin) / dspan * ph
+                    if math.isfinite(yy):
+                        poly.append(QPointF(x0 + fr[k] / fmax * pw, yy))
+            if poly.size() >= 2:
+                self.polys.append((self.model.color[c], poly))
+
+    def resizeEvent(self, ev):
+        self._build_polys()
+        super().resizeEvent(ev)
 
     def paintEvent(self, ev):
         p = QPainter(self)
@@ -58,31 +133,6 @@ class SpectrumCanvas(_Canvas):
         if pw < 20 or ph < 20:
             return
 
-        chans = self.channels
-        curves = []
-        fmax = 0.0
-        dmin, dmax = 10.0, -200.0
-        for c in chans:
-            x = _recent(self.store, c)
-            if x is None or len(x) < 16:
-                continue
-            g, o = self.model.gain[c], self.model.off[c]
-            x = x * g + o
-            fr, amp = analysis.fft_magnitude(x, self.store.fs)
-            if fr is None:
-                continue
-            db = analysis.to_db(amp)
-            curves.append((c, fr, db))
-            fmax = max(fmax, fr[-1])
-            dmin = min(dmin, float(db[1:].min()) if len(db) > 1 else -120.0)
-            dmax = max(dmax, float(db.max()))
-        fmax = fmax or (self.store.fs / 2.0)
-        if (not math.isfinite(dmax)) or dmax <= dmin:
-            dmax, dmin = 0.0, -90.0
-        dmin = max(dmin, dmax - 100.0)
-        self.freq_max, self.db_min, self.db_max = fmax, dmin, dmax
-
-        # grid
         p.setPen(QPen(QColor(theme.PLOT_GRID), 1))
         p.setFont(QFont(theme.MONO, 8))
         for i in range(1, 5):
@@ -97,30 +147,21 @@ class SpectrumCanvas(_Canvas):
         p.setPen(QPen(QColor(theme.FG_DIM), 1))
         p.drawText(QRectF(x0, y1 + 2, 80, BM - 2), Qt.AlignLeft | Qt.AlignVCenter, "0")
         p.drawText(QRectF(x1 - 80, y1 + 2, 80, BM - 2), Qt.AlignRight | Qt.AlignVCenter,
-                   "%.0f Hz" % fmax)
-        p.drawText(QRectF(x0 - LM, y0 - TM, LM, TM), Qt.AlignLeft | Qt.AlignVCenter,
-                   "dB")
-        p.drawText(QRectF(x0 + 6, y0 + 2, 240, 16), Qt.AlignLeft, "频谱 (单边, Hann)")
+                   "%.0f Hz" % self.freq_max)
+        p.drawText(QRectF(x0 - LM, y0 - TM, LM, TM), Qt.AlignLeft | Qt.AlignVCenter, "dB")
+        p.drawText(QRectF(x0 + 6, y0 + 2, 260, 16), Qt.AlignLeft,
+                   "频谱 (单边, Hann)  峰 %.0f dB" % self.db_max)
 
-        dspan = max(1e-6, dmax - dmin)
         p.save()
         p.setClipRect(QRectF(x0, y0, pw, ph))
-        for c, fr, db in curves:
-            p.setPen(QPen(QColor(self.model.color[c]), 1.0))
-            poly = QPolygonF()
-            for k in range(len(fr)):
-                xx = x0 + fr[k] / fmax * pw
-                yy = y1 - (float(db[k]) - dmin) / dspan * ph
-                if math.isfinite(yy):
-                    poly.append(QPointF(xx, yy))
-            if poly.size() >= 2:
-                p.drawPolyline(poly)
+        for color, poly in self.polys:
+            p.setPen(_pen(color, 1.0))
+            p.drawPolyline(poly)
         p.restore()
 
-        # legend
         ty = y0 + 20
-        for c, _, _ in curves:
-            p.setPen(QPen(QColor(self.model.color[c])))
+        for c, _, _ in self.curves:
+            p.setPen(_pen(self.model.color[c], 1.0))
             p.drawText(QRectF(x1 - 140, ty, 130, 14), Qt.AlignRight, self.model.short_name(c))
             ty += 13
 
@@ -134,26 +175,22 @@ class SpectrumDialog(QDialog):
         self.canvas = SpectrumCanvas(store, model, self)
         v.addWidget(self.canvas, 1)
         row = QHBoxLayout()
-        self.lbl = QLabel("对右侧“选择性波形图”勾选的通道做 FFT")
-        self.lbl.setObjectName("Dim")
-        row.addWidget(self.lbl)
+        lbl = QLabel("对右侧“选择性波形图”勾选的通道做 FFT")
+        lbl.setObjectName("Dim")
+        row.addWidget(lbl)
         row.addStretch(1)
         b = QPushButton("刷新")
-        b.clicked.connect(self._refresh)
+        b.clicked.connect(self.canvas.compute)
         row.addWidget(b)
         v.addLayout(row)
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self._refresh)
-        self._timer.start(800)
-        self._refresh()
-
-    def _refresh(self):
+        self._timer.timeout.connect(self.canvas.compute)
         self.canvas.compute()
-        self.canvas.update()
+        self._timer.start(900)
 
     def showEvent(self, ev):
         if not self._timer.isActive():
-            self._timer.start(800)
+            self._timer.start(900)
         super().showEvent(ev)
 
     def closeEvent(self, ev):
@@ -166,30 +203,20 @@ class VectorCanvas(_Canvas):
         super().__init__(parent)
         self.store = store
         self.model = model
-        self.mode = "dq"   # dq | ab
+        self.mode = "ab"   # dq | ab
         self.span = 1.0
+        self.xs = self.ys = None
         self.i_id = index_of("Id")
         self.i_iq = index_of("Iq")
         self.i_ia = index_of("Ia")
         self.i_ib = index_of("Ib")
         self.i_ic = index_of("Ic")
-        self.i_ph = index_of("phase")
 
-    def paintEvent(self, ev):
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        p.fillRect(self.rect(), QColor(theme.PLOT_BG))
-        x0, y0, x1, y1 = self._rect()
-        pw, ph = x1 - x0, y1 - y0
-        if pw < 20 or ph < 20:
-            return
-
+    def compute(self):
         xs = ys = None
-        xlabel = ylabel = ""
         if self.mode == "dq" and self.i_id is not None and self.i_iq is not None:
             xs = _recent(self.store, self.i_id)
             ys = _recent(self.store, self.i_iq)
-            xlabel, ylabel = "Id (A)", "Iq (A)"
             if xs is not None:
                 xs = xs * self.model.gain[self.i_id] + self.model.off[self.i_id]
             if ys is not None:
@@ -201,16 +228,27 @@ class VectorCanvas(_Canvas):
             if ia is not None and ib is not None and ic is not None:
                 n = min(len(ia), len(ib), len(ic))
                 xs, ys = analysis.clarke(ia[-n:], ib[-n:], ic[-n:])
-            xlabel, ylabel = "α (A)", "β (A)"
-
-        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
-        span = self.span
         if xs is not None and len(xs) > 1:
             m = max(abs(float(xs.min())), abs(float(xs.max())),
                     abs(float(ys.min())), abs(float(ys.max())), 1e-3)
-            span = m * 1.1
-            self.span = span
+            self.span = m * 1.1
+        self.xs, self.ys = xs, ys
+        self.update()
+
+    def paintEvent(self, ev):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.fillRect(self.rect(), QColor(theme.PLOT_BG))
+        x0, y0, x1, y1 = self._rect()
+        pw, ph = x1 - x0, y1 - y0
+        if pw < 20 or ph < 20:
+            return
+
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        span = max(1e-6, self.span)
         sc = min(pw, ph) / (2.0 * span)
+        xlabel = "α (A)" if self.mode == "ab" else "Id (A)"
+        ylabel = "β (A)" if self.mode == "ab" else "Iq (A)"
 
         p.setPen(QPen(QColor(theme.PLOT_GRID), 1))
         for f in (0.5, 1.0):
@@ -224,13 +262,14 @@ class VectorCanvas(_Canvas):
         p.drawText(QRectF(x1 - 120, y1 + 2, 120, BM - 2), Qt.AlignRight, xlabel)
         p.drawText(QRectF(x0, y0 - TM, 200, TM), Qt.AlignLeft, ylabel + "  (X-Y)")
 
+        xs, ys = self.xs, self.ys
         if xs is not None and len(xs) > 1:
             p.save()
             p.setClipRect(QRectF(x0, y0, pw, ph))
-            p.setPen(QPen(QColor(theme.ACCENT), 1.0))
+            p.setPen(_pen(theme.ACCENT, 1.0))
             poly = QPolygonF()
             n = len(xs)
-            step = max(1, n // 4000)
+            step = max(1, n // 1500)
             k = 0
             while k < n:
                 px = cx + float(xs[k]) * sc
@@ -240,10 +279,9 @@ class VectorCanvas(_Canvas):
                 k += step
             if poly.size() >= 2:
                 p.drawPolyline(poly)
-            lx, ly = float(xs[-1]) * sc, float(ys[-1]) * sc
             p.setBrush(QBrush(QColor(theme.RED)))
             p.setPen(Qt.NoPen)
-            p.drawEllipse(QPointF(cx + lx, cy - ly), 3.5, 3.5)
+            p.drawEllipse(QPointF(cx + float(xs[-1]) * sc, cy - float(ys[-1]) * sc), 3.5, 3.5)
             p.restore()
 
         p.setPen(QPen(QColor(theme.BORDER), 1))
@@ -265,17 +303,18 @@ class VectorDialog(QDialog):
         self.cmb.addItems(["d-q 电流", "α-β 电流"])
         self.cmb.currentIndexChanged.connect(self._on_mode)
         row.addWidget(self.cmb)
-        self.cmb.setCurrentIndex(1)          # 默认 α-β (电流空间矢量, 圆形)
+        self.cmb.setCurrentIndex(1)          # 默认 α-β 电流空间矢量
         row.addStretch(1)
         v.addLayout(row)
         self._timer = QTimer(self)
-        self._timer.timeout.connect(self.canvas.update)
+        self._timer.timeout.connect(self.canvas.compute)
+        self.canvas.compute()
         self._timer.start(200)
 
     def _on_mode(self, idx):
         self.canvas.mode = "ab" if idx == 1 else "dq"
         self.canvas.span = 1.0
-        self.canvas.update()
+        self.canvas.compute()
 
     def showEvent(self, ev):
         if not self._timer.isActive():
