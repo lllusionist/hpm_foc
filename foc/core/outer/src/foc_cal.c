@@ -503,13 +503,13 @@ bool anticogging_loop(void)
     cg_prev_phase = encoder.phase;
 
     /* 按电角度分桶累加 Iq_set */
-    int idx = (int)(encoder.phase / M_2PI * (float)COGGING_MAP_NUM);
-    if (idx < 0) 
-        idx = 0;
-    if (idx >= (int)COGGING_MAP_NUM) 
-        idx = (int)COGGING_MAP_NUM - 1;
-    cg_sum[idx] += (int32_t)(FOC.Iq_set * 1000.0f); // 速度环的iq_set *1000转换为安培
-    cg_cnt[idx]++;
+    int cg_idx = (int)(encoder.phase * (float)COGGING_MAP_NUM / M_2PI);
+    if (cg_idx < 0) 
+        cg_idx = 0;
+    if (cg_idx >= (int)COGGING_MAP_NUM) 
+        cg_idx = (int)COGGING_MAP_NUM - 1;
+    cg_sum[cg_idx] += (int32_t)(FOC.Iq_set * 1000.0f); // 速度环的iq_set *1000转换为安培
+    cg_cnt[cg_idx]++;
 
     if (cg_turns < COGGING_TURNS) {
         return false;
@@ -530,7 +530,7 @@ bool anticogging_loop(void)
     int32_t mean = (n > 0U) ? (int32_t)(sum / (int64_t)n) : 0;
 
     for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-        int32_t v = (cg_cnt[i] > 0U) ? ((cg_sum[i] / (int32_t)cg_cnt[i]) - mean) : 0; // 每个
+        int32_t v = (cg_cnt[i] > 0U) ? ((cg_sum[i] / (int32_t)cg_cnt[i]) - mean) : 0;
         if (v > 32767)  v = 32767;
         if (v < -32768) v = -32768;
         Config.cogging_map[i] = (int16_t)v;
