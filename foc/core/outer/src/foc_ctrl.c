@@ -239,6 +239,16 @@ void CONTROLLER_loop(void)
         iq_set     = CLAMP(iq_set, Imin, Imax);
     }
 
+    // 齿槽转矩前馈补偿 (标定态下不加, 避免污染采样)
+    if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
+        Config.anticogging_enable && Config.cogging_map_valid &&
+        (foc_get_stage() != ANTICOGGING)) {
+        int cg_idx = (int)(encoder.phase * (float)COGGING_MAP_NUM / M_2PI);
+        if (cg_idx < 0) cg_idx = 0;
+        if (cg_idx >= (int)COGGING_MAP_NUM) cg_idx = (int)COGGING_MAP_NUM - 1;
+        iq_set += (float)Config.cogging_map[cg_idx] * 0.001f; /* mA -> A */
+    }
+
     // 电流限幅
     bool limited = false;
     if (iq_set > +Config.current_limit) {

@@ -55,6 +55,7 @@ typedef struct {
     int32_t  heartbeat_consumer_ms;          // 心跳消费超时时间（ms）
     int32_t  heartbeat_producer_ms;          // 心跳生产者周期（ms）
     
+    int16_t  cogging_map[COGGING_MAP_NUM];   // 齿槽补偿表(mA, 按电角度256点)
     uint32_t cogging_map_crc;                // 齿槽补偿表CRC校验
     int32_t  cogging_map_valid;              // 齿槽补偿表有效标志
     

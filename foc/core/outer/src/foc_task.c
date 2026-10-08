@@ -84,6 +84,9 @@ static void enter_state(tFSMState state)
     case CALIBRATION:
         calibration_start();
         break;
+    case ANTICOGGING:
+        anticogging_start();
+        break;
     default:
         break;
     }
@@ -103,6 +106,10 @@ static void exit_state(tFSMState state)
         break;
     case CALIBRATION:
         calibration_end();
+        sFSM.state_next_ready = 1;
+        break;
+    case ANTICOGGING:
+        anticogging_end();
         sFSM.state_next_ready = 1;
         break;
     default:
@@ -269,6 +276,14 @@ static void Task_FOC(void *argument)
         case CALIBRATION:
             if (slow_tick) {
                 calibration_loop(); // 校准 1kHz
+            }
+            foc_check_and_trip();
+            break;
+        case ANTICOGGING:
+            if (slow_tick) {
+                if (anticogging_loop()) { // 齿槽补偿标定 1kHz
+                    foc_request_stage(IDLE);
+                }
             }
             foc_check_and_trip();
             break;

@@ -156,7 +156,10 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 
 
-	case USB_CMD_ANTICOGGING_START: // 未移植
+	case USB_CMD_ANTICOGGING_START:
+		foc_request_stage(ANTICOGGING);
+		break;
+
 	default:
 		break;
 	}
