@@ -10,6 +10,7 @@
 
 #define OFFSET_LUT_NUM      512U
 #define COGGING_MAP_NUM     256U   // 256点 × 2字节 = 512字节
+#define COGGING_SCALE       5000.0f // 补偿表缩放: Iq(A) × 5000 → int16 (量程 ±6.55A)
 
 typedef struct {
     uint32_t magic;                          // 配置区魔数（标识有效配置）

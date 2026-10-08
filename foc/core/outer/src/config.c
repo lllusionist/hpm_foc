@@ -70,7 +70,7 @@ void config_init(void)
     Config.calib_voltage   = 3.0f;
     
     Config.default_op_mode        = CONTROL_MODE_POSITION_FILTER;
-    Config.pos_p_gain             = 30.0f;
+    Config.pos_p_gain             = 5.0f;
     Config.vel_p_gain             = 0.10f;
     Config.vel_i_gain             = 0.01f;
     Config.current_ff_gain        = 0.001f;

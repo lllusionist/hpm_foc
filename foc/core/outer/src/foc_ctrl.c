@@ -239,14 +239,15 @@ void CONTROLLER_loop(void)
         iq_set     = CLAMP(iq_set, Imin, Imax);
     }
 
-    // 齿槽转矩前馈补偿 (标定态下不加, 避免污染采样)
+    // 齿槽转矩前馈补偿 (照搬 rare_foc: 单圈机械角索引, 静止测得的保持电流)
     if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
         Config.anticogging_enable && Config.cogging_map_valid &&
         (foc_get_stage() != ANTICOGGING)) {
-        int cg_idx = (int)(encoder.phase * (float)COGGING_MAP_NUM / M_2PI);
+        int cg_idx = (int)nearbyintf((float)COGGING_MAP_NUM *
+                                     (float)encoder.count_aligned / ENCODER_CPR_F);
         if (cg_idx < 0) cg_idx = 0;
-        if (cg_idx >= (int)COGGING_MAP_NUM) cg_idx = (int)COGGING_MAP_NUM - 1;
-        iq_set += (float)Config.cogging_map[cg_idx] * 0.001f; /* mA -> A */
+        if (cg_idx >= (int)COGGING_MAP_NUM) cg_idx = 0;
+        iq_set += (float)Config.cogging_map[cg_idx] / COGGING_SCALE;
     }
 
     // 电流限幅
