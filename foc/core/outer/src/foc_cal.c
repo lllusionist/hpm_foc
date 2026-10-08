@@ -458,8 +458,8 @@ static bool     cg_running;
 
 void anticogging_start(void)
 {
-    if (Config.pole_pairs <= 0) {
-        printf("cogging: motor params not calibrated\n");
+    if (!Config.calib_valid || (Config.pole_pairs <= 0)) {
+        printf("cogging: calibration required first\n");
         cg_running = false;
         return;
     }
