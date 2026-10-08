@@ -8,7 +8,7 @@
 
 #define CONFIG_MAGIC        0x5A5A1234
 
-#define OFFSET_LUT_NUM      128U
+#define OFFSET_LUT_NUM      512U
 #define COGGING_MAP_NUM     256U   // 256点 × 2字节 = 512字节
 
 typedef struct {

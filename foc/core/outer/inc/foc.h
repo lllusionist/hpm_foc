@@ -29,6 +29,7 @@
 #define FOC_FAULT_OVER_VOLTAGE 2  // 母线过压
 #define FOC_FAULT_UNDER_VOLTAGE 3 // 母线欠压
 #define FOC_FAULT_ADC 4
+#define FOC_FAULT_IBUS_OC 5      // 母线过流
 
 typedef struct {
 

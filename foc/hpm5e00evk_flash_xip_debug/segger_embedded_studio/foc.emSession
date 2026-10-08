@@ -2,12 +2,11 @@
 <session>
  <Bookmarks/>
  <Breakpoints groups="Breakpoints" active_group="Breakpoints">
-  <BreakpointListItem trigger="" line="168" counter="0" hardwareBreakpoint="" isFunctionBreakpoint="false" action="" expression="" stopAll="false" group="Breakpoints" type="Breakpoint" state="2" filename="../../core/outer/src/foc_cal.c" useHWbreakpoint="false"/>
   <Exceptions/>
  </Breakpoints>
  <ExecutionProfileWindow/>
  <FrameBuffer>
-  <FrameBufferWindow width="0" keepAspectRatio="0" flipHorizontally="0" zoomToFitWindow="0" showGrid="0" flipVertically="0" addressSpace="" format="0" height="0" autoEvaluate="0" rotationDegrees="0" scaleFactor="1" refreshPeriod="0" name="foc - hpm5e00evk_Debug" addressText="" accessByDisplayWidth="0"/>
+  <FrameBufferWindow width="-203607184" keepAspectRatio="0" flipHorizontally="0" zoomToFitWindow="0" showGrid="0" flipVertically="0" addressSpace="" format="0" height="509" autoEvaluate="0" rotationDegrees="0" scaleFactor="1" refreshPeriod="0" name="foc - hpm5e00evk_Debug" addressText="" accessByDisplayWidth="0"/>
  </FrameBuffer>
  <Memory1>
   <MemoryWindow addressSpace="" dataSize="1" autoEvaluate="0" viewMode="0" viewType="4" addressOrder="0" columnsText="" refreshPeriod="0" name="foc - hpm5e00evk_Debug" sizeText="" addressText=""/>
@@ -27,16 +26,11 @@
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner;inc"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;inc"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;src"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;drivers"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;drivers;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;cherryusb"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;cherryusb;osal"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware;FreeRTOS"/>
  </Project>
  <Register1>
@@ -58,10 +52,11 @@
   <Trace enabled="Yes"/>
  </TraceWindow>
  <Watch1>
-  <Watches active="1" update="Five Seconds">
-   <Watchpoint expression="Config.pole_pairs" name="Config.pole_pairs" radix="-1" linenumber="59" filename="../../core/outer/src/foc_cal.c"/>
-   <Watchpoint expression="Config" name="Config" radix="-1" linenumber="164" filename="../../core/outer/src/foc_cal.c"/>
-   <Watchpoint expression="Config.encoder_offset" name="Config.encoder_offset" radix="-1" linenumber="0" filename="../segger_embedded_studio"/>
+  <Watches active="1" update="Never">
+   <Watchpoint expression="Config.current_ki" name="Config.current_ki" radix="-1" linenumber="0" filename="../segger_embedded_studio"/>
+   <Watchpoint expression="Config.current_kp" name="Config.current_kp" radix="-1" linenumber="0" filename="../segger_embedded_studio"/>
+   <Watchpoint expression="Config.vel_i_gain" name="Config.vel_i_gain" radix="-1" linenumber="0" filename="../segger_embedded_studio"/>
+   <Watchpoint expression="Config.vel_p_gain" name="Config.vel_p_gain" radix="-1" linenumber="0" filename="../segger_embedded_studio"/>
   </Watches>
  </Watch1>
  <Watch2>
@@ -74,9 +69,12 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="15" useTextEdit="1" path="../../core/inner/src/main.c" left="0" top="7" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="8" y="44" useTextEdit="1" path="../../core/outer/src/usb_driver.c" left="0" selected="1" top="33" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="1" y="43" useTextEdit="1" path="../../core/outer/src/foc_cal.c" left="0" top="34" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="21" y="98" useTextEdit="1" path="../../core/outer/src/config.c" left="0" top="51" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="3713" useTextEdit="1" path="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/tasks.c" left="0" top="3692" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="112" useTextEdit="1" path="../../core/outer/src/usb_driver.c" left="0" top="91" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="672" useTextEdit="1" path="../../core/inner/src/dma.c" left="0" top="651" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="14" y="21" useTextEdit="1" path="../../core/inner/src/main.c" left="0" top="0" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../core/outer/src/vofa.c" left="0" selected="1" top="18" codecName="Default"/>
  </Files>
- <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="D:/Desktop/FOC/foc/core/outer/src" debugSearchPath="" autoConnectCapabilities="3199"/>
+ <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>

@@ -4,7 +4,8 @@
 #include "foc_task.h"
 
 #define CAL_LOOP_HZ (1000U)
-#define SAMPLES_PER_PPAIR (128U)
+#define SAMPLES_PER_PPAIR (512U)
+#define LUT_WINDOW        (128U) /* offset LUT 滑动平均窗口: 与原始平滑强度相当(512密度下≈12.9°) */
 #define MAX_MOTOR_POLE_PAIRS (20U) // 最大支持的极对数
 
 /* 磁链测量: 开环电流拖动, 两个转速各采一段, 用两点法消掉 R 项 */
@@ -403,7 +404,7 @@ void calibration_loop(void)
         }
 
         uint32_t total_samples = (uint32_t)Config.pole_pairs * SAMPLES_PER_PPAIR;
-        int window = (int)SAMPLES_PER_PPAIR;
+        int window = (int)LUT_WINDOW;
 
         if (sample_count == 0) {
             int64_t sum = 0;

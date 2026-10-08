@@ -123,9 +123,10 @@ static bool foc_over_current(void)
 // 保护: 相过流(立即) / 母线过压 / 母线欠压; 返回故障码, 0 = 正常
 static uint8_t foc_protection_check(void)
 {
-    static bool     uv_warned = false;
-    static uint32_t ov_cnt    = 0;
-    static uint32_t uv_cnt    = 0;
+    static bool     uv_warned   = false;
+    static uint32_t ov_cnt      = 0;
+    static uint32_t uv_cnt      = 0;
+    static uint32_t ibus_oc_cnt = 0;
 
     float vbus = FOC.Vbus;
 
@@ -140,6 +141,15 @@ static uint8_t foc_protection_check(void)
 
     if (foc_over_current()) {
         return FOC_FAULT_PHASE_OC;
+    }
+
+    // 母线电流保护 (滤波值 + 计数去抖, 与过压一致)
+    if (FOC.Ibus_filt > Config.protect_i_bus_max) {
+        if (++ibus_oc_cnt >= 3U) {
+            return FOC_FAULT_IBUS_OC;
+        }
+    } else {
+        ibus_oc_cnt = 0;
     }
 
     if (vbus > Config.protect_over_voltage) {
