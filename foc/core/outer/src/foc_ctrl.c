@@ -162,7 +162,7 @@ void CONTROLLER_loop(void)
         }
     }
 
-    if (stage != RUN) {
+    if ((stage != RUN) && (stage != ANTICOGGING)) {
         return;
     }
 

@@ -327,7 +327,7 @@ void foc_adc_callback(void)
 		return;
 	}
 
-	if (foc_get_stage() != RUN) {
+	if ((foc_get_stage() != RUN) && (foc_get_stage() != ANTICOGGING)) {
 		return;
 	}
 
