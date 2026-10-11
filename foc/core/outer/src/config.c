@@ -68,14 +68,14 @@ void config_init(void)
 
     // 航模
     // Config.current_limit   = 8.0f;
-    // // 标定注入电流 (A), 按电机额定取
+    // // 标定注入电流 (A): 取额定的 20~30%
     // Config.calib_current   = 5.0f;
     // // 注入电压上限 (V), 取 R×calib_current×1.2
     // Config.calib_voltage   = 1.0f;
 
     // 云台
     Config.current_limit   = 3.0f;
-    // 标定注入电流 (A), 按电机额定取
+    // 标定注入电流 (A): 取额定的 20~30%
     Config.calib_current   = 0.3f;
     // 注入电压上限 (V), 取 R×calib_current×1.2
     Config.calib_voltage   = 3.6f;
