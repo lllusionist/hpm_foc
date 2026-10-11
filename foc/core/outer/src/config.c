@@ -64,10 +64,21 @@ void config_init(void)
     Config.pole_pairs      = 0;
     Config.phase_resistance = 5.0f;	   // 默认值, 校准后覆盖
     Config.phase_inductance = 0.00164f;
-    Config.current_limit   = 8.0f;
     Config.velocity_limit  = 30.0f;
-    Config.calib_current   = 5.0f;   // 标定注入电流 (A), 按电机额定取
-    Config.calib_voltage   = 1.0f;   // 注入电压上限 (V), 取 R×calib_current×1.2
+
+    // 航模
+    // Config.current_limit   = 8.0f;
+    // // 标定注入电流 (A), 按电机额定取
+    // Config.calib_current   = 5.0f;
+    // // 注入电压上限 (V), 取 R×calib_current×1.2
+    // Config.calib_voltage   = 1.0f;
+
+    // 云台
+    Config.current_limit   = 3.0f;
+    // 标定注入电流 (A), 按电机额定取
+    Config.calib_current   = 0.3f;
+    // 注入电压上限 (V), 取 R×calib_current×1.2
+    Config.calib_voltage   = 3.6f;
     
     Config.default_op_mode        = CONTROL_MODE_POSITION_FILTER;
     Config.pos_p_gain             = 5.0f;
