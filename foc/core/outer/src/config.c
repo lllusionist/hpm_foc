@@ -66,19 +66,19 @@ void config_init(void)
     Config.phase_inductance = 0.00164f;
     Config.velocity_limit  = 30.0f;
 
-    // 航模
-    // Config.current_limit   = 8.0f;
-    // // 标定注入电流 (A): 取额定的 20~30%
-    // Config.calib_current   = 5.0f;
-    // // 注入电压上限 (V), 取 R×calib_current×1.2
-    // Config.calib_voltage   = 1.0f;
+     //航模
+     Config.current_limit   = 8.0f;
+     // 标定注入电流 (A): 取额定的 20~30%
+     Config.calib_current   = 5.0f;
+     // 注入电压上限 (V), 取 R×calib_current×1.2
+     Config.calib_voltage   = 1.0f;
 
-    // 云台
-    Config.current_limit   = 3.0f;
-    // 标定注入电流 (A): 取额定的 20~30%
-    Config.calib_current   = 0.3f;
-    // 注入电压上限 (V), 取 R×calib_current×1.2
-    Config.calib_voltage   = 3.6f;
+    //// 云台
+    //Config.current_limit   = 3.0f;
+    //// 标定注入电流 (A): 取额定的 20~30%
+    //Config.calib_current   = 0.3f;
+    //// 注入电压上限 (V), 取 R×calib_current×1.2
+    //Config.calib_voltage   = 3.6f;
     
     Config.default_op_mode        = CONTROL_MODE_POSITION_FILTER;
     Config.pos_p_gain             = 5.0f;
