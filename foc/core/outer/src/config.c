@@ -66,8 +66,8 @@ void config_init(void)
     Config.phase_inductance = 0.00164f;
     Config.current_limit   = 8.0f;
     Config.velocity_limit  = 30.0f;
-    Config.calib_current   = 0.3f;
-    Config.calib_voltage   = 3.0f;
+    Config.calib_current   = 5.0f;   // 目标注入电流(A): 按电机额定电流的 20~30% 选取
+    Config.calib_voltage   = 1.0f;   // 注入电压上限(硬限幅): 开环标定最大电流 ≈ 0.9*V/R
     
     Config.default_op_mode        = CONTROL_MODE_POSITION_FILTER;
     Config.pos_p_gain             = 5.0f;

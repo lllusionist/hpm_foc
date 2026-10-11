@@ -69,12 +69,12 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="21" y="98" useTextEdit="1" path="../../core/outer/src/config.c" left="0" top="51" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="21" y="98" useTextEdit="1" path="../../core/outer/src/config.c" left="0" selected="1" top="51" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="3713" useTextEdit="1" path="../../hpm_sdk_localized_for_hpm5e00evk/middleware/FreeRTOS/Source/tasks.c" left="0" top="3692" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="112" useTextEdit="1" path="../../core/outer/src/usb_driver.c" left="0" top="91" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="0" y="672" useTextEdit="1" path="../../core/inner/src/dma.c" left="0" top="651" codecName="Default"/>
   <SessionOpenFile windowGroup="DockEditLeft" x="14" y="21" useTextEdit="1" path="../../core/inner/src/main.c" left="0" top="0" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../core/outer/src/vofa.c" left="0" selected="1" top="18" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="13" y="36" useTextEdit="1" path="../../core/outer/src/vofa.c" left="0" top="66" codecName="Default"/>
  </Files>
  <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>

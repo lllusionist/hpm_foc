@@ -39,6 +39,9 @@ typedef enum eCalibStep {
     CS_ENCODER_CCW_LOOP,
     CS_ENCODER_END,
 
+    // 收尾 (rare 的 CS_REPORT_OFFSET_LUT): 停留一段时间供上位机读回偏移表, 然后结束
+    CS_REPORT_OFFSET_LUT,
+
 } tCalibStep;
 
 void calibration_start(void);
