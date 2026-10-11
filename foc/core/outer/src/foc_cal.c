@@ -107,6 +107,13 @@ void calibration_start(void)
     next_sample_time = 0;
     memset(encoder_error_arr, 0, sizeof(encoder_error_arr));
 
+    /* 磁链累加器必须每次标定都清零: flux_vq_sum/flux_vd_sum 若跨标定残留,
+     * 会与本次累加混在一起, 使 Vq1 偏大(实测 0.2985 -> 0.6011 = 加上了
+     * 上次 MEAS2 的残留), 进而把 lambda 算成 2.4e-3、Kt 算成 0.0507。 */
+    flux_v_sum = flux_i_sum = flux_vq_sum = flux_vd_sum = 0.0f;
+    flux_vel_sum = 0.0f;
+    flux_cnt     = 0;
+
     /* 回显实际生效的参数, 便于确认配置是否已下发 */
     printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm\n",
            Config.calib_current, Config.calib_voltage,
