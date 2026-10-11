@@ -705,6 +705,17 @@ void calibration_loop(void)
         j_sum_tt += (float)j_cnt * (float)j_cnt;
         j_cnt++;
 
+        /* DEC 段接近零点就提前收工。
+         * 因 |a-|/a+ = (KtI+Tf)/(KtI-Tf) 恒大于 1 (实测航模 2.35 倍),
+         * 固定 0.3s 必然冲过零点反转: 摩擦方向随之翻转, 既造成异响/失步,
+         * 也破坏 J = Kt·I/(π(a+ - a-)) "两段同向" 的前提。
+         * 保留 30 点以上再拟合, 避免样本过少。 */
+        if ((mCalibStep == CS_MOTOR_J_DEC) && (j_cnt > 30U) && (encoder.vel < 0.3f)) {
+            j_slope_dec = j_slope();
+            mCalibStep  = CS_MOTOR_J_END;
+            break;
+        }
+
         if (j_cnt >= J_CAL_SAMPLES) {
             if (mCalibStep == CS_MOTOR_J_ACC) {
                 j_slope_acc = j_slope();
