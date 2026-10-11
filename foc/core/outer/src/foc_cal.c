@@ -6,29 +6,30 @@
 
 #define CAL_LOOP_HZ (1000U)
 #define SAMPLES_PER_PPAIR (512U)
-#define LUT_WINDOW        (128U) /* offset LUT 滑动平均窗口: 与原始平滑强度相当(512密度下≈12.9°) */
+#define LUT_WINDOW        (128U) // offset LUT 滑动平均窗口
 #define MAX_MOTOR_POLE_PAIRS (20U) // 最大支持的极对数
 
-/* 磁链测量: 开环电流拖动, 两个转速各采一段, 用两点法消掉 R 项 */
+/* 磁链: 开环拖动, 两转速点用矢量差分消掉 R 项 */
 #define FLUX_SPEED1 (2.0f * M_PI * 10.0f) // 低速点 (电角速度 rad/s)
 #define FLUX_SPEED2 (2.0f * M_PI * 30.0f) // 高速点
 #define FLUX_SETTLE_TIME (1.5f)		  // 每个转速稳定时间 (s)
 #define FLUX_MEAS_SAMPLES (800U)	  // 每个转速采样点数 (1kHz -> 0.5s)
-#define FLUX_IQ_GAIN (1.4f)   /* 磁链标定拖动电流 = calib_current × 该系数
-                               * (拖动要克服齿槽/摩擦, 5A 会失步产生异响) */
+#define FLUX_IQ_GAIN (1.4f)   // 拖动电流 = calib_current × 该系数 (5A 会失步)
+#define FLUX_RTEST_RATIO (0.5f)   // 同转速校验的降流比例
 
-/* 电阻/电感测量 (参考 dgm / rare_foc) */
-#define R_CAL_CYCLES (CAL_LOOP_HZ * 2U) // 电阻: 两点法总时长 2s
-#define L_CAL_CYCLES (CAL_LOOP_HZ / 2U) // 电感: 正弦注入时长 0.5s
-#define L_INJECT_HZ (1000.0f)		// 电感注入频率 (Hz)
-
-/* ===== 自适应注入参数 (CN103560736B「永磁同步电机静止型离线参数辨识方法」) =====
- * 该专利的核心是: 注入电压【从小到大逐步增加】, 直到实测电流达到阈值,
- * 而不是用固定电压。这样对小电阻电机天然不会过流。
- */
-#define CALIB_R_STEP_V (0.05f)		    // Δu2: 电阻自适应升压步长 (V); 太小会被死区/PWM量化淹没
-#define R_CAL_WINDOW   (CAL_LOOP_HZ / 5U)  // 每个工作点停留 200ms 后测稳态电流
-#define CALIB_L_MIN_V  (0.05f)		    // 电感注入幅值下限 (V), 保底信噪比
+/* ============ 电阻 / 电感 标定方案 (CN103560736B) ============
+ * 电阻: 自适应两点伏安法 —— 电压自 Δu2 起逐步升压, 直到稳态电流达
+ *       calib_current; 取末两点 Rs = Δu2/(I2-I1)。只依赖电压增量,
+ *       且两点靠近, 死区/管压降等非线性相减抵消。
+ * 电感: 自适应幅值两轮注入 —— 首轮取 u = I_target×R (因 |Z|>=R, 保证
+ *       不过流) 并测出 |Z|; 次轮按 I_target×|Z| 修正后再测一轮。
+ *       1000Hz 正弦的注入与同步解调在 40kHz 中断完成 (1kHz 循环里会
+ *       退化成直流), 末轮由 Z² = R² + (ωL)² 解出 L。
+ * =========================================================== */
+#define L_CAL_CYCLES (CAL_LOOP_HZ / 2U) // 电感: 每轮正弦注入时长 0.5s
+#define CALIB_R_STEP_V (0.05f)		    // Δu2: 电阻升压步长 (V)
+#define R_CAL_WINDOW   (CAL_LOOP_HZ / 5U)  // 每个工作点停留 200ms
+#define CALIB_L_MIN_V  (0.05f)		    // 电感注入幅值下限 (V)
 
 static int encoder_error_arr[MAX_MOTOR_POLE_PAIRS * SAMPLES_PER_PPAIR];
 
@@ -37,24 +38,31 @@ static uint32_t loop_count;    // 1kHz 时间基准
 static float phase_set;        // 电角度设定值
 static int16_t sample_count;   // 采样点下标
 static float next_sample_time; // 下一个采样时刻 (秒)
-static int64_t start_count_long; // 极对数标定起点计数 (对应 rare 的 start_count_long)
+static int64_t start_count_long; // 极对数标定起点计数
 static bool dir_pp_runin;        // 极对数标定: 预跑阶段是否已完成
 
 static float flux_v_sum, flux_i_sum; // 电压/电流模长累加
 static float flux_v1, flux_i1, flux_v2, flux_i2;
 static float flux_vel1, flux_vel2;   // 两个转速点的实测机械转速 (rps)
 static float flux_vel_sum;           // 转速窗口累加 (取平均, 避免撞上噪声尖峰)
+static float flux_vq_sum;            // Vq 窗口累加 (同转速变电流测 R 用)
+static float flux_vq_a;              // 高电流点的 Vq 均值
+static float flux_i_a;               // 高电流点的电流均值
+static float flux_r_est;             // 由 ΔVq 差算出的 R (反电势项抵消)
+static float flux_vq_b;              // 第二转速点的 Vq 均值
+static float flux_vd_sum;            // Vd 窗口累加 (矢量差分法用)
+static float flux_vd_a, flux_vd_b;   // 两个转速点的 Vd 均值
 static uint32_t flux_cnt;
 static bool flux_sat, flux_sat1, flux_sat2;
 
-/* 电阻: 自适应两点伏安法 (CN103560736B 步骤3) */
+/* 电阻: 自适应两点伏安法 */
 static float    r_volt;   /* 当前注入电压 ures (V) */
 static float    r_i1;     /* 上一个工作点的稳态电流 Ires1 (A) */
 static float    r_isum;   /* 窗口内电流累加 */
 static uint32_t r_icnt;   /* 窗口内累加计数 */
 static uint32_t r_s1;     /* 升压次数 */
 
-/* 电感: 注入幅值自适应 (CN103560736B 步骤1 的 d 轴脉动版本) */
+/* 电感: 注入幅值自适应 */
 static float   l_v_dc, l_v_amp;  /* 注入的直流偏置 / 正弦幅值 */
 static uint8_t l_pass;           /* 0 = 探测轮, 1 = 测量轮 */
 
@@ -78,8 +86,7 @@ void calibration_start(void)
     next_sample_time = 0;
     memset(encoder_error_arr, 0, sizeof(encoder_error_arr));
 
-    /* 每次标定先回显关键参数: 便于确认"恢复默认参数"是否已让新配置生效。
-     * 若 cur 不是 5.00A / vol 不是 1.00V, 说明 Flash 里还是旧配置。 */
+    /* 回显实际生效的参数, 便于确认配置是否已下发 */
     printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm\n",
            Config.calib_current, Config.calib_voltage,
            CALIB_R_STEP_V, Config.phase_resistance);
@@ -99,12 +106,6 @@ void calibration_loop(void)
 {
     float time = (float)loop_count / (float)CAL_LOOP_HZ;
 
-    /* ===== 平台适配 =====
-     * 1) rare 的 FOC.Ia 在 get_iphase_a() 里已换算成安培;
-     *    本工程 FOC.Ia 是原始 ADC 值, 需减中点再乘比例。
-     * 2) 电感注入的 1000Hz 正弦无法在 1kHz 循环里产生 (见 CS_MOTOR_L_START),
-     *    注入与解调放到 40kHz 的 foc_adc_callback 里, 算法与 rare 一致。
-     * 注: 电阻/电感已按 CN103560736B 改成【自适应注入】, 不再逐行等同 rare。 */
     const float ia_meas = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 
     float voltage_calc = Config.phase_resistance * Config.calib_current;
@@ -112,29 +113,27 @@ void calibration_loop(void)
     if (drag_v < 0.2f) drag_v = 0.2f;
     if (drag_v > (Config.calib_voltage * 0.9f)) drag_v = Config.calib_voltage * 0.9f;
 
-    // encoder
-    float calib_phase_vel = 12.0f * M_PI; // 角速度
+    float calib_phase_vel = 12.0f * M_PI;
     float total_calib_cycles = 14.0f;
 
     switch (mCalibStep) {
     case CS_MOTOR_R_START:
         loop_count = 0;
-        r_volt  = CALIB_R_STEP_V;   /* 步骤3-1: ures = Δu2 */
+        r_volt  = CALIB_R_STEP_V;   /* ures = Δu2 */
         r_i1    = 0.0f;             /* Ires1 */
         r_isum  = 0.0f;
         r_icnt  = 0;
         r_s1    = 0;                /* 升压次数 */
-        FOC.calib_mode      = false;  /* 平台适配: 本工程电流环校准模式必须关闭 */
-        FOC.calib_vinj_mode = false;  /* 平台适配: 本工程电压注入模式必须关闭 */
-        foc_arm();                    /* = rare 的 FOC_PWM_START() */
+        FOC.calib_mode      = false;
+        FOC.calib_vinj_mode = false;
+        foc_arm();
         mCalibStep = CS_MOTOR_R_LOOP;
         break;
 
     case CS_MOTOR_R_LOOP: {
-        /* 在 d 轴注入恒定电压 ures (开环, 不经过电流环) */
-        FOC_voltage(r_volt, 0, 0);
+        FOC_voltage(r_volt, 0, 0);   /* d 轴注入恒定电压 (开环) */
 
-        /* 步骤3-2: 停留 200ms 后取平均作为该工作点的稳态电流 */
+        /* 200ms 窗口平均作为该工作点的稳态电流 */
         r_isum += ia_meas;
         r_icnt++;
 
@@ -146,14 +145,12 @@ void calibration_loop(void)
 
             if ((Is < Config.calib_current) &&
                 ((r_volt + CALIB_R_STEP_V) <= (Config.calib_voltage * 0.9f))) {
-                /* 步骤3-3: 电流未达阈值 -> 记录本点, 升压继续 */
+                /* 未达阈值: 记录本点, 升压继续 */
                 r_i1 = Is;
                 r_volt += CALIB_R_STEP_V;
                 r_s1++;
             } else {
-                /* 步骤3-4: 电流达到阈值 -> Rs = Δu2 / (Ires2 - Ires1)
-                 * 只需电压【增量】准确; 两工作点靠得近, 逆变器死区/压降等
-                 * 非线性因素相减抵消 */
+                /* 达阈值: Rs = Δu2/(Ires2-Ires1), 只依赖电压增量, 非线性抵消 */
                 float di = Is - r_i1;
                 if (fabsf(di) > 1e-4f) {
                     Config.phase_resistance = CALIB_R_STEP_V / di;
@@ -175,14 +172,7 @@ void calibration_loop(void)
         l_v_dc = Config.calib_current * Config.phase_resistance;
         l_pass = 0;   /* 第 0 轮 = 探测轮 */
 
-        /* ===== 自适应注入幅值 (CN103560736B 步骤1 的 d 轴脉动版本) =====
-         * rare 原版用固定 1.5V/3V: 对低阻电机(如 0.09Ω)会产生几十安电流,
-         * 把电流采样打到饱和、把母线拉垮, 电感测量随之全废。
-         * 专利思路是"注入电压从小开始, 逐步加大直到电流达到目标"。
-         * 这里取它的等价起点 —— 因 |Z| = √(R²+(ωL)²) ≥ R 恒成立, 故
-         *     u_amp = I_target × R
-         * 可保证注入电流 ≤ I_target (物理上不会过流); 第二轮再按实测 |Z|
-         * 把幅值修正到刚好达到目标电流。 */
+        /* 自适应幅值: |Z|>=R, 故 u_amp = I_target×R 保证不过流 */
         l_v_amp = Config.calib_current * Config.phase_resistance;
         if (l_v_amp < CALIB_L_MIN_V) l_v_amp = CALIB_L_MIN_V;
 
@@ -191,13 +181,7 @@ void calibration_loop(void)
             if (l_v_amp < CALIB_L_MIN_V) l_v_amp = CALIB_L_MIN_V;
         }
 
-        /* ===== 平台适配 (第 3 处) =====
-         * rare 的 CALIBRATION_loop 跑 20kHz, 所以能在该循环里直接产生
-         * omega = 2π·current_ctrl_bw = 1000Hz 的正弦。
-         * 本工程 calibration_loop 跑 1kHz —— 在 1kHz 循环里算 sin(omega·time)
-         * 会退化成 sin(2π·k) ≡ 0, 注入变成纯直流、解调失效。
-         * 故把【注入 + 同步解调】放到 40kHz 的 PWM 中断 (foc_adc_callback)
-         * 里执行, 算法与 rare 的 CS_MOTOR_L_LOOP 完全一致。 */
+        /* 1000Hz 正弦需 40kHz 中断产生, 1kHz 循环里会退化成直流 */
         FOC.vinj_omega   = 2.0f * M_PI * Config.current_ctrl_bw; // 1000 Hz
         FOC.vinj_amp     = l_v_amp;
         FOC.vinj_dc      = l_v_dc;
@@ -209,12 +193,12 @@ void calibration_loop(void)
 
         loop_count = 0;
         FOC.calib_vinj_mode = true;
-        foc_arm();                        /* = rare 的 FOC_PWM_START() */
+        foc_arm();
         mCalibStep = CS_MOTOR_L_LOOP;
     } break;
 
     case CS_MOTOR_L_LOOP:
-        // 丢弃起始瞬态后开始解调累加 (对应 rare 的 loop_count >= 100)
+        // 丢弃起始瞬态后开始解调累加
         if (!FOC.vinj_acc && (loop_count >= 100U)) {
             FOC.vinj_acc = true;
         }
@@ -276,7 +260,7 @@ void calibration_loop(void)
         FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 
         printf("ind: %.6f H (Iamp=%.3f Z=%.3f Vdc=%.3f Vamp=%.3f)\n",
-               Config.phase_inductance, I_amp, Z, l_v_dc, l_v_amp);   /* 本工程调试输出 */
+               Config.phase_inductance, I_amp, Z, l_v_dc, l_v_amp);
 
         phase_set  = 0;
         loop_count = 0;
@@ -303,10 +287,7 @@ void calibration_loop(void)
         FOC_voltage(drag_v, 0, phase_set);
 
         if (!dir_pp_runin) {
-            /* 预跑: 先空转 total_calib_cycles 个电周期, 让转子充分"牵入"同步。
-             * 同步电机从静止起转会有一段低于同步转速的滑行期(pole slipping),
-             * 直接测量会让圈数偏少, 导致 pole_pairs 被 round 到相邻整数
-             * (实测偏差 6.7% -> 14 对极被算成 15)。 */
+            /* 预跑: 先空转一圈让转子牵入同步, 避免起动滑行期使圈数偏少 */
             if (phase_set >= total_calib_cycles * M_2PI) {
                 encoder.shadow_count = 0;
                 start_count_long = 0;
@@ -332,9 +313,7 @@ void calibration_loop(void)
                    (long long)diff, mech_revs, pp_raw, (int)Config.pole_pairs);
         }
 
-        /* 保护: 本项目 encoder_error_arr 按 MAX_MOTOR_POLE_PAIRS*SAMPLES_PER_PPAIR 分配,
-         * 极对数无效时不再进入编码器采样, 直接结束并标记无效, 避免数组越界。
-         * (rare 在此处会无条件继续, 但它没有这个数组尺寸保护) */
+        /* 极对数无效则直接结束, 避免 encoder_error_arr 越界 */
         if ((Config.pole_pairs <= 0) || (Config.pole_pairs > (int)MAX_MOTOR_POLE_PAIRS)) {
             Config.calib_valid = false;
             loop_count = 0;
@@ -381,6 +360,8 @@ void calibration_loop(void)
 
         flux_v_sum += sqrtf(SQ(FOC.Vd_out) + SQ(FOC.Vq_out));
         flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
+        flux_vq_sum += FOC.Vq_out;
+        flux_vd_sum += FOC.Vd_out;
         flux_vel_sum += encoder.vel;
         if (FOC.saturated) flux_sat = true;
         flux_cnt++;
@@ -393,17 +374,57 @@ void calibration_loop(void)
                 flux_v1    = v_avg;
                 flux_i1    = i_avg;
                 flux_sat1  = flux_sat;
-                flux_vel1  = flux_vel_sum / (float)flux_cnt;   /* 窗口平均转速 */
-                loop_count = 0;
+                flux_vel1  = flux_vel_sum / (float)flux_cnt;
+                flux_vq_a  = flux_vq_sum / (float)flux_cnt;
+                flux_vd_a  = flux_vd_sum / (float)flux_cnt;
+                flux_i_a   = i_avg;
+                loop_count   = 0;
                 flux_vel_sum = 0.0f;
-                mCalibStep = CS_FLUX_RAMP2;
+                flux_vq_sum  = 0.0f;
+                flux_vd_sum  = 0.0f;
+                flux_v_sum   = 0.0f;
+                flux_i_sum   = 0.0f;
+                flux_cnt     = 0;
+                FOC.calib_iq = Config.calib_current * FLUX_IQ_GAIN * FLUX_RTEST_RATIO;
+                mCalibStep = CS_FLUX_RTEST;
             } else {
                 flux_v2   = v_avg;
                 flux_i2   = i_avg;
                 flux_sat2 = flux_sat;
                 flux_vel2 = flux_vel_sum / (float)flux_cnt;
+                flux_vq_b = flux_vq_sum / (float)flux_cnt;
+                flux_vd_b = flux_vd_sum / (float)flux_cnt;
                 mCalibStep = CS_FLUX_END;
             }
+        }
+    } break;
+
+    case CS_FLUX_RTEST: {
+        /* 同转速变电流: ΔVq = R·ΔIq, 反电势项抵消, 用于校验 R */
+        FOC.calib_angle += FOC.calib_phase_vel / (float)CAL_LOOP_HZ;
+        if (FOC.calib_angle >= M_2PI) FOC.calib_angle -= M_2PI;
+
+        flux_vq_sum  += FOC.Vq_out;
+        flux_i_sum   += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
+        flux_vel_sum += encoder.vel;
+        flux_cnt++;
+
+        if (flux_cnt >= FLUX_MEAS_SAMPLES) {
+            float vq_b = flux_vq_sum / (float)flux_cnt;
+            float i_b  = flux_i_sum / (float)flux_cnt;
+            float di   = flux_i_a - i_b;
+            if (fabsf(di) > 0.1f) {
+                flux_r_est = (flux_vq_a - vq_b) / di;
+            }
+            printf("flux Rtest: I %.3f->%.3f A, Vq %.4f->%.4f V, vel %.3f rps, R_est=%.4f Ohm\n",
+                   flux_i_a, i_b, flux_vq_a, vq_b,
+                   flux_vel_sum / (float)flux_cnt, flux_r_est);
+
+            FOC.calib_iq = Config.calib_current * FLUX_IQ_GAIN;
+            flux_v_sum = flux_i_sum = flux_vq_sum = flux_vel_sum = 0.0f;
+            flux_cnt   = 0;
+            loop_count = 0;
+            mCalibStep = CS_FLUX_RAMP2;
         }
     } break;
 
@@ -442,8 +463,7 @@ void calibration_loop(void)
             float lambda_simple =
                 (flux_v2 - flux_v1) / (FLUX_SPEED2 - FLUX_SPEED1);
 
-            /* 诊断: 两个转速点的实测电压/电流/机械转速
-             * 期望 vel 与给定电角速度匹配: vel = w_e/(2*pi*pole_pairs) */
+            /* 两个转速点的实测电压/电流/转速 (vel 应 = w_e/(2π·p)) */
             printf("flux pts: V1=%.4f I1=%.3f vel1=%.3f | V2=%.4f I2=%.3f vel2=%.3f\n",
                    flux_v1, flux_i1, flux_vel1, flux_v2, flux_i2, flux_vel2);
             printf("flux cmd: we1=%.1f we2=%.1f rad/s (预期 vel1=%.3f vel2=%.3f rps)\n",
@@ -453,17 +473,43 @@ void calibration_loop(void)
             printf("flux: R=%.3f Ohm lambda=%.6f Wb (simple %.6f)\n",
                    res, lambda, lambda_simple);
 
-            /* 只在和电阻标定值接近时才采纳: 磁链标定若失步(异响/滑差),
-             * 算出的 R 是垃圾, 不应覆盖专门用两点伏安法测得的电阻 */
+            /* 用 Vq 分量与 R_est 解 lambda, 两转速点互相校验 */
+            {
+                float rr  = (flux_r_est > 0.001f) ? flux_r_est : Config.phase_resistance;
+                float lv1 = (flux_vq_a - rr * flux_i1) / FLUX_SPEED1;
+                float lv2 = (flux_vq_b - rr * flux_i2) / FLUX_SPEED2;
+                /* 两点法(仅用 Vq): 同时消掉 R·Iq 与任何恒定电压偏置 */
+                float lvp = ((flux_vq_b - flux_vq_a) - rr * (flux_i2 - flux_i1)) /
+                            (FLUX_SPEED2 - FLUX_SPEED1);
+                /* 用 |ΔV| 而非 Δ|V|: 两者近乎垂直时模差会严重低估 */
+                float dvd = flux_vd_b - flux_vd_a;
+                float dvq = flux_vq_b - flux_vq_a;
+                float dvm = sqrtf(SQ(dvd) + SQ(dvq));
+                float lam_vec = dvm / (FLUX_SPEED2 - FLUX_SPEED1);
+
+                printf("flux Vq: Vq1=%.4f Vq2=%.4f Vd1=%.4f Vd2=%.4f (R=%.4f)\n",
+                       flux_vq_a, flux_vq_b, flux_vd_a, flux_vd_b, rr);
+                printf("flux Vq: lam1=%.6f lam2=%.6f (单点, 差%.0f%%)  两点法=%.6f\n",
+                       lv1, lv2,
+                       100.0f * (lv1 - lv2) / ((lv1 + lv2) * 0.5f + 1e-9f), lvp);
+                printf("flux vec: |dV|=%.4f (模差仅%.4f) -> lambda_vec=%.6f Wb\n",
+                       dvm, flux_v2 - flux_v1, lam_vec);
+
+                /* 矢量差分法作为最终磁链; 无效时回退到模差法 */
+                if ((lam_vec > 0.00005f) && (lam_vec < 1.0f)) {
+                    Config.flux_linkage = lam_vec;
+                } else if ((lambda > 0.00005f) && (lambda < 1.0f)) {
+                    Config.flux_linkage = lambda;
+                }
+            }
+
+            /* 磁链标定的 R 只在接近电阻标定值时才采纳 */
             if ((res > 0.01f) && (res < 50.0f) &&
-                (fabsf(res - Config.phase_resistance) < 0.5f * Config.phase_resistance)) {
+                (fabsf(res - Config.phase_resistance) < 0.2f * Config.phase_resistance)) {
                 Config.phase_resistance = res;
             } else {
                 printf("flux: R rejected (%.4f vs %.4f), keep %.4f\n",
                        res, Config.phase_resistance, Config.phase_resistance);
-            }
-            if ((lambda > 0.00005f) && (lambda < 1.0f)) {
-                Config.flux_linkage = lambda;
             }
             FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
         } else {
@@ -573,8 +619,7 @@ void calibration_loop(void)
         }
     } break;
 
-    /* 收尾 (照搬 rare 的 CS_REPORT_OFFSET_LUT):
-     * 停留 OFFSET_LUT_NUM × 1ms, 供上位机读回偏移表, 然后结束校准 */
+    /* 收尾: 停留一段时间供上位机读回偏移表, 然后结束校准 */
     case CS_REPORT_OFFSET_LUT:
         if (sample_count < (int32_t)OFFSET_LUT_NUM) {
             if (time > next_sample_time) {
@@ -637,15 +682,7 @@ void calibration_loop(void)
     loop_count++;
 }
 
-/* ===================== 齿槽转矩补偿标定 =====================
- * 理论 (照搬 rare_foc):
- *   ① 位置环【逐点步进】: 每 25ms 把位置指令前进一步(1/256 圈机械角),
- *      停稳后记录"保持该位置所需的 q 轴电流" FOC.Iq_filt。
- *   ② 静止测量 => 不含动摩擦, 所以【不减均值】。
- *   ③ 正转测一遍、反转再测一遍, 两者【取平均】, 抵消静摩擦/滞回的方向性。
- *   ④ 表按【单圈机械角】索引: 256 点覆盖一整圈机械角, 而不是一个电周期。
- * 运行时由 CONTROLLER_loop 按机械角查表, 前馈叠加到 iq_set。
- */
+/* 齿槽标定 (照搬 rare_foc): 位置环逐点步进测保持电流, 正反转平均, 表按机械角索引 */
 static int      cg_number;   /* 已走步数 */
 static uint32_t cg_loop_cnt; /* 步进分频计数 */
 static bool     cg_valid;    /* 本次标定是否成功 */

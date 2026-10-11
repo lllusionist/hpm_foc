@@ -29,6 +29,7 @@ typedef enum eCalibStep {
     CS_FLUX_START,
     CS_FLUX_RAMP1,
     CS_FLUX_MEAS1,
+    CS_FLUX_RTEST,   // 同转速降电流, 用 ΔVq=Δ(R·Iq) 直接测 R (反电势项抵消)
     CS_FLUX_RAMP2,
     CS_FLUX_MEAS2,
     CS_FLUX_END,
