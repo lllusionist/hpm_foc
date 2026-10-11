@@ -27,9 +27,13 @@
  *       退化成直流), 末轮由 Z² = R² + (ωL)² 解出 L。
  * =========================================================== */
 #define L_CAL_CYCLES (CAL_LOOP_HZ / 2U) // 电感: 每轮正弦注入时长 0.5s
-#define CALIB_R_STEP_V (0.05f)		    // Δu2: 电阻升压步长 (V)
+/* 步长按"电压量程"派生, 不写死绝对值 —— 这样同一套代码能同时适配:
+ *   低阻航模 (0.03Ω): calib_voltage=1.0V -> 步长 0.05V, 每步约 1.7A
+ *   高阻云台 (10Ω)  : calib_voltage=3.0V -> 步长 0.15V, 每步约 15mA
+ * 两者都在约 20 步内扫完量程, 两点法的电流差也都够用。 */
+#define CALIB_R_STEP_V (Config.calib_voltage * 0.05f) // Δu2: 电阻升压步长 (V)
 #define R_CAL_WINDOW   (CAL_LOOP_HZ / 5U)  // 每个工作点停留 200ms
-#define CALIB_L_MIN_V  (0.05f)		    // 电感注入幅值下限 (V)
+#define CALIB_L_MIN_V  (Config.calib_voltage * 0.05f) // 电感注入幅值下限 (V)
 
 static int encoder_error_arr[MAX_MOTOR_POLE_PAIRS * SAMPLES_PER_PPAIR];
 
@@ -57,7 +61,7 @@ static float flux_vd_a, flux_vd_b;   // 两个转速点的 Vd 均值
  * 交替给 +I 和 −I, 两次都在正转, 故摩擦方向相同:
  *   J·2π·a+ = Kt·I − Tf ;  J·2π·a− = −Kt·I − Tf
  *   => J = Kt·I / (π·(a+ − a−))   (Tf 自动消掉)              */
-#define J_CAL_IQ      (2.5f)   /* 测试电流 (A), 须超过齿槽峰值(约1.4A) */
+#define J_CAL_IQ      (Config.calib_current * 0.5f)   /* 测试电流: 标定电流的一半 */
 #define J_CAL_SAMPLES (300U)   /* 每段采样点数 (1kHz -> 0.3s) */
 #define J_SPINUP_RPS  (1.0f)   /* 起转目标 (rps), 保证两段都在正转 */
 static float    j_sum_t, j_sum_v, j_sum_tv, j_sum_tt;
