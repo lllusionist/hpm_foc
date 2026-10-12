@@ -82,10 +82,10 @@ void config_init(void)
     
     Config.default_op_mode        = CONTROL_MODE_POSITION_FILTER;
     Config.pos_p_gain             = 5.0f;
-    Config.vel_p_gain             = 0.10f;
-    Config.vel_i_gain             = 0.01f;
+    Config.vel_p_gain             = 8.0f;   /* 齿槽补偿后残差靠 Kp 硬压: 实测 8.0 纹波 2.07%, 2.49 时 3.36% */
+    Config.vel_i_gain             = 78.3f;
     Config.current_ff_gain        = 0.001f;
-    Config.current_ctrl_bw        = 1000;
+    Config.current_ctrl_bw        = 700;    /* L/R: 航模230us/云台306us, 1000Hz 高于对象极点会放大采样噪声 */
     Config.anticogging_enable     = 1;
     Config.target_velcity_window  = 0.5f;
     Config.target_position_window = 0.01f;
