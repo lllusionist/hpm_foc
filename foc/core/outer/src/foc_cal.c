@@ -987,6 +987,12 @@ void anticogging_end(void)
     foc_disarm();
     pwm_output_low_sides();
 
+    /* 必须在 CONFIG_save_to_flash() 之前恢复速度环增益:
+     * 该函数保存的是调用时刻的整个 Config, 若先保存就会把齿槽扫描期间
+     * 的临时增益(8.0/10.0)一并写进 Flash, 下次上电读回来即永久污染。 */
+    Config.vel_p_gain = cg_vel_p_save;
+    Config.vel_i_gain = cg_vel_i_save;
+
     if (cg_valid) {
         Config.cogging_map_valid  = 1;
         Config.anticogging_enable = 1;
@@ -1005,9 +1011,6 @@ void anticogging_end(void)
         printf("cogging: aborted, invalid (phase=%d samples=%d travel=%.1f rad)\n",
                cg_phase, cg_number, (double)cg_travel);
     }
-
-    Config.vel_p_gain = cg_vel_p_save;
-    Config.vel_i_gain = cg_vel_i_save;
 
     Controller.input_velocity        = 0.0f;
     Controller.input_velocity_buffer = 0.0f;
