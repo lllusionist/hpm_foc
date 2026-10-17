@@ -97,6 +97,27 @@ void foc_update_voltages(void)
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
+/* 死区补偿: 死区期间输出电压偏离指令, 按电流方向逐相补回 ±(t_dead/T_pwm) 占空比。
+ * ITH 为过零过渡带 —— 太窄时补偿量近似方波, 低速会出现可听啸叫。 */
+#define DT_DEAD_NS   (PWM_DEAD_TIME_NS + 100U)  /* 仅 FD6288 的 100ns */
+#define DT_COMP_ITH  (0.8f)                     /* 过零过渡带(A) */
+
+static void foc_deadtime_comp(void)
+{
+	const float dt_comp = (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
+	float ca = ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
+	float cb = ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
+	float cc = ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
+
+	if (ca > 1.0f) { ca = 1.0f; } else if (ca < -1.0f) { ca = -1.0f; }
+	if (cb > 1.0f) { cb = 1.0f; } else if (cb < -1.0f) { cb = -1.0f; }
+	if (cc > 1.0f) { cc = 1.0f; } else if (cc < -1.0f) { cc = -1.0f; }
+
+	FOC.dtc_a += dt_comp * ca;
+	FOC.dtc_b += dt_comp * cb;
+	FOC.dtc_c += dt_comp * cc;
+}
+
 void FOC_voltage(float Vd, float Vq, float phase)
 {
 	float v_to_mod = 1.5f / FOC.Vbus_filt;
@@ -116,6 +137,7 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
 
 	if (0 == SVPWM(alpha, beta, &FOC.dtc_a, &FOC.dtc_b, &FOC.dtc_c)) {
+		foc_deadtime_comp();
 		pwm_set_duty(FOC.dtc_a, FOC.dtc_b, FOC.dtc_c);
 	}
 }
@@ -276,6 +298,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
 
 	if (0 == SVPWM(alpha, beta, &FOC.dtc_a, &FOC.dtc_b, &FOC.dtc_c)) {
+		foc_deadtime_comp();
 		pwm_set_duty(FOC.dtc_a, FOC.dtc_b, FOC.dtc_c);
 	}
 
