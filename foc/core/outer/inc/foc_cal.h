@@ -40,7 +40,14 @@ typedef enum eCalibStep {
     CS_ENCODER_CCW_LOOP,
     CS_ENCODER_END,
 
-    // (转动惯量 J 标定已删除)
+    // 转动惯量 J: 交替给 ±Iq, 用加速度斜率差消掉摩擦
+    //   J·2π·a+ = Kt·I − Tf ;  J·2π·a− = −Kt·I − Tf
+    //   => J = Kt·I / (π·(a+ − a−))
+    CS_MOTOR_J_START,
+    CS_MOTOR_J_SPINUP,
+    CS_MOTOR_J_ACC,
+    CS_MOTOR_J_DEC,
+    CS_MOTOR_J_END,
 
     // 收尾 (rare 的 CS_REPORT_OFFSET_LUT): 停留一段时间供上位机读回偏移表, 然后结束
     CS_REPORT_OFFSET_LUT,
