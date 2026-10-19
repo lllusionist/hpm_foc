@@ -239,7 +239,8 @@ void CONTROLLER_loop(void)
         iq_set     = CLAMP(iq_set, Imin, Imax);
     }
 
-    // 齿槽转矩前馈补偿 (照搬 rare_foc: 单圈机械角索引, 静止测得的保持电流)
+    // 齿槽转矩前馈补偿 (单圈机械角索引; 位置保持法测得保持电流,
+    // 与齿槽转矩同向, 前馈取正)
     if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
         Config.anticogging_enable && Config.cogging_map_valid &&
         (foc_get_stage() != ANTICOGGING)) {

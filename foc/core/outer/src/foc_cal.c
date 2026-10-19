@@ -812,28 +812,27 @@ void calibration_loop(void)
 }
 
 /* 齿槽标定 (照搬 rare_foc): 位置环逐点步进测保持电流, 正反转平均, 表按机械角索引 */
-static int      cg_number;   /* 采样点数 */
-static bool     cg_valid;    /* 本次标定是否成功 */
+#define CG_STEP_MS   50U    /* 每步保持时间 (ms); 25ms 时 56/84 阶表噪声大 */
+#define CG_GAP_STEPS 100    /* 起始/换向空走步数 */
+#define CG_LOOP_DIV  ((CG_STEP_MS * CAL_LOOP_HZ) / 1000U) /* 1kHz -> 50 */
+
+static int      cg_number;     /* 已走步数 */
+static uint32_t cg_loop_cnt;   /* 25ms 分频计数 */
+static uint32_t cg_total_ticks;
+static bool     cg_valid;
 static bool     cg_running;
+static int16_t  cg_tmp[COGGING_MAP_NUM];
+static float    cg_pos_p_save;
 
-/* 齿槽标定: 恒速扫描法。
- * 让电机连续匀速转过若干圈, 按机械角分桶累加 Iq, 正反转各扫一遍取平均
- * 并减掉直流分量 (动摩擦)。相比逐点步进, 连续运动不含静摩擦, 从根本上
- * 避开"攒力->冲过头"的粘滑 (步进法稳态滞后 perr_ss = v/Kp 达 12.5 步)。 */
-#define CG_SCAN_RPS   (0.5f)   /* 扫描速度 (rps) */
-#define CG_RAMP_TIME  (2.5f)   /* 加速/换向稳定时间 (s), 必须够长才能真正匀速 */
-#define CG_SCAN_REVS  (2.0f)   /* 每个方向扫描圈数 */
-#define COGGING_VEL_P_GAIN (8.0f)   /* 扫描期间的速度环增益 (原值 0.1) */
-#define COGGING_VEL_I_GAIN (10.0f)  /* 原值 0.01, 太小则攒不出电流 */
-static float    cg_vel_p_save, cg_vel_i_save;
-
-enum { CG_RAMP_FWD, CG_SCAN_FWD, CG_RAMP_REV, CG_SCAN_REV, CG_DONE };
-static int      cg_phase;
-static uint32_t cg_ramp_cnt;
-static float    cg_travel;    /* 本方向已转过的机械角 (rad) */
-static float    cg_prev_pos;  /* 上一拍的机械角 */
-static int32_t  cg_sum[COGGING_MAP_NUM];
-static uint16_t cg_cnt[COGGING_MAP_NUM];
+/* 位置指令前进/后退一步 (单圈机械角, 循环卷绕) */
+static void cg_step(float dir)
+{
+    const float delta   = dir * (M_2PI / (float)COGGING_MAP_NUM);
+    float       pos_ref = Controller.input_position + delta;
+    while (pos_ref >= M_2PI) pos_ref -= M_2PI;
+    while (pos_ref < 0.0f)   pos_ref += M_2PI;
+    Controller.input_position = pos_ref;
+}
 
 /* 单圈机械角 -> 补偿表下标 (0 ~ 255) */
 static int cg_index(float pos)
@@ -850,11 +849,19 @@ static float cg_pos(void)
     return (float)encoder.count_aligned * (M_2PI / ENCODER_CPR_F);
 }
 
+/* 采样一次静止保持电流, 按倍率转成 int16 */
+static int16_t cg_sample(void)
+{
+    int32_t raw = (int32_t)(FOC.Iq_filt * COGGING_SCALE);
+    if (raw > 32767)  raw = 32767;
+    if (raw < -32768) raw = -32768;
+    return (int16_t)raw;
+}
+
 void anticogging_start(void)
 {
     /* 先存档, 任何路径退出都能在 anticogging_end 里恢复 */
-    cg_vel_p_save = Config.vel_p_gain;
-    cg_vel_i_save = Config.vel_i_gain;
+    cg_pos_p_save = Config.pos_p_gain;
 
     if (!Config.calib_valid || (Config.pole_pairs <= 0)) {
         printf("cogging: calibration required first\n");
@@ -866,28 +873,24 @@ void anticogging_start(void)
     FOC.calib_mode      = false;
     FOC.calib_vinj_mode = false;
 
-    /* 速度模式: 让电机连续匀速旋转 (恒速扫描) */
-    Controller.ctrl_mode      = CONTROL_MODE_VELOCITY_RAMP;
-    Controller.vel_setpoint   = 0.0f;
+    /* 位置模式: 逐点步进定位 (照搬 rare_foc), 保持电流就是位置相关转矩 */
+    Controller.ctrl_mode      = CONTROL_MODE_POSITION_FILTER;
     Controller.target_reached = false;
-    CONTROLLER_reset();
+    CONTROLLER_reset();   /* input_position 对齐当前实际机械位置 */
+
+    /* 逐步定位需要更大的位置 P 才能克服静摩擦; 速度环保持 0.03/1.5 稳定.
+     * 原值 5.0 时每步只给 0.12rps / 0.03A, 转子根本不动, 表全落在同一个 bin. */
+    Config.pos_p_gain = 50.0f;
 
     /* 标定期间旧表失效, 避免运行时补偿污染采样 */
     Config.cogging_map_valid = 0;
     memset(Config.cogging_map, 0, sizeof(Config.cogging_map));
-    memset(cg_sum, 0, sizeof(cg_sum));
-    memset(cg_cnt, 0, sizeof(cg_cnt));
 
-    cg_phase    = CG_RAMP_FWD;
-    cg_ramp_cnt = 0;
-    cg_travel   = 0.0f;
-    cg_prev_pos = cg_pos();
-    cg_number   = 0;
-    cg_valid    = false;
-    cg_running  = true;
-
-    Config.vel_p_gain = COGGING_VEL_P_GAIN;
-    Config.vel_i_gain = COGGING_VEL_I_GAIN;
+    cg_number      = 0;
+    cg_loop_cnt    = 0;
+    cg_total_ticks = 0;
+    cg_valid       = false;
+    cg_running     = true;
 }
 
 bool anticogging_loop(void)
@@ -896,76 +899,81 @@ bool anticogging_loop(void)
         return true;
     }
 
-    const float pos   = cg_pos();
-    const float omega = CG_SCAN_RPS;   /* vel_setpoint 单位是 rps, 不能再乘 2π */
-
-    if ((cg_phase == CG_SCAN_FWD) || (cg_phase == CG_SCAN_REV)) {
-        /* 每拍重申速度指令: 否则 vel_setpoint 会被清 0, 电机停转而永久卡住 */
-        Controller.vel_setpoint          = (cg_phase == CG_SCAN_FWD) ? omega : -omega;
-        Controller.input_velocity        = Controller.vel_setpoint;
-        Controller.input_velocity_buffer = Controller.vel_setpoint;
-
-        /* 累加转角 (过零修正) 并按机械角分桶累加 Iq; 正反转写同一组桶 */
-        float d = pos - cg_prev_pos;
-        while (d >  3.14159265f) d -= M_2PI;
-        while (d < -3.14159265f) d += M_2PI;
-        cg_prev_pos = pos;
-        /* 带符号累加净转角: 用 fabsf(d) 会把编码器抖动当成前进而虚增行程 */
-        cg_travel  += d;
-
-        int idx = cg_index(pos);
-        cg_sum[idx] += (int32_t)(FOC.Iq_filt * COGGING_SCALE);
-        cg_cnt[idx]++;
-        cg_number++;
-
-        if (fabsf(cg_travel) >= (CG_SCAN_REVS * M_2PI)) {
-            if (cg_phase == CG_SCAN_FWD) {
-                cg_phase    = CG_RAMP_REV;      /* 换向 */
-                cg_ramp_cnt = 0;
-                Controller.vel_setpoint = 0.0f;
-            } else {
-                cg_phase = CG_DONE;
-            }
-        }
-        return false;
+    /* 总超时: 正常约 712 步 × 25ms ≈ 18s, 60s 足够 */
+    if (++cg_total_ticks > (uint32_t)(60.0f * (float)CAL_LOOP_HZ)) {
+        cg_valid   = false;
+        cg_running = false;
+        return true;
+    }
+    if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
+        printf("cogging: step=%d mode=%d stage=%d armed=%d inpos=%.3f act=%.3f "
+               "pg=%.1f vg=%.3f iqset=%.3f Iq=%.2f\n",
+               cg_number, Controller.ctrl_mode, (int)foc_get_stage(),
+               (int)FOC.is_armed, (double)Controller.input_position,
+               (double)cg_pos(), (double)Config.pos_p_gain,
+               (double)Config.vel_p_gain, (double)FOC.Iq_set,
+               (double)FOC.Iq_filt);
     }
 
-    if (cg_phase == CG_RAMP_FWD) {
-        Controller.vel_setpoint = omega;
-        if (++cg_ramp_cnt >= (uint32_t)(CG_RAMP_TIME * (float)CAL_LOOP_HZ)) {
-            cg_phase = CG_SCAN_FWD;
-            cg_travel = 0.0f;
-            cg_prev_pos = pos;
-        }
-    } else if (cg_phase == CG_RAMP_REV) {
-        Controller.vel_setpoint = -omega;
-        if (++cg_ramp_cnt >= (uint32_t)(CG_RAMP_TIME * (float)CAL_LOOP_HZ)) {
-            cg_phase = CG_SCAN_REV;
-            cg_travel = 0.0f;
-            cg_prev_pos = pos;
-        }
+    /* 1kHz -> 25ms 一步 */
+    if (++cg_loop_cnt < CG_LOOP_DIV) {
+        return false;
+    }
+    cg_loop_cnt = 0;
+
+    cg_number++;
+
+    if (cg_number <= CG_GAP_STEPS) {
+        /* 正转空走, 让位置环/速度环稳定 */
+        cg_step(+1.0f);
+
+    } else if (cg_number <= (CG_GAP_STEPS + (int)COGGING_MAP_NUM)) {
+        /* 正转采样: 记录保持当前位置所需的电流 */
+        int16_t index = (int16_t)cg_index(cg_pos());
+        Config.cogging_map[index] = cg_sample();
+        cg_step(+1.0f);
+
+    } else if (cg_number <= (CG_GAP_STEPS + (int)COGGING_MAP_NUM +
+                             CG_GAP_STEPS)) {
+        /* 反转空走 */
+        cg_step(-1.0f);
+
+    } else if (cg_number <= (CG_GAP_STEPS + (int)COGGING_MAP_NUM +
+                             CG_GAP_STEPS + (int)COGGING_MAP_NUM)) {
+        /* 反转采样: 与正转结果取平均, 抵消静摩擦/滞回方向性 */
+        int16_t index = (int16_t)cg_index(cg_pos());
+        Config.cogging_map[index] =
+            (Config.cogging_map[index] + cg_sample()) / 2;
+        cg_step(-1.0f);
+
     } else {
-        /* CG_DONE: 每桶求平均, 再减掉直流分量(动摩擦), 齿槽本身是零均值的 */
-        int32_t sum_all = 0;
-        int     nvalid  = 0;
+        /* 去掉直流分量 (平均摩擦/负载), 只保留位置相关转矩 */
+        int32_t sum = 0;
         for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-            if (cg_cnt[i] > 0U) {
-                cg_sum[i] /= (int32_t)cg_cnt[i];
-                sum_all   += cg_sum[i];
-                nvalid++;
-            }
+            sum += Config.cogging_map[i];
         }
-        int32_t mean = (nvalid > 0) ? (sum_all / nvalid) : 0;
-        printf("cogging raw: %d samples, %d/%u bins, mean %d (%.3f A)\n",
-               cg_number, nvalid, (unsigned)COGGING_MAP_NUM,
-               (int)mean, (float)mean / COGGING_SCALE);
+        int32_t mean = sum / (int32_t)COGGING_MAP_NUM;
         for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-            int32_t v = cg_sum[i] - mean;
+            int32_t v = (int32_t)Config.cogging_map[i] - mean;
             if (v >  32767) v =  32767;
             if (v < -32768) v = -32768;
             Config.cogging_map[i] = (int16_t)v;
         }
-        Controller.vel_setpoint = 0.0f;
+        /* 5-bin 圆周滑动平均: 保留 14/28/42 阶, 压掉 56/84 阶的静摩擦/位置噪声.
+         * 84 阶是齿槽, 但静态步进在 2rps 附近的高阶相位不可靠, 宁可少补. */
+        for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+            int32_t s = 0;
+            for (int k = -2; k <= 2; k++) {
+                int j = (int)i + k;
+                while (j < 0) j += (int)COGGING_MAP_NUM;
+                while (j >= (int)COGGING_MAP_NUM) j -= (int)COGGING_MAP_NUM;
+                s += Config.cogging_map[j];
+            }
+            cg_tmp[i] = (int16_t)(s / 5);
+        }
+        for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+            Config.cogging_map[i] = cg_tmp[i];
+        }
         cg_valid   = true;
         cg_running = false;
         return true;
@@ -981,11 +989,8 @@ void anticogging_end(void)
     foc_disarm();
     pwm_output_low_sides();
 
-    /* 必须在 CONFIG_save_to_flash() 之前恢复速度环增益:
-     * 该函数保存的是调用时刻的整个 Config, 若先保存就会把齿槽扫描期间
-     * 的临时增益(8.0/10.0)一并写进 Flash, 下次上电读回来即永久污染。 */
-    Config.vel_p_gain = cg_vel_p_save;
-    Config.vel_i_gain = cg_vel_i_save;
+    /* 必须在 CONFIG_save_to_flash() 之前恢复位置环增益, 否则 50.0 会写进 Flash */
+    Config.pos_p_gain = cg_pos_p_save;
 
     if (cg_valid) {
         Config.cogging_map_valid  = 1;
@@ -996,14 +1001,12 @@ void anticogging_end(void)
             if (Config.cogging_map[i] < mn) mn = Config.cogging_map[i];
             if (Config.cogging_map[i] > mx) mx = Config.cogging_map[i];
         }
-        printf("cogging: done, %u pts, %d samples, map %d~%d pkpk %d (%.3f A)\n",
+        printf("cogging: done, %u pts, %d steps, map %d~%d pkpk %d (%.3f A)\n",
                (unsigned)COGGING_MAP_NUM, cg_number, mn, mx, (int)(mx - mn),
                (float)(mx - mn) / COGGING_SCALE);
     } else {
         Config.cogging_map_valid = 0;
-        /* phase: 0=RAMP_FWD 1=SCAN_FWD 2=RAMP_REV 3=SCAN_REV 4=DONE */
-        printf("cogging: aborted, invalid (phase=%d samples=%d travel=%.1f rad)\n",
-               cg_phase, cg_number, (double)cg_travel);
+        printf("cogging: aborted, invalid (step=%d)\n", cg_number);
     }
 
     Controller.input_velocity        = 0.0f;
