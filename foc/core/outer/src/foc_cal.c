@@ -11,10 +11,10 @@
 
 /* 磁链: 开环拖动, 两转速点用矢量差分消掉 R 项 */
 #define FLUX_SPEED1 (2.0f * M_PI * 10.0f) // 低速点 (电角速度 rad/s)
-#define FLUX_SPEED2 (2.0f * M_PI * 30.0f) // 高速点
+#define FLUX_SPEED2 (2.0f * M_PI * 14.0f) // 高速点: 原 30Hz, 云台 30Hz+0.7A 电压饱和产生毛刺
 #define FLUX_SETTLE_TIME (1.5f)		  // 每个转速稳定时间 (s)
 #define FLUX_MEAS_SAMPLES (1500U)	  // 每点采样点数 (1kHz -> 1.5s, 低速点也够转 1 圈)
-#define FLUX_IQ_GAIN (1.4f)   // 拖动电流 = calib_current × 该系数 (5A 会失步)
+#define FLUX_IQ_GAIN (0.8f)   // 拖动电流 = calib_current × 该系数 (原 1.4, 云台 0.7A 易饱和)
 #define FLUX_RTEST_RATIO (0.5f)   // 同转速校验的降流比例
 
 /* ============ 电阻 / 电感 标定方案 (CN103560736B) ============
@@ -57,26 +57,6 @@ static float flux_vq_b;              // 第二转速点的 Vq 均值
 static float flux_vd_sum;            // Vd 窗口累加 (矢量差分法用)
 static float flux_vd_a, flux_vd_b;   // 两个转速点的 Vd 均值
 
-/* ===== 转动惯量 J 标定 =====
- * 交替给 +I 和 −I, 两次都在正转, 故摩擦方向相同:
- *   J·2π·a+ = Kt·I − Tf ;  J·2π·a− = −Kt·I − Tf
- *   => J = Kt·I / (π·(a+ − a−))   (Tf 自动消掉)              */
-#define J_CAL_IQ      (Config.calib_current * 0.5f)   /* 测试电流: 标定电流的一半 */
-#define J_CAL_SAMPLES (300U)   /* 每段采样点数 (1kHz -> 0.3s) */
-#define J_SPINUP_RPS  (1.0f)   /* 起转目标 (rps), 保证两段都在正转 */
-static float    j_sum_t, j_sum_v, j_sum_tv, j_sum_tt;
-static uint32_t j_cnt;
-static float    j_slope_acc, j_slope_dec;
-static float    j_vel_limit_save;   /* 标定期间需放开速度限幅 */
-
-/* 最小二乘拟合 vel(t) 斜率, 单位 rps/s */
-static float j_slope(void)
-{
-    float n   = (float)j_cnt;
-    float den = n * j_sum_tt - j_sum_t * j_sum_t;
-    if (fabsf(den) < 1e-6f) return 0.0f;
-    return (n * j_sum_tv - j_sum_t * j_sum_v) / den * (float)CAL_LOOP_HZ;
-}
 static uint32_t flux_cnt;
 static bool flux_sat, flux_sat1, flux_sat2;
 
@@ -550,7 +530,10 @@ void calibration_loop(void)
 
         phase_set  = 0;
         loop_count = 0;
-        mCalibStep = CS_MOTOR_J_START;
+        /* J 段已删除: 云台开环定转矩测惯量毛刺太大, J 只用于建议速度环增益.
+         * flux 结束后直接进入收尾报告。 */
+        printf("J: skipped\n");
+        mCalibStep = CS_REPORT_OFFSET_LUT;
     } break;
 
     case CS_ENCODER_START:
@@ -651,108 +634,7 @@ void calibration_loop(void)
         }
     } break;
 
-    case CS_MOTOR_J_START:
-        Controller.ctrl_mode     = CONTROL_MODE_CURRENT_RAMP;
-        Controller.input_current = 0.0f;   /* CURRENT_RAMP 以 input_current 为目标 */
-        Controller.cur_setpoint  = 0.0f;
-        FOC.calib_mode      = false;
-        FOC.calib_vinj_mode = false;
-        FOC.calib_id        = 0.0f;   /* 清掉磁链标定残留的 7A 拖动电流 */
-        FOC.calib_iq        = 0.0f;
-        foc_arm();
-        /* 电流模式下 iq_set 会被 (velocity_limit - vel)*vel_p_gain 夹住,
-         * 标定需要 2A 加速度电流, 故临时放开速度限幅 */
-        j_vel_limit_save = Config.velocity_limit;
-        Config.velocity_limit = 10000.0f;
-        j_slope_acc = 0.0f;
-        j_slope_dec = 0.0f;
-        loop_count  = 0;
-        mCalibStep  = CS_MOTOR_J_SPINUP;
-        break;
-
-    case CS_MOTOR_J_SPINUP:
-    case CS_MOTOR_J_ACC:
-    case CS_MOTOR_J_DEC: {
-        /* 直接用电流环 + 编码器角度驱动, 绕开 Controller 的指令路径
-         * (实测 CONTROLLER_loop 的 iq_set 送不到 FOC.Iq_set) */
-        float iq = ((mCalibStep == CS_MOTOR_J_DEC) ? -J_CAL_IQ : J_CAL_IQ);
-        /* CALIBRATION 状态下 foc_adc_callback 只执行 calib_mode 分支
-         * (stage 非 RUN/ANTICOGGING 时在普通电流环之前就 return 了),
-         * 所以必须走 calib_mode; 但角度/角速度改用编码器实测值,
-         * 电机才能自由加速 —— 这正是测转动惯量所需的。 */
-        FOC.calib_mode      = true;
-        FOC.calib_id        = 0.0f;
-        FOC.calib_iq        = iq;
-        FOC.calib_angle     = encoder.phase;
-        FOC.calib_phase_vel = encoder.vel * M_2PI * (float)Config.pole_pairs;
-
-        if (mCalibStep == CS_MOTOR_J_SPINUP) {
-            if ((encoder.vel >= J_SPINUP_RPS) || (time > 3.0f)) {
-                printf("J spinup: t=%.2f vel=%.3f Iq=%.3f set=%.3f ciq=%.2f armed=%d\n",
-                       (double)time, encoder.vel, (double)FOC.Iq, (double)FOC.Iq_set,
-                       (double)FOC.calib_iq, (int)FOC.is_armed);
-                j_sum_t = j_sum_v = j_sum_tv = j_sum_tt = 0.0f;
-                j_cnt = 0;
-                loop_count = 0;
-                mCalibStep = CS_MOTOR_J_ACC;
-            }
-            break;
-        }
-
-        j_sum_t  += (float)j_cnt;
-        j_sum_v  += encoder.vel;
-        j_sum_tv += (float)j_cnt * encoder.vel;
-        j_sum_tt += (float)j_cnt * (float)j_cnt;
-        j_cnt++;
-
-        /* DEC 段接近零点就提前收工。
-         * 因 |a-|/a+ = (KtI+Tf)/(KtI-Tf) 恒大于 1 (实测航模 2.35 倍),
-         * 固定 0.3s 必然冲过零点反转: 摩擦方向随之翻转, 既造成异响/失步,
-         * 也破坏 J = Kt·I/(π(a+ - a-)) "两段同向" 的前提。
-         * 保留 30 点以上再拟合, 避免样本过少。 */
-        if ((mCalibStep == CS_MOTOR_J_DEC) && (j_cnt > 30U) && (encoder.vel < 0.3f)) {
-            j_slope_dec = j_slope();
-            mCalibStep  = CS_MOTOR_J_END;
-            break;
-        }
-
-        if (j_cnt >= J_CAL_SAMPLES) {
-            if (mCalibStep == CS_MOTOR_J_ACC) {
-                j_slope_acc = j_slope();
-                j_sum_t = j_sum_v = j_sum_tv = j_sum_tt = 0.0f;
-                j_cnt = 0;
-                mCalibStep = CS_MOTOR_J_DEC;
-            } else {
-                j_slope_dec = j_slope();
-                mCalibStep = CS_MOTOR_J_END;
-            }
-        }
-    } break;
-
-    case CS_MOTOR_J_END: {
-        Controller.input_current = 0.0f;
-        Controller.cur_setpoint  = 0.0f;
-        Config.velocity_limit = j_vel_limit_save;
-        pwm_output_low_sides();
-
-        float da = j_slope_acc - j_slope_dec;
-        float kt = 1.5f * (float)Config.pole_pairs * Config.flux_linkage;
-        float J  = 0.0f;
-        if (fabsf(da) > 1e-3f) {
-            J = kt * J_CAL_IQ / (3.14159265f * da);
-        }
-        printf("J: a+=%.3f a-=%.3f rps/s  Kt=%.5f -> J=%.3e kg.m2\n",
-               j_slope_acc, j_slope_dec, kt, J);
-        if ((J > 1e-7f) && (J < 1e-1f)) {
-            /* 由 J 反算速度环初值: Kp = 4π·ζ·ωbw·J/Kt, Ki = 2π·J·ωbw²/Kt
-             * 取 ζ=1, 带宽 10Hz (电流环 1000Hz 的 1/100) */
-            const float wbw = 2.0f * 3.14159265f * 10.0f;
-            printf("J: 建议速度环 Kp=%.2f Ki=%.1f (zeta=1, bw=10Hz)\n",
-                   4.0f * 3.14159265f * wbw * J / kt,
-                   2.0f * 3.14159265f * J * wbw * wbw / kt);
-        }
-        mCalibStep = CS_REPORT_OFFSET_LUT;
-    } break;
+    /* (J 段已删除) */
 
     /* 收尾: 停留一段时间供上位机读回偏移表, 然后结束校准 */
     case CS_REPORT_OFFSET_LUT:
