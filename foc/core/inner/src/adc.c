@@ -282,6 +282,28 @@ void isr_adc(void)
 		FOC.Ia = adc_dma_buf[0].result;
 		FOC.Ib = adc_dma_buf[1].result;
 		FOC.Ic = adc_dma_buf[2].result;
+
+		/*
+		 * 星形连接三相电流和恒为 0. ADC 队列是串行转换的, 高压调制时
+		 * 最后一路 (Ic) 最容易采到开关沿. 检测到坏样本时用前两相重建,
+		 * 保证电流环/死区补偿/过流保护看到的都是干净值.
+		 * FOC.isum 保留原始值, 继续作为采样质量诊断量.
+		 */
+		FOC.isum = ((FOC.Ia - FOC.Ia_midpoint) +
+			    (FOC.Ib - FOC.Ib_midpoint) +
+			    (FOC.Ic - FOC.Ic_midpoint)) * FOC_CURRENT_SCALE;
+		if (FOC.adc_ready && ((FOC.isum > 0.1f) || (FOC.isum < -0.1f))) {
+			float ic_fix = FOC.Ic_midpoint -
+				       (FOC.Ia - FOC.Ia_midpoint) -
+				       (FOC.Ib - FOC.Ib_midpoint);
+			if (ic_fix < 0.0f) {
+				ic_fix = 0.0f;
+			} else if (ic_fix > 65535.0f) {
+				ic_fix = 65535.0f;
+			}
+			FOC.Ic = ic_fix;
+		}
+
 		current_snapshot_seq++;
 		__asm volatile("fence rw, w" ::: "memory");
 		current_snapshot[0] = (uint16_t)FOC.Ia;
@@ -289,10 +311,6 @@ void isr_adc(void)
 		current_snapshot[2] = (uint16_t)FOC.Ic;
 		__asm volatile("fence rw, w" ::: "memory");
 		current_snapshot_seq++;
-
-		FOC.isum = ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
-			    (FOC.Ic - FOC.Ic_midpoint)) *
-			   FOC_CURRENT_SCALE;
 		FOC.adc_current_frames++;
 		FOC.adc_current_missed = 0U;
 
