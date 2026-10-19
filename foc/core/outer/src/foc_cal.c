@@ -5,7 +5,7 @@
 #include "foc_ctrl.h"
 
 #define CAL_LOOP_HZ (1000U)
-#define SAMPLES_PER_PPAIR (512U)
+#define SAMPLES_PER_PPAIR (160U)  /* 1kHz 下 6.25Hz 电, 每拍一点 => 2240 点/机械圈 */
 #define LUT_WINDOW        (128U) // offset LUT 滑动平均窗口
 #define MAX_MOTOR_POLE_PAIRS (20U) // 最大支持的极对数
 
@@ -545,45 +545,38 @@ void calibration_loop(void)
         break;
     case CS_ENCODER_CW_LOOP:
         if (sample_count < (int32_t)(Config.pole_pairs * SAMPLES_PER_PPAIR)) {
-            if (time > next_sample_time) {
-                next_sample_time += M_2PI / ((float)SAMPLES_PER_PPAIR * calib_phase_vel);
-                float mech_phase = phase_set / (float)Config.pole_pairs;
-                float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
-                if (mech_phase_wrapped < 0) mech_phase_wrapped += M_2PI;
-                int count_ref = (int)(mech_phase_wrapped * ENCODER_CPR_F / M_2PI);
-                int actual_count = (Config.encoder_dir == 1) ? encoder.raw : (ENCODER_CPR - 1 - encoder.raw);
-                int error = actual_count - count_ref;
-                while (error >  ENCODER_CPR / 2) error -= ENCODER_CPR;
-                while (error < -ENCODER_CPR / 2) error += ENCODER_CPR;
-                encoder_error_arr[sample_count] = error;
-                sample_count++;
-            }
-            phase_set += calib_phase_vel / (float)CAL_LOOP_HZ;
+            float mech_phase = phase_set / (float)Config.pole_pairs;
+            float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
+            if (mech_phase_wrapped < 0) mech_phase_wrapped += M_2PI;
+            int count_ref = (int)(mech_phase_wrapped * ENCODER_CPR_F / M_2PI);
+            int actual_count = (Config.encoder_dir == 1) ? encoder.raw : (ENCODER_CPR - 1 - encoder.raw);
+            int error = actual_count - count_ref;
+            while (error >  ENCODER_CPR / 2) error -= ENCODER_CPR;
+            while (error < -ENCODER_CPR / 2) error += ENCODER_CPR;
+            encoder_error_arr[sample_count] = error;
+            sample_count++;
+            phase_set += M_2PI / (float)SAMPLES_PER_PPAIR;
         } else {
-            phase_set -= calib_phase_vel / (float)CAL_LOOP_HZ;
+            phase_set -= M_2PI / (float)SAMPLES_PER_PPAIR;
             loop_count = 0;
             sample_count--;
-            next_sample_time = 0;
             mCalibStep = CS_ENCODER_CCW_LOOP;
         }
         FOC_voltage(drag_v, 0, phase_set);
         break;
     case CS_ENCODER_CCW_LOOP:
         if (sample_count >= 0) {
-            if (time > next_sample_time) {
-                next_sample_time += M_2PI / ((float)SAMPLES_PER_PPAIR * calib_phase_vel);
-                float mech_phase = phase_set / (float)Config.pole_pairs;
-                float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
-                if (mech_phase_wrapped < 0) mech_phase_wrapped += M_2PI;
-                int count_ref = (int)(mech_phase_wrapped * ENCODER_CPR_F / M_2PI);
-                int actual_count = (Config.encoder_dir == 1) ? encoder.raw : (ENCODER_CPR - 1 - encoder.raw);
-                int error = actual_count - count_ref;
-                while (error >  ENCODER_CPR / 2) error -= ENCODER_CPR;
-                while (error < -ENCODER_CPR / 2) error += ENCODER_CPR;
-                encoder_error_arr[sample_count] = (encoder_error_arr[sample_count] + error) / 2;
-                sample_count--;
-            }
-            phase_set -= calib_phase_vel / (float)CAL_LOOP_HZ;
+            float mech_phase = phase_set / (float)Config.pole_pairs;
+            float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
+            if (mech_phase_wrapped < 0) mech_phase_wrapped += M_2PI;
+            int count_ref = (int)(mech_phase_wrapped * ENCODER_CPR_F / M_2PI);
+            int actual_count = (Config.encoder_dir == 1) ? encoder.raw : (ENCODER_CPR - 1 - encoder.raw);
+            int error = actual_count - count_ref;
+            while (error >  ENCODER_CPR / 2) error -= ENCODER_CPR;
+            while (error < -ENCODER_CPR / 2) error += ENCODER_CPR;
+            encoder_error_arr[sample_count] = (encoder_error_arr[sample_count] + error) / 2;
+            sample_count--;
+            phase_set -= M_2PI / (float)SAMPLES_PER_PPAIR;
             FOC_voltage(drag_v, 0, phase_set);
         } else {
             pwm_output_low_sides();
