@@ -8,6 +8,20 @@ tController Controller;
 
 #define CTRL_PERIOD (1.0f / 5000.0f) /* Task_FOC 周期 (5kHz) */
 
+/* 低速摩擦前馈 + 增益调度 (4310 实测: 静摩擦约 0.05A, 动摩擦约 0.03A).
+ * 把 MOVE/BREAK 设为 0 可关闭前馈; VEL_BOOST_GAIN 设为 1 可关闭调度.
+ */
+#define FRICTION_FF_MOVE_A 0.030f
+#define FRICTION_FF_BREAK_A 0.050f
+#define FRICTION_FF_ENGAGE_VEL 0.010f
+#define FRICTION_FF_RELEASE_VEL 0.050f
+/* 基础增益已到 0.17/5.3, 低速不再额外放大 */
+#define VEL_BOOST_GAIN 1.0f
+#define VEL_BOOST_FULL_VEL 0.5f
+#define VEL_BOOST_END_VEL 1.0f
+
+static bool friction_boost;
+
 void CONTROLLER_update_input_pos_filter_gain(float bw)
 {
 	float bandwidth = bw * M_2PI;
@@ -48,6 +62,8 @@ void CONTROLLER_reset(void)
 	Controller.cur_setpoint = 0.0f;
 
 	Controller.vel_integrator = 0;
+
+	friction_boost = false;
 
 	Controller.input_updated = false;
 	Controller.target_reached = false;
@@ -237,9 +253,28 @@ void CONTROLLER_loop(void)
 	/* 速度环 PI */
 	iq_set = Controller.cur_setpoint;
 
+	float vel_kp = Config.vel_p_gain;
+	float vel_ki = Config.vel_i_gain;
+	bool low_speed_assist = (foc_get_stage() != ANTICOGGING);
+
 	if (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) {
+		/* 低速时静摩擦占主导, 平滑提升增益; 1rps 以上恢复原值 */
+		float av = fabsf(vel_meas);
+		float boost = 1.0f;
+		if (low_speed_assist) {
+			if (av < VEL_BOOST_FULL_VEL)
+				boost = VEL_BOOST_GAIN;
+			else if (av < VEL_BOOST_END_VEL)
+				boost = 1.0f + (VEL_BOOST_GAIN - 1.0f) *
+						   (VEL_BOOST_END_VEL - av) /
+						   (VEL_BOOST_END_VEL -
+						    VEL_BOOST_FULL_VEL);
+		}
+		vel_kp *= boost;
+		vel_ki *= boost;
+
 		v_err = vel_des - vel_meas;
-		iq_set += Config.vel_p_gain * v_err;
+		iq_set += vel_kp * v_err;
 		iq_set += Controller.vel_integrator;
 	}
 
@@ -252,19 +287,39 @@ void CONTROLLER_loop(void)
 		iq_set = CLAMP(iq_set, Imin, Imax);
 	}
 
+	/* 摩擦前馈: 粘住时给突破电流, 转起来后回到动摩擦偏置 */
+	if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
+	    low_speed_assist) {
+		float av = fabsf(vel_meas);
+		if (av < FRICTION_FF_ENGAGE_VEL)
+			friction_boost = true;
+		else if (av > FRICTION_FF_RELEASE_VEL)
+			friction_boost = false;
+
+		float ff =
+		    friction_boost ? FRICTION_FF_BREAK_A : FRICTION_FF_MOVE_A;
+		if (vel_des > FRICTION_FF_ENGAGE_VEL)
+			iq_set += ff;
+		else if (vel_des < -FRICTION_FF_ENGAGE_VEL)
+			iq_set -= ff;
+	}
+
 	/* 齿槽转矩前馈补偿 (单圈机械角索引; 位置保持法测得保持电流, */
 	/* 与齿槽转矩同向, 前馈取正) */
 	if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    Config.anticogging_enable && Config.cogging_map_valid &&
 	    (foc_get_stage() != ANTICOGGING)) {
-		int cg_idx = (int)nearbyintf((float)COGGING_MAP_NUM *
-					     (float)encoder.count_aligned /
-					     ENCODER_CPR_F);
-		if (cg_idx < 0)
-			cg_idx = 0;
-		if (cg_idx >= (int)COGGING_MAP_NUM)
-			cg_idx = 0;
-		iq_set += (float)Config.cogging_map[cg_idx] / COGGING_SCALE;
+		/* 相邻两点线性插值, 降低 512 点查表的量化毛刺 */
+		float fidx = (float)COGGING_MAP_NUM *
+			     (float)encoder.count_aligned / ENCODER_CPR_F;
+		int i0 = (int)fidx;
+		float frac = fidx - (float)i0;
+		if (i0 >= (int)COGGING_MAP_NUM)
+			i0 = 0;
+		int i1 = (i0 + 1 < (int)COGGING_MAP_NUM) ? i0 + 1 : 0;
+		float cg = (1.0f - frac) * (float)Config.cogging_map[i0] +
+			   frac * (float)Config.cogging_map[i1];
+		iq_set += cg / COGGING_SCALE;
 	}
 
 	/* 电流限幅 */
@@ -281,13 +336,13 @@ void CONTROLLER_loop(void)
 	FOC.Id_set = 0.0f;
 	FOC.Iq_set = iq_set;
 
-	/* 速度积分器 (抗饱和) */
-	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
+	/* 速度积分器 (抗饱和 + 限幅) */
+	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP)
 		Controller.vel_integrator = 0.0f;
-	} else if (limited) {
+	else if (limited)
 		Controller.vel_integrator *= 0.99f;
-	} else {
-		Controller.vel_integrator +=
-		    (Config.vel_i_gain * CTRL_PERIOD) * v_err;
-	}
+	else
+		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
+	Controller.vel_integrator =
+	    CLAMP(Controller.vel_integrator, -0.5f, 0.5f);
 }

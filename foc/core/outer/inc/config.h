@@ -6,10 +6,11 @@
 #include "hpm_crc32.h"
 #include <stdio.h>
 
-#define CONFIG_MAGIC 0x5A5A1234
+/* 布局变更 (齿槽表 256 -> 512 点): 旧 Flash 配置自动失效 */
+#define CONFIG_MAGIC 0x5A5A1235
 
 #define OFFSET_LUT_NUM 512U
-#define COGGING_MAP_NUM 256U /* 256点 × 2字节 = 512字节 */
+#define COGGING_MAP_NUM 512U /* 512点 × 2字节 = 1024字节 */
 /* 补偿表缩放: Iq(A) × 5000 → int16 (量程 ±6.55A) */
 #define COGGING_SCALE 5000.0f
 
@@ -59,7 +60,7 @@ typedef struct {
 	int32_t heartbeat_producer_ms; /* 心跳生产者周期（ms） */
 
 	int16_t
-	    cogging_map[COGGING_MAP_NUM]; /* 齿槽补偿表(mA, 按电角度256点) */
+	    cogging_map[COGGING_MAP_NUM]; /* 齿槽补偿表(int16, 按机械角512点) */
 	uint32_t cogging_map_crc;	  /* 齿槽补偿表CRC校验 */
 	int32_t cogging_map_valid;	  /* 齿槽补偿表有效标志 */
 

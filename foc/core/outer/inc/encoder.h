@@ -28,7 +28,7 @@
 #define ENCODER_CPR_HALF 8388608
 #define ENCODER_MASK 0x00FFFFFFU
 
-#define ENCODER_PLL_BW_HZ (100.0f)		     /* 环路带宽 */
+#define ENCODER_PLL_BW_HZ (300.0f) /* 环路带宽: 低速速度环需要更高带宽 */
 #define ENCODER_PLL_SNAP_VEL (ENCODER_CPR_F / 60.0f) /* 约 1 转/分 */
 
 /* 方向/零位/极对数来自校准后的 Config */

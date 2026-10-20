@@ -7,6 +7,10 @@
 tConfig Config;
 #define debug 0
 
+/* 配置必须能放进 Flash 缓冲区, 否则 save 会静默失败 */
+_Static_assert(sizeof(tConfig) <= FLASH_CFG_BUF_SIZE,
+	       "tConfig exceeds flash cfg buffer");
+
 /*
  * debug=1: 关掉斜坡/前馈, 便于阶跃标定外环。
  * 斜坡极大 => 设定值一拍到位; 前馈必须清零, 否则阶跃拍被放大成尖峰。
@@ -28,7 +32,11 @@ uint32_t CONFIG_calculate_crc(const tConfig *cfg)
 uint8_t CONFIG_save_to_flash(void)
 {
 	Config.crc32 = CONFIG_calculate_crc(&Config);
-	return flash_write_config(&Config, sizeof(tConfig));
+	uint8_t ret = flash_write_config(&Config, sizeof(tConfig));
+
+	if (ret)
+		printf("config: flash save failed (%u)\n", ret);
+	return ret;
 }
 
 uint8_t CONFIG_load_from_flash(void)
@@ -80,9 +88,9 @@ void config_init(void)
 
 	Config.default_op_mode = CONTROL_MODE_POSITION_FILTER;
 	Config.pos_p_gain = 5.0f;
-	/* 裸云台电机: 原 8.0/78.3 会与 100Hz 编码器 PLL 自激 */
-	Config.vel_p_gain = 0.03f;
-	Config.vel_i_gain = 1.5f;
+	/* PLL 300Hz 下整定: 原 8.0/78.3 会自激 */
+	Config.vel_p_gain = 0.17f;
+	Config.vel_i_gain = 5.3f;
 	Config.current_ff_gain = 0.001f;
 	/* L/R: 本电机 432µs -> 极点 368Hz, 取 300 留裕量 */
 	Config.current_ctrl_bw = 300;

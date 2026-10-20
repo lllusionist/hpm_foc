@@ -904,18 +904,43 @@ void calibration_loop(void)
 	loop_count++;
 }
 
-/* 齿槽标定 (rare_foc): 位置环步进测保持电流, 正反平均, 按机械角索引 */
-#define CG_STEP_MS 50U	 /* 每步保持时间 (ms); 25ms 时 56/84 阶表噪声大 */
-#define CG_GAP_STEPS 100 /* 起始/换向空走步数 */
-#define CG_LOOP_DIV ((CG_STEP_MS * CAL_LOOP_HZ) / 1000U) /* 1kHz -> 50 */
+/* 齿槽标定: 位置保持法, 正反两遍平均, 按实际机械角索引.
+ * 每点先等停稳, 再对 Iq_filt 多点平均, 降低静摩擦/噪声对高阶齿槽的污染.
+ */
+#define CG_GAP_STEPS 100      /* 起始/换向空走步数 */
+#define CG_GAP_MS 50U	      /* 空走每步时间 */
+#define CG_SETTLE_POS 0.006f  /* 到位窗口 (rad, 约 0.34° 机械) */
+#define CG_SETTLE_VEL 0.05f   /* 停稳速度窗口 (rps) */
+#define CG_SETTLE_TICKS 5U    /* 连续满足 5ms 认为停稳 */
+#define CG_SETTLE_MAX_MS 300U /* 单点最长等待 */
+#define CG_AVG_SAMPLES 8U     /* 每点平均样本数 (1kHz) */
+#define CG_TIMEOUT_S 120U     /* 总超时 */
+#define CG_LP_BINS 1U	      /* 1 = 不做圆周低通 (避免 84 阶相位滞后) */
 
-static int cg_number;	     /* 已走步数 */
-static uint32_t cg_loop_cnt; /* 25ms 分频计数 */
+typedef enum {
+	CG_PH_GAP_FWD,
+	CG_PH_SCAN_FWD,
+	CG_PH_GAP_REV,
+	CG_PH_SCAN_REV,
+	CG_PH_DONE
+} tCgPhase;
+
+typedef enum { CG_ST_MOVE, CG_ST_SETTLE, CG_ST_AVG } tCgState;
+
+static int cg_number; /* 已走步数 (诊断) */
 static uint32_t cg_total_ticks;
 static bool cg_valid;
 static bool cg_running;
 static int16_t cg_tmp[COGGING_MAP_NUM];
 static float cg_pos_p_save;
+static tCgPhase cg_phase;
+static tCgState cg_state;
+static int cg_step_idx;	 /* 当前阶段内步数 */
+static uint32_t cg_tick; /* 当前步内 1kHz 计数 */
+static uint32_t cg_settle_cnt;
+static int32_t cg_iq_sum;
+static uint32_t cg_iq_n;
+static uint8_t cg_written[(COGGING_MAP_NUM + 7U) / 8U];
 
 /* 位置指令前进/后退一步 (单圈机械角, 循环卷绕) */
 static void cg_step(float dir)
@@ -929,7 +954,7 @@ static void cg_step(float dir)
 	Controller.input_position = pos_ref;
 }
 
-/* 单圈机械角 -> 补偿表下标 (0 ~ 255) */
+/* 单圈机械角 -> 补偿表下标 (0 ~ COGGING_MAP_NUM-1) */
 static int cg_index(float pos)
 {
 	int idx = (int)nearbyintf((float)COGGING_MAP_NUM * pos / M_2PI);
@@ -946,10 +971,26 @@ static float cg_pos(void)
 	return (float)encoder.count_aligned * (M_2PI / ENCODER_CPR_F);
 }
 
-/* 采样一次静止保持电流, 按倍率转成 int16 */
-static int16_t cg_sample(void)
+/* 位置误差卷绕到 [-π, π] */
+static float cg_pos_err(void)
 {
-	int32_t raw = (int32_t)(FOC.Iq_filt * COGGING_SCALE);
+	float perr = Controller.input_position - cg_pos();
+	while (perr > M_PI)
+		perr -= M_2PI;
+	while (perr < -M_PI)
+		perr += M_2PI;
+	return perr;
+}
+
+/* 静止判据: 位置误差和速度都进入窗口 */
+static bool cg_settled(void)
+{
+	return (fabsf(cg_pos_err()) < CG_SETTLE_POS) &&
+	       (fabsf(encoder.vel) < CG_SETTLE_VEL);
+}
+
+static int16_t cg_to_i16(int32_t raw)
+{
 	if (raw > 32767)
 		raw = 32767;
 	if (raw < -32768)
@@ -957,9 +998,27 @@ static int16_t cg_sample(void)
 	return (int16_t)raw;
 }
 
+static int cg_wrap(int idx)
+{
+	while (idx < 0)
+		idx += (int)COGGING_MAP_NUM;
+	while (idx >= (int)COGGING_MAP_NUM)
+		idx -= (int)COGGING_MAP_NUM;
+	return idx;
+}
+
+static void cg_mark(int idx)
+{
+	cg_written[idx >> 3] |= (uint8_t)(1U << (idx & 7));
+}
+
+static bool cg_is_written(int idx)
+{
+	return (cg_written[idx >> 3] & (uint8_t)(1U << (idx & 7))) != 0U;
+}
+
 void anticogging_start(void)
 {
-	/* 先存档, 任何路径退出都能在 anticogging_end 里恢复 */
 	cg_pos_p_save = Config.pos_p_gain;
 
 	if (!Config.calib_valid || (Config.pole_pairs <= 0)) {
@@ -972,24 +1031,168 @@ void anticogging_start(void)
 	FOC.calib_mode = false;
 	FOC.calib_vinj_mode = false;
 
-	/* 位置模式: 逐点步进定位 (照搬 rare_foc), 保持电流就是位置相关转矩 */
 	Controller.ctrl_mode = CONTROL_MODE_POSITION_FILTER;
 	Controller.target_reached = false;
-	CONTROLLER_reset(); /* input_position 对齐当前实际机械位置 */
+	CONTROLLER_reset();
 
 	/* 静摩擦需要更大的位置 P; 原 5.0 时每步只有 0.12rps/0.03A,
 	 * 转子不动, 表全落同一 bin */
 	Config.pos_p_gain = 50.0f;
 
-	/* 标定期间旧表失效, 避免运行时补偿污染采样 */
 	Config.cogging_map_valid = 0;
 	memset(Config.cogging_map, 0, sizeof(Config.cogging_map));
+	memset(cg_written, 0, sizeof(cg_written));
 
 	cg_number = 0;
-	cg_loop_cnt = 0;
 	cg_total_ticks = 0;
 	cg_valid = false;
 	cg_running = true;
+	cg_phase = CG_PH_GAP_FWD;
+	cg_state = CG_ST_MOVE;
+	cg_step_idx = 0;
+	cg_tick = 0;
+	cg_settle_cnt = 0;
+	cg_iq_sum = 0;
+	cg_iq_n = 0;
+}
+
+/* 扫完一遍后处理: 去均值 + 圆周低通 */
+static void cg_finish_map(void)
+{
+	int32_t sum = 0;
+	int32_t mean;
+
+	/* 补齐漏采的 bin: 用两侧最近的有效点线性插值 */
+	uint32_t missing = 0;
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+		if (cg_is_written((int)i))
+			continue;
+		missing++;
+		int lo_d = 1;
+		while ((lo_d < (int)COGGING_MAP_NUM) &&
+		       !cg_is_written(cg_wrap((int)i - lo_d)))
+			lo_d++;
+		int hi_d = 1;
+		while ((hi_d < (int)COGGING_MAP_NUM) &&
+		       !cg_is_written(cg_wrap((int)i + hi_d)))
+			hi_d++;
+		if ((lo_d >= (int)COGGING_MAP_NUM) ||
+		    (hi_d >= (int)COGGING_MAP_NUM))
+			continue;
+		int32_t vl = Config.cogging_map[cg_wrap((int)i - lo_d)];
+		int32_t vh = Config.cogging_map[cg_wrap((int)i + hi_d)];
+		Config.cogging_map[i] =
+		    (int16_t)(vl + (vh - vl) * lo_d / (lo_d + hi_d));
+		cg_mark((int)i);
+	}
+	if (missing)
+		printf("cogging: filled %u missing bins\n", (unsigned)missing);
+
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++)
+		sum += Config.cogging_map[i];
+	mean = sum / (int32_t)COGGING_MAP_NUM;
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++)
+		Config.cogging_map[i] =
+		    cg_to_i16((int32_t)Config.cogging_map[i] - mean);
+
+	/* 圆周低通: 1-bin 表示不滤波, 避免 56/84 阶的相位滞后;
+	 * 每点已做 8 次平均, 表噪声主要靠采样平均压制.
+	 */
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+		int32_t s = 0;
+		for (int k = -(int)(CG_LP_BINS / 2U);
+		     k <= (int)(CG_LP_BINS / 2U); k++) {
+			int j = (int)i + k;
+			while (j < 0)
+				j += (int)COGGING_MAP_NUM;
+			while (j >= (int)COGGING_MAP_NUM)
+				j -= (int)COGGING_MAP_NUM;
+			s += Config.cogging_map[j];
+		}
+		cg_tmp[i] = (int16_t)(s / (int32_t)CG_LP_BINS);
+	}
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++)
+		Config.cogging_map[i] = cg_tmp[i];
+}
+
+/* 空走阶段: 每 CG_GAP_MS 走一步 */
+static void cg_gap_step(float dir)
+{
+	if (++cg_tick < CG_GAP_MS)
+		return;
+	cg_tick = 0;
+	cg_step(dir);
+	cg_number++;
+	if (++cg_step_idx < CG_GAP_STEPS)
+		return;
+
+	cg_step_idx = 0;
+	if (cg_phase == CG_PH_GAP_FWD)
+		cg_phase = CG_PH_SCAN_FWD;
+	else
+		cg_phase = CG_PH_SCAN_REV;
+	cg_state = CG_ST_MOVE;
+}
+
+/* 采样阶段: 移动 -> 等停稳 -> 多点平均, 每点一个 bin */
+static void cg_scan_step(float dir)
+{
+	switch (cg_state) {
+	case CG_ST_MOVE:
+		cg_step(dir);
+		cg_number++;
+		cg_state = CG_ST_SETTLE;
+		cg_settle_cnt = 0;
+		cg_tick = 0;
+		break;
+
+	case CG_ST_SETTLE:
+		cg_tick++;
+		if (cg_settled()) {
+			if (++cg_settle_cnt >= CG_SETTLE_TICKS) {
+				cg_iq_sum = 0;
+				cg_iq_n = 0;
+				cg_state = CG_ST_AVG;
+			}
+		} else {
+			cg_settle_cnt = 0;
+		}
+		if (cg_tick >= CG_SETTLE_MAX_MS) {
+			printf("cogging: settle timeout at step %d\n",
+			       cg_number);
+			cg_valid = false;
+			cg_running = false;
+		}
+		break;
+
+	case CG_ST_AVG: {
+		cg_iq_sum += (int32_t)(FOC.Iq_filt * COGGING_SCALE);
+		if (++cg_iq_n < CG_AVG_SAMPLES)
+			break;
+
+		int16_t v = cg_to_i16(cg_iq_sum / (int32_t)cg_iq_n);
+		int idx = cg_index(cg_pos());
+		if ((cg_phase == CG_PH_SCAN_FWD) || !cg_is_written(idx)) {
+			Config.cogging_map[idx] = v;
+			cg_mark(idx);
+		} else {
+			Config.cogging_map[idx] =
+			    (Config.cogging_map[idx] + v) / 2;
+		}
+
+		cg_state = CG_ST_MOVE;
+		if (++cg_step_idx < (int)COGGING_MAP_NUM)
+			break;
+
+		cg_step_idx = 0;
+		if (cg_phase == CG_PH_SCAN_FWD)
+			cg_phase = CG_PH_GAP_REV;
+		else
+			cg_phase = CG_PH_DONE;
+		cg_state = CG_ST_MOVE;
+		cg_tick = 0;
+	} break;
+	}
 }
 
 bool anticogging_loop(void)
@@ -997,88 +1200,39 @@ bool anticogging_loop(void)
 	if (!cg_running)
 		return true;
 
-	/* 总超时: 正常约 712 步 × 25ms ≈ 18s, 60s 足够 */
-	if (++cg_total_ticks > (uint32_t)(60.0f * (float)CAL_LOOP_HZ)) {
+	if (++cg_total_ticks > (uint32_t)CG_TIMEOUT_S * CAL_LOOP_HZ) {
+		printf("cogging: timeout at step %d\n", cg_number);
 		cg_valid = false;
 		cg_running = false;
 		return true;
 	}
 	if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
-		printf("cogging: step=%d mode=%d stage=%d armed=%d inpos=%.3f "
-		       "act=%.3f "
-		       "pg=%.1f vg=%.3f iqset=%.3f Iq=%.2f\n",
-		       cg_number, Controller.ctrl_mode, (int)foc_get_stage(),
-		       (int)FOC.is_armed, (double)Controller.input_position,
-		       (double)cg_pos(), (double)Config.pos_p_gain,
-		       (double)Config.vel_p_gain, (double)FOC.Iq_set,
+		printf("cogging: step=%d ph=%d st=%d inpos=%.3f act=%.3f "
+		       "iq=%.2f\n",
+		       cg_number, (int)cg_phase, (int)cg_state,
+		       (double)Controller.input_position, (double)cg_pos(),
 		       (double)FOC.Iq_filt);
 	}
 
-	/* 1kHz -> 25ms 一步 */
-	if (++cg_loop_cnt < CG_LOOP_DIV)
-		return false;
-	cg_loop_cnt = 0;
-
-	cg_number++;
-
-	if (cg_number <= CG_GAP_STEPS) {
-		/* 正转空走, 让位置环/速度环稳定 */
-		cg_step(+1.0f);
-
-	} else if (cg_number <= (CG_GAP_STEPS + (int)COGGING_MAP_NUM)) {
-		/* 正转采样: 记录保持当前位置所需的电流 */
-		int16_t index = (int16_t)cg_index(cg_pos());
-		Config.cogging_map[index] = cg_sample();
-		cg_step(+1.0f);
-
-	} else if (cg_number <=
-		   (CG_GAP_STEPS + (int)COGGING_MAP_NUM + CG_GAP_STEPS)) {
-		/* 反转空走 */
-		cg_step(-1.0f);
-
-	} else if (cg_number <= (CG_GAP_STEPS + (int)COGGING_MAP_NUM +
-				 CG_GAP_STEPS + (int)COGGING_MAP_NUM)) {
-		/* 反转采样: 与正转结果取平均, 抵消静摩擦/滞回方向性 */
-		int16_t index = (int16_t)cg_index(cg_pos());
-		Config.cogging_map[index] =
-		    (Config.cogging_map[index] + cg_sample()) / 2;
-		cg_step(-1.0f);
-
-	} else {
-		/* 去掉直流分量 (平均摩擦/负载), 只保留位置相关转矩 */
-		int32_t sum = 0;
-		for (uint32_t i = 0; i < COGGING_MAP_NUM; i++)
-			sum += Config.cogging_map[i];
-		int32_t mean = sum / (int32_t)COGGING_MAP_NUM;
-		for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-			int32_t v = (int32_t)Config.cogging_map[i] - mean;
-			if (v > 32767)
-				v = 32767;
-			if (v < -32768)
-				v = -32768;
-			Config.cogging_map[i] = (int16_t)v;
-		}
-		/* 5-bin 圆周低通: 保留 14/28/42 阶, 压掉 56/84 阶
-		 * (2rps 附近高阶相位不可靠, 宁可少补) */
-		for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-			int32_t s = 0;
-			for (int k = -2; k <= 2; k++) {
-				int j = (int)i + k;
-				while (j < 0)
-					j += (int)COGGING_MAP_NUM;
-				while (j >= (int)COGGING_MAP_NUM)
-					j -= (int)COGGING_MAP_NUM;
-				s += Config.cogging_map[j];
-			}
-			cg_tmp[i] = (int16_t)(s / 5);
-		}
-		for (uint32_t i = 0; i < COGGING_MAP_NUM; i++)
-			Config.cogging_map[i] = cg_tmp[i];
+	switch (cg_phase) {
+	case CG_PH_GAP_FWD:
+		cg_gap_step(+1.0f);
+		break;
+	case CG_PH_SCAN_FWD:
+		cg_scan_step(+1.0f);
+		break;
+	case CG_PH_GAP_REV:
+		cg_gap_step(-1.0f);
+		break;
+	case CG_PH_SCAN_REV:
+		cg_scan_step(-1.0f);
+		break;
+	case CG_PH_DONE:
+		cg_finish_map();
 		cg_valid = true;
 		cg_running = false;
 		return true;
 	}
-
 	return false;
 }
 
