@@ -199,7 +199,7 @@ void inverse_park(float mod_d, float mod_q, float Theta, float *mod_alpha,
  * @brief 带有校验返回值的 SVPWM 函数
  * @param Valpha, Vbeta: 输入的 Alpha 和 Beta 轴电压
  * @param duty_a, duty_b, duty_c: 输出的三个相占空比指针
- * @retval int: 0 表示成功（在合法调制范围内）, -1 表示失败（发生过调制或数值无效）
+ * @retval int: 0 成功, -1 失败 (过调制或数值无效)
  */
 int SVPWM(float alpha, float beta, volatile float *duty_a,
 	  volatile float *duty_b, volatile float *duty_c)
@@ -309,7 +309,7 @@ int SVPWM(float alpha, float beta, volatile float *duty_a,
 	} break;
 	}
 
-	/* if any of the results becomes NaN, result_valid will evaluate to false */
+	/* 结果含 NaN 时 result_valid 为 false */
 	int result_valid = *duty_a >= 0.0f && *duty_a <= 1.0f &&
 			   *duty_b >= 0.0f && *duty_b <= 1.0f &&
 			   *duty_c >= 0.0f && *duty_c <= 1.0f;
@@ -326,7 +326,7 @@ float sin_f32(float x)
 	float findex;
 
 	/* input x is in radians */
-	/* Scale the input to [0 1] range from [0 2*PI] , divide input by 2*pi */
+	/* 输入 [0,2π] 归一化到 [0,1] */
 	in = x * 0.159154943092f;
 
 	/* Calculation of floor value of input */
@@ -372,7 +372,7 @@ float cos_f32(float x)
 	float findex;
 
 	/* input x is in radians */
-	/* Scale the input to [0 1] range from [0 2*PI] , divide input by 2*pi, add 0.25 (pi/2) to read sine table */
+	/* [0,2π] 归一化到 [0,1], 再偏移 0.25 读正弦表 */
 	in = x * 0.159154943092f + 0.25f;
 
 	/* Calculation of floor value of input */
@@ -409,8 +409,7 @@ float cos_f32(float x)
 	return (cosVal);
 }
 
-/* 注意: 不能叫 crc32, 会和 SDK 的 utils/hpm_crc32.c 里的 crc32 冲突 (链接报 multiply defined)。
- * 表 crc32_table 还在上面, 一行都不用删。 */
+/* 不能叫 crc32: 会与 SDK 的 hpm_crc32.c 冲突 (multiply defined) */
 uint32_t util_crc32(const uint8_t *data, uint32_t size)
 {
 	uint32_t crc = 0;

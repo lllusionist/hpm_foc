@@ -41,12 +41,11 @@ static void vofa_send_config(void)
 	}
 }
 
-/*================================ 批量发送 ====================================*/
+/* 批量发送 */
 /*
- * USB CDC 全速每秒只能搬约 1000 个包, 单样本发送 1kHz 已是上限.
- * 因此: ADC 中断按分频采样进环形缓冲(默认 5kHz), vofa 任务按 1ms 把攒下的
- * 多个样本打包进同一包 USB 发出; 上位机仍按帧尾逐个解析,
- * 有效采样率 = 采样分频, 与 USB 包率解耦.
+ * USB CDC 全速约 1000 包/s, 单样本 1kHz 已是上限。
+ * ADC 中断按分频采样入环形缓冲, vofa 任务每 1ms 打包发送,
+ * 有效采样率与 USB 包率解耦。
  */
 #define VOFA_NCH 22
 #define VOFA_RING 64 /* 环形缓冲样本数 */
@@ -63,15 +62,15 @@ void vofa_transmit(uint8_t *buf, uint16_t len)
 
 static void vofa_snapshot(float *d)
 {
-	d[0] =
-	    (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE; /* A 相电流 (A) */
-	d[1] =
-	    (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE; /* B 相电流 (A) */
-	d[2] =
-	    (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE; /* C 相电流 (A) */
-	d[3] = FOC.Id;					    /* d 轴电流反馈 */
-	d[4] = FOC.Iq;					    /* q 轴电流反馈 */
-	d[5] = FOC.Iq_set;				    /* q 轴电流目标 */
+	/* A 相电流 (A) */
+	d[0] = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+	/* B 相电流 (A) */
+	d[1] = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
+	/* C 相电流 (A) */
+	d[2] = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
+	d[3] = FOC.Id;			     /* d 轴电流反馈 */
+	d[4] = FOC.Iq;			     /* q 轴电流反馈 */
+	d[5] = FOC.Iq_set;		     /* q 轴电流目标 */
 	d[6] = Controller.vel_setpoint;	     /* 速度环目标 (rps) */
 	d[7] = encoder.vel;		     /* 速度反馈 (rps) */
 	d[8] = FOC.torque;		     /* 转矩估算 (N·m) */

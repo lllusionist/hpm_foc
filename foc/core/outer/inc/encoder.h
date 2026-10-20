@@ -31,7 +31,7 @@
 #define ENCODER_PLL_BW_HZ (100.0f)		     /* 环路带宽 */
 #define ENCODER_PLL_SNAP_VEL (ENCODER_CPR_F / 60.0f) /* 约 1 转/分 */
 
-/* 方向/零位/极对数由校准结果 Config.encoder_dir/encoder_offset/pole_pairs 提供 */
+/* 方向/零位/极对数来自校准后的 Config */
 
 typedef struct sEncoder {
 	uint8_t need_init; /* 前N次采样只对齐, 不跑 PLL */

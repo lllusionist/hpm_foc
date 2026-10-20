@@ -11,9 +11,8 @@
 #define ADC_CH_IBUS (3U) /* PF20 */
 
 /*
- * 采样保持周期 20 -> 10:
- * 三路是串行转换的, 采样时间越短整队完成越早, 越不容易撞上开关沿
- * (实测队列里最后转换的那一相最容易采到开关暂态)
+ * 采样保持 20→10: 三路串行转换, 采样越短整队完成越早,
+ * 越不容易撞上开关沿 (最后一路 Ic 最危险)。
  */
 #define ADC_SAMPLE_CYCLE (10U)
 #define ADC_PMT_ERROR_MASK \
@@ -187,9 +186,8 @@ bool adc1_read_ibus(uint16_t *ibus)
 
 	adc16_clear_status_flags(HPM_ADC1, error_mask);
 	/*
-	 * TRG_CMPT_FLAG is only raised for queues with INTEN set, and this
-	 * polled queue has none, so invalidate the channel field and wait for
-	 * the DMA to publish the fresh result instead.
+	 * 该轮询队列未开 INTEN, TRG_CMPT_FLAG 不会置位;
+	 * 清通道字段, 等 DMA 发布新结果。
 	 */
 	sample->adc_ch = 0x1FU;
 	adc16_trigger_pmt_by_sw(HPM_ADC1, ADC1_IBUS_TRIG_CH);
@@ -209,7 +207,7 @@ bool adc1_read_ibus(uint16_t *ibus)
 	return false;
 }
 
-/* Software trigger one ADC1 preemption queue and accept only a complete frame. */
+/* 软触发 ADC1 抢占队列, 只接受完整帧 */
 bool adc1_read_all(uint16_t *va, uint16_t *vb, uint16_t *vc, uint16_t *vbus)
 {
 	for (uint8_t i = 0; i < ADC1_QUEUE_LEN; i++)
@@ -287,10 +285,8 @@ void isr_adc(void)
 		FOC.Ic = adc_dma_buf[2].result;
 
 		/*
-		 * 星形连接三相电流和恒为 0. ADC 队列是串行转换的, 高压调制时
-		 * 最后一路 (Ic) 最容易采到开关沿. 检测到坏样本时用前两相重建,
-		 * 保证电流环/死区补偿/过流保护看到的都是干净值.
-		 * FOC.isum 保留原始值, 继续作为采样质量诊断量.
+		 * 三相电流和恒为 0; Ic 最易采到开关沿, 坏样本时用 Ia+Ib 重建。
+		 * FOC.isum 保留原始值作诊断。
 		 */
 		FOC.isum =
 		    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +

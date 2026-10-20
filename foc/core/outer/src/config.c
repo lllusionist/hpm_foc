@@ -8,9 +8,8 @@ tConfig Config;
 #define debug 0
 
 /*
- * 标定开关 (debug=1): 关掉所有斜坡/前馈, 便于用阶跃响应标定外环。
- * 斜坡速率设得极大 => 设定值一拍到位(近似阶跃);
- * 同时必须把加速度前馈清零, 否则阶跃那一拍 (step/CTRL_PERIOD) 会被前馈放大成尖峰。
+ * debug=1: 关掉斜坡/前馈, 便于阶跃标定外环。
+ * 斜坡极大 => 设定值一拍到位; 前馈必须清零, 否则阶跃拍被放大成尖峰。
  */
 static void config_debug_overrides(void)
 {
@@ -62,10 +61,9 @@ void config_init(void)
 	Config.phase_inductance = 0.00164f;
 	Config.velocity_limit = 30.0f;
 
-	/* 当前电机: 线-线 15.2Ω/6.56mH => 相 7.6Ω/3.28mH, 额定 0.59A */
-	/* calib_current 同时决定 dir_pp 的拖动电压 (drag_v ≈ R×calib_current), */
-	/* 过小会导致起转失败(实测 0.15A 时 mech_revs 仅 0.00042, 几乎不动), */
-	/* 故取额定的 85%; calib_voltage 作为 drag_v 的上限需 >= R×calib_current。 */
+	/* 当前电机: 线-线 15.2Ω/6.56mH (相 7.6Ω/3.28mH), 额定 0.59A。
+	 * calib_current 决定拖动电压, 取额定的 85%; 过小会起转失败。
+	 * calib_voltage 需 >= R×calib_current。 */
 	Config.current_limit = 1.5f;  /* 额定的 2.5 倍 */
 	Config.calib_current = 0.50f; /* 额定的 85%, 保证拖动转矩 */
 	Config.calib_voltage = 5.0f;  /* R×I = 8.47×0.5 ≈ 4.24, 留裕量 */
@@ -82,12 +80,12 @@ void config_init(void)
 
 	Config.default_op_mode = CONTROL_MODE_POSITION_FILTER;
 	Config.pos_p_gain = 5.0f;
-	Config.vel_p_gain =
-	    0.03f; /* 裸云台电机: 原 8.0/78.3 会与 100Hz 编码器 PLL 自激 */
+	/* 裸云台电机: 原 8.0/78.3 会与 100Hz 编码器 PLL 自激 */
+	Config.vel_p_gain = 0.03f;
 	Config.vel_i_gain = 1.5f;
 	Config.current_ff_gain = 0.001f;
-	Config.current_ctrl_bw =
-	    300; /* L/R: 本电机 432µs -> 极点 368Hz, 取 300 留裕量 */
+	/* L/R: 本电机 432µs -> 极点 368Hz, 取 300 留裕量 */
+	Config.current_ctrl_bw = 300;
 	Config.anticogging_enable = 1;
 	Config.target_velcity_window = 0.5f;
 	Config.target_position_window = 0.01f;

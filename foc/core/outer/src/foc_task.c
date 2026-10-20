@@ -187,9 +187,8 @@ static void foc_check_and_trip(void)
 		fault = FOC_FAULT_ADC;
 
 	/*
-	 * 电流帧停更判据必须按真实时间, 不能按调用次数:
-	 * 任务超时后 vTaskDelayUntil 会连续补跑多拍, 这些调用间隔只有几微秒,
-	 * 帧数当然不变, 用"连续 N 次相等"会误报 (校准里的阻塞 printf 就会触发)。
+	 * 停更判据按真实时间而非调用次数: 任务补跑时间隔仅几微秒,
+	 * "连续 N 次相等" 会误报 (阻塞 printf 就会触发)。
 	 */
 	frames = FOC.adc_current_frames;
 	if (frames != last_frames) {

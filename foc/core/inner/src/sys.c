@@ -81,7 +81,7 @@ static void sys_pmp_init(void)
 	if ((start_addr >= axi_sram_start) && (end_addr <= axi_sram_end)) {
 		length = end_addr - start_addr;
 		if (length > 0) {
-			/* Ensure the address and the length are power of 2 aligned */
+			/* 地址和长度需 2 的幂对齐 */
 			assert((length & (length - 1U)) == 0U);
 			assert((start_addr & (length - 1U)) == 0U);
 			pmp_entry[index].pmp_addr =
@@ -105,7 +105,7 @@ static void sys_console_init(void)
 {
 	console_config_t cfg;
 
-	/* 先配引脚再开时钟：反过来的话，配引脚那一刻 RX 上的电平跳变会被当成起始位收进来 */
+	/* 先配引脚再开时钟: 否则 RX 电平跳变会被当成起始位 */
 	HPM_IOC->PAD[SYS_CONSOLE_TX_PAD].FUNC_CTL = SYS_CONSOLE_TX_FUNC;
 	HPM_IOC->PAD[SYS_CONSOLE_RX_PAD].FUNC_CTL = SYS_CONSOLE_RX_FUNC;
 

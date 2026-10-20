@@ -53,7 +53,7 @@ static void pwm_fault_config(void)
 	for (uint8_t ch = 0; ch < 6; ch++) {
 		pwmv2_set_fault_mode(
 		    PWM, (pwm_channel_t)ch,
-		    pwm_fault_output_0); /* 故障时输出0(下桥低有效则改output_1) */
+		    pwm_fault_output_0); /* 故障输出0(下桥低有效改output_1) */
 		pwmv2_set_fault_recovery_time(
 		    PWM, (pwm_channel_t)ch,
 		    pwm_fault_recovery_on_fault_clear); /* 软件清故障后恢复 */
@@ -214,9 +214,7 @@ void pwm_init(void)
 }
 
 /*
- * 占空比上限(给低边采样窗口留余量):
- * 下桥低边导通窗口 = (1-占空比)*半周期, 三相串行采样时越靠后的通道越危险,
- * 0.96 让最小窗口 >= 周期的 4% (~1us @40kHz).
+ * 占空比上限: 给低边采样留余量; 0.96 保证最小窗口 >= 周期 4%。
  */
 #define PWM_DUTY_MAX_LIMIT (0.96f)
 
@@ -230,8 +228,8 @@ void pwm_set_duty(float du, float dv, float dw)
 		dw = PWM_DUTY_MAX_LIMIT;
 
 	uint32_t half = reload >> 1;
-	uint32_t hu =
-	    (uint32_t)(du * (float)reload) >> 1; /* 每相导通宽度的一半 */
+	/* 每相导通宽度的一半 */
+	uint32_t hu = (uint32_t)(du * (float)reload) >> 1;
 	uint32_t hv = (uint32_t)(dv * (float)reload) >> 1;
 	uint32_t hw = (uint32_t)(dw * (float)reload) >> 1;
 

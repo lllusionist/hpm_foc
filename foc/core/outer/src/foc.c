@@ -96,8 +96,8 @@ void foc_update_voltages(void)
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
-/* 死区补偿: 死区期间输出电压偏离指令, 按电流方向逐相补回 ±(t_dead/T_pwm) 占空比。
- * ITH 为过零过渡带 —— 太窄时补偿量近似方波, 低速会出现可听啸叫。 */
+/* 死区补偿: 按电流方向逐相补 ±(t_dead/T_pwm); ITH 太窄会近似方波,
+ * 低速有可听啸叫 */
 #define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U) /* 仅 FD6288 的 100ns */
 #define DT_COMP_ITH (0.8f)		     /* 过零过渡带(A) */
 

@@ -85,8 +85,8 @@ int CONTROLLER_set_home(void)
 			    (float)encoder
 				.count_aligned; /* PLL 对齐当前单圈位置 */
 			encoder.pll_vel = 0;
-			encoder.count_in_cpr_prev =
-			    encoder.count_in_cpr; /* 防止产生错误 delta */
+			/* 防止产生错误 delta */
+			encoder.count_in_cpr_prev = encoder.count_in_cpr;
 
 			Controller.input_position = 0;
 			Controller.input_position_buffer = 0;

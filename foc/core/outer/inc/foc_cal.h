@@ -29,7 +29,7 @@ typedef enum eCalibStep {
 	CS_FLUX_START,
 	CS_FLUX_RAMP1,
 	CS_FLUX_MEAS1,
-	CS_FLUX_RTEST, /* 同转速降电流, 用 ΔVq=Δ(R·Iq) 直接测 R (反电势项抵消) */
+	CS_FLUX_RTEST, /* 降流复测: ΔVq=Δ(R·Iq), 消掉反电势 */
 	CS_FLUX_RAMP2,
 	CS_FLUX_MEAS2,
 	CS_FLUX_END,
@@ -49,7 +49,7 @@ typedef enum eCalibStep {
 	CS_MOTOR_J_DEC,
 	CS_MOTOR_J_END,
 
-	/* 收尾 (rare 的 CS_REPORT_OFFSET_LUT): 停留一段时间供上位机读回偏移表, 然后结束 */
+	/* 收尾: 停留一会让上位机读回偏移表 */
 	CS_REPORT_OFFSET_LUT,
 
 } tCalibStep;
