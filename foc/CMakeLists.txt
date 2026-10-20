@@ -63,4 +63,7 @@ sdk_app_src(core/outer/src/flash.c)
 sdk_app_src(core/outer/src/util.c)
 sdk_app_src(core/outer/src/vofa.c)
 sdk_app_src(core/outer/src/usb_driver.c)
+
+# 只用 SES, 不生成 IAR 工程
+set(EXCLUDED_IDE_IAR 1)
 generate_ide_projects()

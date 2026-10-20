@@ -26,6 +26,7 @@ foc/hpm5e00evk_flash_xip_debug/output/
 foc/hpm5e00evk_flash_xip_debug/iar_embedded_workbench/
 **/iar_embedded_workbench/
 **/.cmake/
+**/.cache/
 build.ninja
 cmake_install.cmake
 compile_commands.json
