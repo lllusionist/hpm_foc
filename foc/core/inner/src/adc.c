@@ -16,8 +16,8 @@
  * (实测队列里最后转换的那一相最容易采到开关暂态)
  */
 #define ADC_SAMPLE_CYCLE (10U)
-#define ADC_PMT_ERROR_MASK                                                     \
-	(ADC16_INT_STS_AHB_ERR_MASK | ADC16_INT_STS_DMA_FIFO_FULL_MASK |       \
+#define ADC_PMT_ERROR_MASK \
+	(ADC16_INT_STS_AHB_ERR_MASK | ADC16_INT_STS_DMA_FIFO_FULL_MASK | \
 	 ADC16_INT_STS_TRIG_SW_CFLCT_MASK | ADC16_INT_STS_TRIG_HW_CFLCT_MASK)
 
 static const uint8_t adc_ch_tab[ADC_TRIG_LEN] = {ADC_CH_IA, ADC_CH_IB,

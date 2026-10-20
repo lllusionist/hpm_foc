@@ -10,7 +10,7 @@ volatile foc_data_t FOC;
 #define VBUS_DIVIDER_RATIO 16.0f
 #define ADC_REF_VOLTAGE 3.3f	/* ADC参考电压3.3V */
 #define ADC_RESOLUTION 65536.0f /* 16位ADC分辨率 */
-#define VBUS_SCALE_FACTOR                                                      \
+#define VBUS_SCALE_FACTOR \
 	(VBUS_DIVIDER_RATIO * ADC_REF_VOLTAGE / ADC_RESOLUTION)
 
 #define VBUS_DEFAULT 12.0f

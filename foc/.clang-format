@@ -15,6 +15,9 @@ RemoveBracesLLVM: true
 # 一行不超过 80 列
 ColumnLimit: 80
 
+# 续行宏的反斜杠紧跟内容, 不右对齐到 80 列
+AlignEscapedNewlines: DontAlign
+
 # 短语句不许写在一行
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false

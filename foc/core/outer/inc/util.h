@@ -41,7 +41,7 @@
 #endif
 #define CLAMP(x, lower, upper) (MIN(upper, MAX(x, lower)))
 #define FLOAT_EQU(floatA, floatB) ((ABS((floatA) - (floatB))) < 0.000001f)
-#define UTILS_LP_FAST(value, sample, filter_constant)                          \
+#define UTILS_LP_FAST(value, sample, filter_constant) \
 	(value -= (filter_constant) * ((value) - (sample)))
 
 /* 注意: 这里不能用 extern inline —— 定义只在 util.c 里,

@@ -12,12 +12,12 @@
 
 #define FOC_CURRENT_SHUNT_OHM (0.005f)
 #define FOC_CURRENT_AMP_GAIN (20.0f)
-#define FOC_CURRENT_SCALE                                                      \
+#define FOC_CURRENT_SCALE \
 	((3.3f / 65536.0f) / (FOC_CURRENT_SHUNT_OHM * FOC_CURRENT_AMP_GAIN))
 
 #define FOC_IBUS_SHUNT_OHM (0.005f)
 #define FOC_IBUS_AMP_GAIN (20.0f)
-#define FOC_IBUS_SCALE                                                         \
+#define FOC_IBUS_SCALE \
 	((3.3f / 65536.0f) / (FOC_IBUS_SHUNT_OHM * FOC_IBUS_AMP_GAIN))
 
 #define FOC_VBUS_DIVIDER (16.0f)
