@@ -20,9 +20,8 @@ int main(void)
 	sys_board_init();
 
 	flash_init();
-	if (CONFIG_load_from_flash() != 0) {
+	if (CONFIG_load_from_flash() != 0)
 		printf("no valid config, use defaults\n");
-	}
 
 	sys_usb_init();
 	pwm_init();

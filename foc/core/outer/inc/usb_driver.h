@@ -25,11 +25,10 @@
 #define USB_CMD_SET_CUR_KI 0x41
 #define USB_CMD_SET_CUR_BW 0x58
 
-
 #define USB_CMD_SET_VEL_KP 0x42
 #define USB_CMD_SET_VEL_KI 0x43
 
-#define USB_CMD_SET_POS_KP 0x44 // float 位置环 Kp
+#define USB_CMD_SET_POS_KP 0x44 /* float 位置环 Kp */
 
 /* 保护阈值 (float, 单位 V; 改完可用 0x3F 存 Flash) */
 #define USB_CMD_SET_UNDER_VOLTAGE 0x56

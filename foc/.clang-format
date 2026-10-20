@@ -9,6 +9,8 @@ UseTab: Always
 
 # 大括号: 函数另起一行, 控制语句跟在同行
 BreakBeforeBraces: Linux
+# 单条语句去掉多余大括号 (CODE_STYLE.md 第 3 节)
+RemoveBracesLLVM: true
 
 # 一行不超过 80 列
 ColumnLimit: 80

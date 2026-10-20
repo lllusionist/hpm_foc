@@ -6,274 +6,288 @@
 
 tController Controller;
 
-#define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
+#define CTRL_PERIOD (1.0f / 5000.0f) /* Task_FOC 周期 (5kHz) */
 
 void CONTROLLER_update_input_pos_filter_gain(float bw)
 {
-    float bandwidth = bw * M_2PI;
-    Controller.input_pos_filter_ki = 2.0f * bandwidth;
-    Controller.input_pos_filter_kp = 0.25f * SQ(Controller.input_pos_filter_ki);
+	float bandwidth = bw * M_2PI;
+	Controller.input_pos_filter_ki = 2.0f * bandwidth;
+	Controller.input_pos_filter_kp =
+	    0.25f * SQ(Controller.input_pos_filter_ki);
 }
 
 void CONTROLLER_init(void)
 {
-    Controller.ctrl_mode      = (tControlMode)Config.default_op_mode;
-    Controller.target_reached = false;
+	Controller.ctrl_mode = (tControlMode)Config.default_op_mode;
+	Controller.target_reached = false;
 
-    Controller.op_mode_pending     = false;
-    Controller.home_pending        = false;
-    Controller.config_cmd_pending  = 0;
+	Controller.op_mode_pending = false;
+	Controller.home_pending = false;
+	Controller.config_cmd_pending = 0;
 
-    CONTROLLER_update_input_pos_filter_gain(Config.position_filter_bw);
+	CONTROLLER_update_input_pos_filter_gain(Config.position_filter_bw);
 }
 
 void CONTROLLER_reset(void)
 {
-    taskENTER_CRITICAL();
+	taskENTER_CRITICAL();
 
-    float th_meas = (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
+	float th_meas =
+	    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
 
-    Controller.input_position = th_meas;
-    Controller.input_velocity = 0.0f;
-    Controller.input_current  = 0.0f;
+	Controller.input_position = th_meas;
+	Controller.input_velocity = 0.0f;
+	Controller.input_current = 0.0f;
 
-    Controller.input_position_buffer = th_meas;
-    Controller.input_velocity_buffer = 0.0f;
-    Controller.input_current_buffer  = 0.0f;
+	Controller.input_position_buffer = th_meas;
+	Controller.input_velocity_buffer = 0.0f;
+	Controller.input_current_buffer = 0.0f;
 
-    Controller.pos_setpoint = th_meas;
-    Controller.vel_setpoint = 0.0f;
-    Controller.cur_setpoint = 0.0f;
+	Controller.pos_setpoint = th_meas;
+	Controller.vel_setpoint = 0.0f;
+	Controller.cur_setpoint = 0.0f;
 
-    Controller.vel_integrator = 0;
+	Controller.vel_integrator = 0;
 
-    Controller.input_updated  = false;
-    Controller.target_reached = false;
+	Controller.input_updated = false;
+	Controller.target_reached = false;
 
-    FOC.current_ctrl_integral_d = 0;
-    FOC.current_ctrl_integral_q = 0;
+	FOC.current_ctrl_integral_d = 0;
+	FOC.current_ctrl_integral_q = 0;
 
-    taskEXIT_CRITICAL();
+	taskEXIT_CRITICAL();
 }
 
 int CONTROLLER_set_op_mode(tControlMode mode)
 {
-    Controller.ctrl_mode = mode;
-    CONTROLLER_reset();
+	Controller.ctrl_mode = mode;
+	CONTROLLER_reset();
 
-    return 0;
+	return 0;
 }
 
 int CONTROLLER_set_home(void)
 {
-    int ret = 0;
+	int ret = 0;
 
-    if (foc_get_stage() == IDLE) {
-        taskENTER_CRITICAL();
-        encoder.shadow_count = 0;
-        taskEXIT_CRITICAL();
-    } else if (foc_get_stage() == RUN) {
-        float pos_err = Controller.pos_setpoint - encoder.pos;
-        if ((ABS(encoder.vel) < 0.5f) && (ABS(pos_err) < 0.01f)) {
-            taskENTER_CRITICAL();
+	if (foc_get_stage() == IDLE) {
+		taskENTER_CRITICAL();
+		encoder.shadow_count = 0;
+		taskEXIT_CRITICAL();
+	} else if (foc_get_stage() == RUN) {
+		float pos_err = Controller.pos_setpoint - encoder.pos;
+		if ((ABS(encoder.vel) < 0.5f) && (ABS(pos_err) < 0.01f)) {
+			taskENTER_CRITICAL();
 
-            encoder.shadow_count = 0;
-            encoder.pos          = 0;
-            encoder.pll_pos      = (float)encoder.count_aligned; // PLL 对齐当前单圈位置
-            encoder.pll_vel      = 0;
-            encoder.count_in_cpr_prev = encoder.count_in_cpr; // 防止产生错误 delta
+			encoder.shadow_count = 0;
+			encoder.pos = 0;
+			encoder.pll_pos =
+			    (float)encoder
+				.count_aligned; /* PLL 对齐当前单圈位置 */
+			encoder.pll_vel = 0;
+			encoder.count_in_cpr_prev =
+			    encoder.count_in_cpr; /* 防止产生错误 delta */
 
-            Controller.input_position        = 0;
-            Controller.input_position_buffer = 0;
-            Controller.pos_setpoint          = 0;
-            Controller.vel_setpoint          = 0;
-            Controller.cur_setpoint          = 0;
+			Controller.input_position = 0;
+			Controller.input_position_buffer = 0;
+			Controller.pos_setpoint = 0;
+			Controller.vel_setpoint = 0;
+			Controller.cur_setpoint = 0;
 
-            taskEXIT_CRITICAL();
-        } else {
-            ret = -1;
-        }
-    } else {
-        ret = -1;
-    }
+			taskEXIT_CRITICAL();
+		} else {
+			ret = -1;
+		}
+	} else {
+		ret = -1;
+	}
 
-    return ret;
+	return ret;
 }
 
 /* 命令写入缓冲后立即锁存 (USB/CAN 调用); 状态不满足则只存缓冲 */
 void CONTROLLER_sync_callback(void)
 {
-    if (foc_get_stage() != RUN) {
-        return;
-    }
+	if (foc_get_stage() != RUN)
+		return;
 
-    switch (Controller.ctrl_mode) {
-    case CONTROL_MODE_CURRENT_RAMP:
-        Controller.input_current = Controller.input_current_buffer;
-        break;
+	switch (Controller.ctrl_mode) {
+	case CONTROL_MODE_CURRENT_RAMP:
+		Controller.input_current = Controller.input_current_buffer;
+		break;
 
-    case CONTROL_MODE_VELOCITY_RAMP:
-        Controller.input_velocity = Controller.input_velocity_buffer;
-        break;
+	case CONTROL_MODE_VELOCITY_RAMP:
+		Controller.input_velocity = Controller.input_velocity_buffer;
+		break;
 
-    case CONTROL_MODE_POSITION_FILTER:
-    case CONTROL_MODE_POSITION_PROFILE:
-        Controller.input_position = Controller.input_position_buffer;
-        break;
+	case CONTROL_MODE_POSITION_FILTER:
+	case CONTROL_MODE_POSITION_PROFILE:
+		Controller.input_position = Controller.input_position_buffer;
+		break;
 
-    default:
-        break;
-    }
+	default:
+		break;
+	}
 
-    Controller.target_reached = false;
+	Controller.target_reached = false;
 }
 
 /* 1kHz 外环: 生成 FOC.Iq_set, 电流环仍在 ADC 中断里执行 */
 void CONTROLLER_loop(void)
 {
-    float iq_set = 0;
-    float v_err = 0.0f;
-    tFSMState stage = foc_get_stage();
+	float iq_set = 0;
+	float v_err = 0.0f;
+	tFSMState stage = foc_get_stage();
 
-    // 处理中断里提交的请求 (必须在任务上下文执行)
-    if ((stage == IDLE) || (stage == RUN)) {
-        if (Controller.op_mode_pending) {
-            Controller.op_mode_pending = false;
-            CONTROLLER_set_op_mode(Controller.op_mode_req);
-        }
-        if (Controller.home_pending) {
-            Controller.home_pending = false;
-            CONTROLLER_set_home();
-        }
-    }
+	/* 处理中断里提交的请求 (必须在任务上下文执行) */
+	if ((stage == IDLE) || (stage == RUN)) {
+		if (Controller.op_mode_pending) {
+			Controller.op_mode_pending = false;
+			CONTROLLER_set_op_mode(Controller.op_mode_req);
+		}
+		if (Controller.home_pending) {
+			Controller.home_pending = false;
+			CONTROLLER_set_home();
+		}
+	}
 
-    if (Controller.config_cmd_pending != 0U) {
-        uint8_t cmd = Controller.config_cmd_pending;
-        Controller.config_cmd_pending = 0;
-        if (FOC.is_armed) {
-            printf("cfg cmd: motor armed, refused\n");
-        } else if (cmd == 1U) {
-            printf("cfg save: %s\n",
-                   (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
-        } else if (cmd == 2U) {
-            config_init();
-            CONFIG_save_to_flash();
-            printf("cfg reset\n");
-        }
-    }
+	if (Controller.config_cmd_pending != 0U) {
+		uint8_t cmd = Controller.config_cmd_pending;
+		Controller.config_cmd_pending = 0;
+		if (FOC.is_armed) {
+			printf("cfg cmd: motor armed, refused\n");
+		} else if (cmd == 1U) {
+			printf("cfg save: %s\n",
+			       (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
+		} else if (cmd == 2U) {
+			config_init();
+			CONFIG_save_to_flash();
+			printf("cfg reset\n");
+		}
+	}
 
-    if ((stage != RUN) && (stage != ANTICOGGING)) {
-        return;
-    }
+	if ((stage != RUN) && (stage != ANTICOGGING))
+		return;
 
-    const float vel_meas       = encoder.vel; // rps
-    float       vel_des        = 0.0f;
+	const float vel_meas = encoder.vel; /* rps */
+	float vel_des = 0.0f;
 
-    switch (Controller.ctrl_mode) {
-    case CONTROL_MODE_CURRENT_RAMP: {
-        float max_step_size = ABS(CTRL_PERIOD * Config.current_ramp_rate);
-        float full_step     = Controller.input_current - Controller.cur_setpoint;
-        float step          = CLAMP(full_step, -max_step_size, max_step_size);
-        Controller.cur_setpoint += step;
-    } break;
+	switch (Controller.ctrl_mode) {
+	case CONTROL_MODE_CURRENT_RAMP: {
+		float max_step_size =
+		    ABS(CTRL_PERIOD * Config.current_ramp_rate);
+		float full_step =
+		    Controller.input_current - Controller.cur_setpoint;
+		float step = CLAMP(full_step, -max_step_size, max_step_size);
+		Controller.cur_setpoint += step;
+	} break;
 
-    case CONTROL_MODE_VELOCITY_RAMP: {
-        float max_step_size = ABS(CTRL_PERIOD * Config.velocity_ramp_rate);
-        float full_step     = Controller.input_velocity - Controller.vel_setpoint;
-        float step          = CLAMP(full_step, -max_step_size, max_step_size);
-        Controller.vel_setpoint += step;
-        Controller.cur_setpoint = Config.current_ff_gain * (step / CTRL_PERIOD);
+	case CONTROL_MODE_VELOCITY_RAMP: {
+		float max_step_size =
+		    ABS(CTRL_PERIOD * Config.velocity_ramp_rate);
+		float full_step =
+		    Controller.input_velocity - Controller.vel_setpoint;
+		float step = CLAMP(full_step, -max_step_size, max_step_size);
+		Controller.vel_setpoint += step;
+		Controller.cur_setpoint =
+		    Config.current_ff_gain * (step / CTRL_PERIOD);
 
-        if (!Controller.target_reached) {
-            if (ABS(Controller.input_velocity - vel_meas) < Config.target_velcity_window) {
-                Controller.target_reached = true;
-            }
-        }
-    } break;
+		if (!Controller.target_reached) {
+			if (ABS(Controller.input_velocity - vel_meas) <
+			    Config.target_velcity_window) {
+				Controller.target_reached = true;
+			}
+		}
+	} break;
 
-    case CONTROL_MODE_POSITION_FILTER:
-    case CONTROL_MODE_POSITION_PROFILE: {
-        // 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad
-        float th_meas = (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
-        float perr    = Controller.input_position - th_meas;
-        while (perr > 3.14159265f)  perr -= 6.2831853f;   // 最短路径卷绕到 [-π, π]
-        while (perr < -3.14159265f) perr += 6.2831853f;
+	case CONTROL_MODE_POSITION_FILTER:
+	case CONTROL_MODE_POSITION_PROFILE: {
+		/* 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad */
+		float th_meas =
+		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
+		float perr = Controller.input_position - th_meas;
+		while (perr > 3.14159265f)
+			perr -= 6.2831853f; /* 最短路径卷绕到 [-π, π] */
+		while (perr < -3.14159265f)
+			perr += 6.2831853f;
 
-        Controller.cur_setpoint = 0.0f;
-        Controller.vel_setpoint = 0.0f;
-        Controller.pos_setpoint = th_meas;
-        vel_des = Config.pos_p_gain * perr;               // 位置 P -> 速度目标
+		Controller.cur_setpoint = 0.0f;
+		Controller.vel_setpoint = 0.0f;
+		Controller.pos_setpoint = th_meas;
+		vel_des = Config.pos_p_gain * perr; /* 位置 P -> 速度目标 */
 
-        if (!Controller.target_reached) {
-            if (ABS(perr) < Config.target_position_window) {
-                Controller.target_reached = true;
-            }
-        }
-    } break;
+		if (!Controller.target_reached) {
+			if (ABS(perr) < Config.target_position_window)
+				Controller.target_reached = true;
+		}
+	} break;
 
-    default:
-        break;
-    }
+	default:
+		break;
+	}
 
-    // 速度模式用轨迹速度; 位置模式的 vel_des 已在上面按单圈角度 P 给出
-    if (Controller.ctrl_mode < CONTROL_MODE_POSITION_FILTER) {
-        vel_des = Controller.vel_setpoint;
-    }
+	/* 速度模式用轨迹速度; 位置模式的 vel_des 已在上面按单圈角度 P 给出 */
+	if (Controller.ctrl_mode < CONTROL_MODE_POSITION_FILTER)
+		vel_des = Controller.vel_setpoint;
 
-    // 速度限幅
-    vel_des = CLAMP(vel_des, -Config.velocity_limit, +Config.velocity_limit);
+	/* 速度限幅 */
+	vel_des =
+	    CLAMP(vel_des, -Config.velocity_limit, +Config.velocity_limit);
 
-    // 速度环 PI
-    iq_set = Controller.cur_setpoint;
+	/* 速度环 PI */
+	iq_set = Controller.cur_setpoint;
 
-    if (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) {
-        v_err = vel_des - vel_meas;
-        iq_set += Config.vel_p_gain * v_err;
-        iq_set += Controller.vel_integrator;
-    }
+	if (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) {
+		v_err = vel_des - vel_meas;
+		iq_set += Config.vel_p_gain * v_err;
+		iq_set += Controller.vel_integrator;
+	}
 
-    // 电流模式下的速度限幅
-    if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
-        float Imax = (+Config.velocity_limit - vel_meas) * Config.vel_p_gain;
-        float Imin = (-Config.velocity_limit - vel_meas) * Config.vel_p_gain;
-        iq_set     = CLAMP(iq_set, Imin, Imax);
-    }
+	/* 电流模式下的速度限幅 */
+	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
+		float Imax =
+		    (+Config.velocity_limit - vel_meas) * Config.vel_p_gain;
+		float Imin =
+		    (-Config.velocity_limit - vel_meas) * Config.vel_p_gain;
+		iq_set = CLAMP(iq_set, Imin, Imax);
+	}
 
-    // 齿槽转矩前馈补偿 (单圈机械角索引; 位置保持法测得保持电流,
-    // 与齿槽转矩同向, 前馈取正)
-    if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
-        Config.anticogging_enable && Config.cogging_map_valid &&
-        (foc_get_stage() != ANTICOGGING)) {
-        int cg_idx = (int)nearbyintf((float)COGGING_MAP_NUM *
-                                     (float)encoder.count_aligned / ENCODER_CPR_F);
-        if (cg_idx < 0) cg_idx = 0;
-        if (cg_idx >= (int)COGGING_MAP_NUM) cg_idx = 0;
-        iq_set += (float)Config.cogging_map[cg_idx] / COGGING_SCALE;
-    }
+	/* 齿槽转矩前馈补偿 (单圈机械角索引; 位置保持法测得保持电流, */
+	/* 与齿槽转矩同向, 前馈取正) */
+	if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
+	    Config.anticogging_enable && Config.cogging_map_valid &&
+	    (foc_get_stage() != ANTICOGGING)) {
+		int cg_idx = (int)nearbyintf((float)COGGING_MAP_NUM *
+					     (float)encoder.count_aligned /
+					     ENCODER_CPR_F);
+		if (cg_idx < 0)
+			cg_idx = 0;
+		if (cg_idx >= (int)COGGING_MAP_NUM)
+			cg_idx = 0;
+		iq_set += (float)Config.cogging_map[cg_idx] / COGGING_SCALE;
+	}
 
-    // 电流限幅
-    bool limited = false;
-    if (iq_set > +Config.current_limit) {
-        limited = true;
-        iq_set  = +Config.current_limit;
-    }
-    if (iq_set < -Config.current_limit) {
-        limited = true;
-        iq_set  = -Config.current_limit;
-    }
+	/* 电流限幅 */
+	bool limited = false;
+	if (iq_set > +Config.current_limit) {
+		limited = true;
+		iq_set = +Config.current_limit;
+	}
+	if (iq_set < -Config.current_limit) {
+		limited = true;
+		iq_set = -Config.current_limit;
+	}
 
-    FOC.Id_set = 0.0f;
-    FOC.Iq_set = iq_set;
+	FOC.Id_set = 0.0f;
+	FOC.Iq_set = iq_set;
 
-    // 速度积分器 (抗饱和)
-    if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
-        Controller.vel_integrator = 0.0f;
-    } else {
-        if (limited) {
-            Controller.vel_integrator *= 0.99f;
-        } else {
-            Controller.vel_integrator +=
-                (Config.vel_i_gain * CTRL_PERIOD) * v_err;
-        }
-    }
+	/* 速度积分器 (抗饱和) */
+	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
+		Controller.vel_integrator = 0.0f;
+	} else if (limited) {
+		Controller.vel_integrator *= 0.99f;
+	} else {
+		Controller.vel_integrator +=
+		    (Config.vel_i_gain * CTRL_PERIOD) * v_err;
+	}
 }

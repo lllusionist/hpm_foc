@@ -5,18 +5,17 @@
 #include "foc_cal.h"
 
 typedef enum eFSMState {
-    BOOT_UP     = 0,
-    IDLE        = 1,
-    RUN         = 2,
-    CALIBRATION = 3,
-    ANTICOGGING = 4,
+	BOOT_UP = 0,
+	IDLE = 1,
+	RUN = 2,
+	CALIBRATION = 3,
+	ANTICOGGING = 4,
 } tFSMState;
 
-typedef struct sFSM
-{
-    tFSMState state;
-    tFSMState state_next;
-    uint8_t   state_next_ready;
+typedef struct sFSM {
+	tFSMState state;
+	tFSMState state_next;
+	uint8_t state_next_ready;
 } tFSM;
 
 void foc_request_stage(tFSMState state);

@@ -8,8 +8,8 @@ volatile foc_data_t FOC;
 
 /* ADC */
 #define VBUS_DIVIDER_RATIO 16.0f
-#define ADC_REF_VOLTAGE 3.3f	 // ADC参考电压3.3V
-#define ADC_RESOLUTION 65536.0f	 // 16位ADC分辨率
+#define ADC_REF_VOLTAGE 3.3f	/* ADC参考电压3.3V */
+#define ADC_RESOLUTION 65536.0f /* 16位ADC分辨率 */
 #define VBUS_SCALE_FACTOR                                                      \
 	(VBUS_DIVIDER_RATIO * ADC_REF_VOLTAGE / ADC_RESOLUTION)
 
@@ -51,9 +51,8 @@ bool foc_adc_midpoint(void)
 		times += 1;
 		sys_delay_ms(1);
 	}
-	if (times < 16U || ibus_times < 16U) {
+	if (times < 16U || ibus_times < 16U)
 		return false;
-	}
 	FOC.Ia_midpoint = adc_a_sum / times;
 	FOC.Ib_midpoint = adc_b_sum / times;
 	FOC.Ic_midpoint = adc_c_sum / times;
@@ -75,7 +74,8 @@ void foc_update_voltages(void)
 	if (adc1_read_ibus(&ibus_raw)) {
 		FOC.Ibus = ibus_raw;
 		FOC.adc_ibus_missed = 0U;
-		float ibus = ((float)ibus_raw - FOC.Ibus_midpoint) * FOC_IBUS_SCALE;
+		float ibus =
+		    ((float)ibus_raw - FOC.Ibus_midpoint) * FOC_IBUS_SCALE;
 		UTILS_LP_FAST(FOC.Ibus_filt, ibus, 0.1f);
 	} else {
 		FOC.adc_ibus_missed++;
@@ -91,27 +91,39 @@ void foc_update_voltages(void)
 	FOC.Vb = ((float)vb - FOC.Vb_midpoint) * k;
 	FOC.Vc = ((float)vc - FOC.Vc_midpoint) * k;
 
-	float vbus = (float)vbus_raw * (3.3f / 65536.0f) *
-		     FOC_VBUS_DIVIDER;
+	float vbus = (float)vbus_raw * (3.3f / 65536.0f) * FOC_VBUS_DIVIDER;
 	FOC.Vbus = vbus;
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
 /* 死区补偿: 死区期间输出电压偏离指令, 按电流方向逐相补回 ±(t_dead/T_pwm) 占空比。
  * ITH 为过零过渡带 —— 太窄时补偿量近似方波, 低速会出现可听啸叫。 */
-#define DT_DEAD_NS   (PWM_DEAD_TIME_NS + 100U)  /* 仅 FD6288 的 100ns */
-#define DT_COMP_ITH  (0.8f)                     /* 过零过渡带(A) */
+#define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U) /* 仅 FD6288 的 100ns */
+#define DT_COMP_ITH (0.8f)		     /* 过零过渡带(A) */
 
 static void foc_deadtime_comp(void)
 {
-	const float dt_comp = (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
-	float ca = ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
-	float cb = ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
-	float cc = ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
+	const float dt_comp =
+	    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
+	float ca =
+	    ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
+	float cb =
+	    ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
+	float cc =
+	    ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
 
-	if (ca > 1.0f) { ca = 1.0f; } else if (ca < -1.0f) { ca = -1.0f; }
-	if (cb > 1.0f) { cb = 1.0f; } else if (cb < -1.0f) { cb = -1.0f; }
-	if (cc > 1.0f) { cc = 1.0f; } else if (cc < -1.0f) { cc = -1.0f; }
+	if (ca > 1.0f)
+		ca = 1.0f;
+	else if (ca < -1.0f)
+		ca = -1.0f;
+	if (cb > 1.0f)
+		cb = 1.0f;
+	else if (cb < -1.0f)
+		cb = -1.0f;
+	if (cc > 1.0f)
+		cc = 1.0f;
+	else if (cc < -1.0f)
+		cc = -1.0f;
 
 	FOC.dtc_a += dt_comp * ca;
 	FOC.dtc_b += dt_comp * cb;
@@ -124,14 +136,14 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	float mod_vd = Vd * v_to_mod;
 	float mod_vq = Vq * v_to_mod;
 
-	// Vector modulation saturation, lock integrator if saturated
+	/* Vector modulation saturation, lock integrator if saturated */
 	float factor = 0.9f * SQRT3_BY_2 / sqrtf(SQ(mod_vd) + SQ(mod_vq));
 	if (factor < 1.0f) {
 		mod_vd *= factor;
 		mod_vq *= factor;
 	}
 
-	// Inverse park transform
+	/* Inverse park transform */
 	float alpha, beta;
 	float pwm_phase = phase;
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
@@ -142,21 +154,20 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	}
 }
 
-// 三相下桥全开, 上桥全关
+/* 三相下桥全开, 上桥全关 */
 void pwm_output_low_sides(void)
 {
 	pwm_set_duty(0, 0, 0);
 }
 
-// 恢复三相正常 PWM 输出
+/* 恢复三相正常 PWM 输出 */
 void enable_bldc_pwm_output(void)
 {
-	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++) {
+	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++)
 		pwmv2_disable_software_force(PWM, ch);
-	}
 }
 
-// 强制三相输出到无效电平, 完全关断
+/* 强制三相输出到无效电平, 完全关断 */
 void disable_bldc_pwm_output(void)
 {
 	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++) {
@@ -168,28 +179,26 @@ void disable_bldc_pwm_output(void)
 	}
 
 	pwmv2_shadow_register_unlock(PWM);
-	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++) {
+	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++)
 		pwmv2_force_output(PWM, ch, pwm_force_output_1, false);
-	}
 	pwmv2_shadow_register_lock(PWM);
 }
 
 void foc_disarm(void)
 {
-	if (!FOC.is_armed) {
+	if (!FOC.is_armed)
 		return;
-	}
 
 	taskENTER_CRITICAL();
 
 	disable_bldc_pwm_output();
 
-	FOC.Iq         = 0;
-	FOC.Iq_filt    = 0;
-	FOC.Id         = 0;
-	FOC.Id_filt    = 0;
-	FOC.Ibus       = 0;
-	FOC.Ibus_filt  = 0;
+	FOC.Iq = 0;
+	FOC.Iq_filt = 0;
+	FOC.Id = 0;
+	FOC.Id_filt = 0;
+	FOC.Ibus = 0;
+	FOC.Ibus_filt = 0;
 	FOC.Power_filt = 0;
 
 	FOC.current_ctrl_integral_d = 0;
@@ -208,18 +217,17 @@ void foc_arm(void)
 		FOC.fault_code = FOC_FAULT_ADC;
 		return;
 	}
-	if (FOC.is_armed) {
+	if (FOC.is_armed)
 		return;
-	}
 
 	taskENTER_CRITICAL();
 
-	FOC.Iq         = 0;
-	FOC.Iq_filt    = 0;
-	FOC.Id         = 0;
-	FOC.Id_filt    = 0;
-	FOC.Ibus       = 0;
-	FOC.Ibus_filt  = 0;
+	FOC.Iq = 0;
+	FOC.Iq_filt = 0;
+	FOC.Id = 0;
+	FOC.Id_filt = 0;
+	FOC.Ibus = 0;
+	FOC.Ibus_filt = 0;
 	FOC.Power_filt = 0;
 
 	FOC.current_ctrl_integral_d = 0;
@@ -258,25 +266,28 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 	float i_d_err = Id_set - i_d;
 	float i_q_err = Iq_set - i_q;
-	float v_d = i_d_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_d;
-	float v_q = i_q_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_q;
+	float v_d =
+	    i_d_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_d;
+	float v_q =
+	    i_q_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_q;
 
-	// 反电势前馈 + d/q 交叉解耦 (校准模式不启用, 保证磁链标定模型不变)
+	/* 反电势前馈 + d/q 交叉解耦 (校准模式不启用, 保证磁链标定模型不变) */
 	if (FOC.ff_enable && !FOC.calib_mode) {
 		v_d += -phase_vel * Config.phase_inductance * i_q;
-		v_q += phase_vel * (Config.phase_inductance * i_d + Config.flux_linkage);
+		v_q += phase_vel *
+		       (Config.phase_inductance * i_d + Config.flux_linkage);
 	}
 
 	FOC.Vd_out = v_d;
 	FOC.Vq_out = v_q;
-	FOC.Vmag   = sqrtf(SQ(v_d) + SQ(v_q));
+	FOC.Vmag = sqrtf(SQ(v_d) + SQ(v_q));
 
-	// voltage normalize = 1/(2/3*v_bus)
+	/* voltage normalize = 1/(2/3*v_bus) */
 	float v_to_mod = 1.5f / FOC.Vbus_filt;
 	float mod_vd = v_d * v_to_mod;
 	float mod_vq = v_q * v_to_mod;
 
-	// Vector modulation saturation, lock integrator if saturated
+	/* Vector modulation saturation, lock integrator if saturated */
 	float factor = 0.9f * SQRT3_BY_2 / sqrtf(SQ(mod_vd) + SQ(mod_vq));
 	if (factor < 1.0f) {
 		mod_vd *= factor;
@@ -287,12 +298,14 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	} else {
 		FOC.saturated = false;
 		FOC.current_ctrl_integral_d +=
-		    i_d_err * (FOC.current_ctrl_i_gain * CURRENT_MEASURE_PERIOD);
+		    i_d_err *
+		    (FOC.current_ctrl_i_gain * CURRENT_MEASURE_PERIOD);
 		FOC.current_ctrl_integral_q +=
-		    i_q_err * (FOC.current_ctrl_i_gain * CURRENT_MEASURE_PERIOD);
+		    i_q_err *
+		    (FOC.current_ctrl_i_gain * CURRENT_MEASURE_PERIOD);
 	}
 
-	// 角度外推一拍, 补偿计算到生效之间的延迟
+	/* 角度外推一拍, 补偿计算到生效之间的延迟 */
 	float alpha, beta;
 	float pwm_phase = phase + phase_vel * CURRENT_MEASURE_PERIOD;
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
@@ -307,8 +320,9 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	FOC.Id = i_d;
 	UTILS_LP_FAST(FOC.Id_filt, FOC.Id, 0.01f);
 
-	// 转矩估算 (表贴式: T = 1.5·p·λ·iq)
-	FOC.torque = 1.5f * (float)Config.pole_pairs * Config.flux_linkage * i_q;
+	/* 转矩估算 (表贴式: T = 1.5·p·λ·iq) */
+	FOC.torque =
+	    1.5f * (float)Config.pole_pairs * Config.flux_linkage * i_q;
 
 	FOC.Power_filt = 1.5f * (v_d * i_d + v_q * i_q);
 }
@@ -323,18 +337,19 @@ void foc_adc_callback(void)
 		vofa_push_sample();
 	}
 
-	if (!FOC.is_armed) {
+	if (!FOC.is_armed)
 		return;
-	}
 
-	// 校准: α 轴正弦电压注入 (电感测量)
+	/* 校准: α 轴正弦电压注入 (电感测量) */
 	if (FOC.calib_vinj_mode) {
 		FOC.inj_phase += FOC.vinj_omega * CURRENT_MEASURE_PERIOD;
-		if (FOC.inj_phase >= M_2PI) FOC.inj_phase -= M_2PI;
+		if (FOC.inj_phase >= M_2PI)
+			FOC.inj_phase -= M_2PI;
 
 		float s = sin_f32(FOC.inj_phase);
 		if (FOC.vinj_acc) {
-			float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+			float ia =
+			    (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 			FOC.vinj_sum_sin += ia * s;
 			FOC.vinj_sum_cos += ia * cos_f32(FOC.inj_phase);
 			FOC.vinj_samples++;
@@ -343,63 +358,62 @@ void foc_adc_callback(void)
 		return;
 	}
 
-	// 校准: 开环电流模式 (角度由校准状态机下发)
+	/* 校准: 开环电流模式 (角度由校准状态机下发) */
 	if (FOC.calib_mode) {
 		FOC_current(FOC.calib_id, FOC.calib_iq, FOC.calib_angle,
 			    FOC.calib_phase_vel);
 		return;
 	}
 
-	if ((foc_get_stage() != RUN) && (foc_get_stage() != ANTICOGGING)) {
+	if ((foc_get_stage() != RUN) && (foc_get_stage() != ANTICOGGING))
 		return;
-	}
 
-	// 调试: 开环固定矢量 (旁路电流环)
+	/* 调试: 开环固定矢量 (旁路电流环) */
 	if (FOC.openloop_voltage > 0.0f) {
 		FOC_voltage(FOC.openloop_voltage, 0, FOC.openloop_angle);
 		return;
 	}
 
-	float iq_set = CLAMP(FOC.Iq_set, -Config.current_limit,
-			     Config.current_limit);
+	float iq_set =
+	    CLAMP(FOC.Iq_set, -Config.current_limit, Config.current_limit);
 	float phase = encoder.phase + FOC.phase_offset;
 	FOC_current(FOC.Id_set, iq_set, phase, encoder.phase_vel);
 }
 
 void foc_init(void)
 {
-	FOC.Vbus                    = VBUS_DEFAULT;
-	FOC.Vbus_filt               = VBUS_DEFAULT;
-	FOC.Id_set                  = 0;
-	FOC.Iq_set                  = 0;
-	FOC.phase_offset            = 0;
-	FOC.openloop_voltage        = 0;
-	FOC.openloop_angle          = 0;
+	FOC.Vbus = VBUS_DEFAULT;
+	FOC.Vbus_filt = VBUS_DEFAULT;
+	FOC.Id_set = 0;
+	FOC.Iq_set = 0;
+	FOC.phase_offset = 0;
+	FOC.openloop_voltage = 0;
+	FOC.openloop_angle = 0;
 
-	FOC.Vd_out      = 0;
-	FOC.Vq_out      = 0;
-	FOC.Vmag        = 0;
-	FOC.torque      = 0;
-	FOC.saturated   = false;
-	FOC.ff_enable   = true;
-	FOC.calib_mode  = false;
+	FOC.Vd_out = 0;
+	FOC.Vq_out = 0;
+	FOC.Vmag = 0;
+	FOC.torque = 0;
+	FOC.saturated = false;
+	FOC.ff_enable = true;
+	FOC.calib_mode = false;
 	FOC.calib_angle = 0;
 	FOC.calib_phase_vel = 0;
-	FOC.calib_id        = 0;
-	FOC.calib_iq        = 0;
+	FOC.calib_id = 0;
+	FOC.calib_iq = 0;
 
 	FOC.calib_vinj_mode = false;
-	FOC.vinj_omega      = 0;
-	FOC.vinj_amp        = 0;
-	FOC.vinj_dc         = 0;
-	FOC.inj_phase       = 0;
-	FOC.vinj_acc        = false;
-	FOC.vinj_sum_sin    = 0;
-	FOC.vinj_sum_cos    = 0;
-	FOC.vinj_samples    = 0;
+	FOC.vinj_omega = 0;
+	FOC.vinj_amp = 0;
+	FOC.vinj_dc = 0;
+	FOC.inj_phase = 0;
+	FOC.vinj_acc = false;
+	FOC.vinj_sum_sin = 0;
+	FOC.vinj_sum_cos = 0;
+	FOC.vinj_samples = 0;
 	FOC.current_ctrl_integral_d = 0;
 	FOC.current_ctrl_integral_q = 0;
-	FOC.Power_filt              = 0;
+	FOC.Power_filt = 0;
 
 	if (Config.current_gain_magic == CONFIG_MAGIC &&
 	    Config.current_kp > 0.0f && Config.current_kp < 1.0e5f &&
@@ -415,8 +429,7 @@ void foc_init(void)
 	FOC.adc_voltage_missed = 0U;
 	FOC.adc_ibus_missed = 0U;
 	adc1_init();
-	if (!foc_adc_midpoint()) {
+	if (!foc_adc_midpoint())
 		FOC.fault_code = FOC_FAULT_ADC;
-	}
 	adc_callback_set(foc_adc_callback);
 }
