@@ -174,12 +174,17 @@ class MainWindow(QWidget):
 
         self.btn_calib = QPushButton("校准")
         self.btn_calib.setToolTip("开始 R/L 参数校准 (电机需可自由转动)")
-        self.btn_anticog = QPushButton("齿槽标定")
-        self.btn_anticog.setToolTip("齿槽转矩补偿标定 (电机需空载且可自由转动, 约几秒)")
-        self.btn_anticog_sweep = QPushButton("齿槽扫描")
+        # 两种齿槽标定方法写的是同一张表, 选一个即可
+        self.btn_anticog_sweep = QPushButton("齿槽扫描★")
         self.btn_anticog_sweep.setToolTip(
-            "恒速扫描法齿槽标定 (0x2E): 速度环匀速 0.3rps 正反各转 8 圈,\n"
-            "按机械角分箱平均; 比位置保持法快、噪声低 (约 1 分钟)")
+            "【推荐】恒速扫描法 (0x2E): 速度环匀速 0.1 rps 正反各 4 圈,\n"
+            "按机械角把电流分箱平均。约 90 s, 噪声比位置保持法低一个数量级,\n"
+            "无步进扰动。实测 0.1 rps 转速纹波 -19%, 位置锁定分量 -35%")
+        self.btn_anticog = QPushButton("齿槽标定(慢)")
+        self.btn_anticog.setToolTip(
+            "位置保持法 (0x28): 位置环把转子锁在每 0.7° 一格, 停稳后取 64 点平均,\n"
+            "正反各扫一遍。约 2~4 分钟, 结果噪声较大 (单点约 3 mA)。\n"
+            "保留作备用/对比: 电机行程受限、无法连续转圈时用这个")
         self.btn_enable = QPushButton("使能")
         self.btn_enable.setObjectName("Toggle")
         self.btn_enable.setCheckable(True)
@@ -198,15 +203,22 @@ class MainWindow(QWidget):
         self.cb_anticog = QCheckBox("齿槽补偿")
         self.cb_anticog.setChecked(True)
         self.cb_anticog.setToolTip(
-            "齿槽前馈在线开关 (0x2A); 关掉可对比低速转速纹波,\n"
-            "需要先跑过「齿槽标定」")
+            "齿槽前馈在线开关 (0x2A)。用途: 做 A/B 验证补偿是否有效\n"
+            "(低速匀速运行, 开/关各录 20~30 s, 对比通道 7 的转速纹波)。\n"
+            "需要先跑过一次齿槽标定 (表在 Flash 里, 读参数看 COG=1)")
         self.cb_ff = QCheckBox("摩擦前馈")
         self.cb_ff.setChecked(True)
         self.cb_ff.setToolTip(
-            "摩擦前馈在线开关 (0x2B); 低速 BREAK/MOVE 换挡会注入转矩台阶,\n"
-            "关掉可判断是不是前馈在引起抖动")
-        for cb in (self.cb_anticog, self.cb_ff):
-            h.addWidget(cb)
+            "摩擦前馈在线开关 (0x2B)。稳态低速实测开关差异很小\n"
+            "(0.1 rps: 0.0204 vs 0.0209 rps), 主要作用在启动/突破静摩擦时。\n"
+            "出现低速抖动时可关掉排查是不是 BREAK/MOVE 换挡引起的")
+        self.btn_dump_cog = QPushButton("导出齿槽表")
+        self.btn_dump_cog.setToolTip(
+            "0x2C: 把 Flash 里的 512 点齿槽表通过串口逐行打印 (索引,值),\n"
+            "可用上位机日志/串口助手保存成 txt 做离线 FFT")
+        for w in (self.cb_anticog, self.cb_ff, self.btn_dump_cog):
+            h.addWidget(w)
+        self.btn_dump_cog.clicked.connect(lambda: self.send(CMD["dump_cog"]))
         self.cb_anticog.toggled.connect(
             lambda on: self.send(CMD["set_anticog"], 1.0 if on else 0.0))
         self.cb_ff.toggled.connect(
@@ -463,10 +475,28 @@ class MainWindow(QWidget):
         if "CLIM" in kv or "VLIM" in kv:
             self._update_target_defs()
         self._save_cfg_later()
+        # 标定得到的电机参数 / 齿槽表状态 (只在状态栏显示, 不写回输入框)
+        extra = []
+        if "R" in kv:
+            extra.append("R=%.2fΩ" % kv["R"])
+        if "L" in kv:
+            extra.append("L=%.2fmH" % (kv["L"] * 1000.0))
+        if "LAM" in kv:
+            extra.append("λ=%.4fWb" % kv["LAM"])
+        if "J" in kv and kv["J"] > 0:
+            extra.append("J=%.2ge-5" % (kv["J"] * 1e5))
+        if "FRIC" in kv and kv["FRIC"] > 0:
+            extra.append("摩擦=%.0fmA" % (kv["FRIC"] * 1000.0))
+        if "CAL" in kv:
+            extra.append("标定%s" % ("有效" if kv["CAL"] > 0.5 else "无效"))
+        if "COG" in kv:
+            extra.append("齿槽表%s" % ("有效" if kv["COG"] > 0.5 else "无效"))
         kvk = kv.get("CURKI")
         msg = "已读取设备参数: %d 项" % got
         if kvk is not None:
             msg += " (设备Ki=%g)" % kvk
+        if extra:
+            msg += " | " + " ".join(extra)
         self.statusbar.flash(msg)
 
     def enable(self):
