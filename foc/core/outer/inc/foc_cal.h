@@ -60,6 +60,8 @@ void calibration_loop(void);
 
 /* 齿槽转矩补偿标定: 速度环低速匀速拖动, 按电角度分桶采样 Iq_set 生成补偿表 */
 void anticogging_start(void);
+/* 0 = 位置保持(0x28), 1 = 恒速扫描(0x2D) */
+void anticogging_set_method(uint8_t m);
 bool anticogging_loop(void); /* 返回 true 表示标定结束 */
 /* 齿槽表 dump (0x2C): 请求后由 1kHz 任务分块打印, 每拍 8 点 */
 void cogging_dump_request(void);

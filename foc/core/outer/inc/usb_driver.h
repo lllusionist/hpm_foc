@@ -14,6 +14,7 @@
 #define USB_CMD_SET_ANTICOG 0x2A    /* float 0/1: 齿槽补偿在线开关 (A/B 用) */
 #define USB_CMD_SET_FRICTION_FF 0x2B /* float 0/1: 摩擦前馈在线开关 */
 #define USB_CMD_DUMP_COGGING 0x2C    /* 无参: 分块打印 512 点齿槽表 */
+#define USB_CMD_ANTICOGGING_SWEEP 0x2E /* 无参: 恒速扫描法齿槽标定 (0x2D 已被 SET_HOME 占用) */
 
 #define USB_CMD_SET_TORQUE 0x23
 #define USB_CMD_SET_VELOCITY 0x24

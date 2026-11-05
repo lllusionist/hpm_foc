@@ -176,6 +176,10 @@ class MainWindow(QWidget):
         self.btn_calib.setToolTip("开始 R/L 参数校准 (电机需可自由转动)")
         self.btn_anticog = QPushButton("齿槽标定")
         self.btn_anticog.setToolTip("齿槽转矩补偿标定 (电机需空载且可自由转动, 约几秒)")
+        self.btn_anticog_sweep = QPushButton("齿槽扫描")
+        self.btn_anticog_sweep.setToolTip(
+            "恒速扫描法齿槽标定 (0x2E): 速度环匀速 0.3rps 正反各转 8 圈,\n"
+            "按机械角分箱平均; 比位置保持法快、噪声低 (约 1 分钟)")
         self.btn_enable = QPushButton("使能")
         self.btn_enable.setObjectName("Toggle")
         self.btn_enable.setCheckable(True)
@@ -187,7 +191,7 @@ class MainWindow(QWidget):
         self.btn_record.setObjectName("Toggle")
         self.btn_record.setCheckable(True)
         self.btn_record.setToolTip("开始录制全分辨率波形+命令; 再点一下停止并保存到桌面")
-        for b in (self.btn_calib, self.btn_anticog, self.btn_enable, self.btn_disable, self.btn_zero, self.btn_record):
+        for b in (self.btn_calib, self.btn_anticog, self.btn_anticog_sweep, self.btn_enable, self.btn_disable, self.btn_zero, self.btn_record):
             h.addWidget(b)
 
         # A/B 调试开关 (固件 0x2A / 0x2B, 运行时即时生效)
@@ -293,6 +297,7 @@ class MainWindow(QWidget):
         self.btn_disable.clicked.connect(self.disable)
         self.btn_calib.clicked.connect(lambda: self.send(CMD["calib"]))
         self.btn_anticog.clicked.connect(lambda: self.send(CMD["anticog"]))
+        self.btn_anticog_sweep.clicked.connect(lambda: self.send(CMD["anticog_sweep"]))
         self.btn_zero.clicked.connect(lambda: self.send(CMD["home"]))
         self.btn_record.clicked.connect(self.toggle_record)
         self.btn_clear.clicked.connect(self.clear_data)

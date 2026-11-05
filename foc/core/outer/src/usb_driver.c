@@ -180,6 +180,12 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 
 	case USB_CMD_ANTICOGGING_START:
+		anticogging_set_method(0U);
+		foc_request_stage(ANTICOGGING);
+		break;
+
+	case USB_CMD_ANTICOGGING_SWEEP:
+		anticogging_set_method(1U);
 		foc_request_stage(ANTICOGGING);
 		break;
 

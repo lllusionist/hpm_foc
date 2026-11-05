@@ -46,6 +46,7 @@ void CONTROLLER_init(void);
 void CONTROLLER_reset(void);
 /* 摩擦前馈在线开关 (0x2B) */
 void CONTROLLER_set_friction_ff(uint8_t en);
+uint8_t CONTROLLER_get_friction_ff(void);
 void CONTROLLER_sync_callback(void);
 int CONTROLLER_set_op_mode(tControlMode mode);
 int CONTROLLER_set_home(void);

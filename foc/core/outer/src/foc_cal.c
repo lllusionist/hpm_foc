@@ -944,6 +944,27 @@ void calibration_loop(void)
 #define CG_TIMEOUT_S 300U     /* 总超时: 512点x2方向, 每点最多 300ms 停稳 */
 #define CG_LP_BINS 1U	      /* 1 = 不做圆周低通 (避免 84 阶相位滞后) */
 
+/* ---- 恒速扫描法 (0x2D) ----
+ * 速度环匀速转 N 圈, 边转边按机械角把 Iq_filt 分箱累加, 正反各一遍后
+ * 两方向平均: 齿槽是位置锁定的(同向叠加), 摩擦随运动方向反号(相消).
+ * 相比位置保持法: 没有"每步停稳"的过程 -> 没有步进扰动/残余振荡,
+ * 平均样本数 = 圈数 x 每圈每箱采样, 噪声低一个数量级. */
+#define CG_SW_RPS 0.30f	    /* 扫描转速 (rps) */
+#define CG_SW_REVS 8.0f	    /* 每方向累加圈数 */
+#define CG_SW_RAMP 1.5f	    /* 速度指令斜坡 (rps/s) */
+#define CG_SW_SKIP_REV 0.5f /* 每方向先空转半圈再开始累加 */
+
+static uint8_t cg_method = 0U; /* 0 = 位置保持(0x28), 1 = 恒速扫描(0x2D) */
+static uint8_t cg_ff_save = 1U; /* 扫描前保存摩擦前馈开关, 结束后恢复 */
+static float cg_sw_prev;  /* 上一拍机械角 */
+static float cg_sw_travel; /* 本方向累计转角 (rad) */
+static float cg_sw_dir;	   /* +1 / -1 */
+static float cg_sw_target; /* 当前速度指令 */
+static uint8_t cg_sw_phase; /* 0=加减速 1=累加 2=收尾 */
+static int32_t cg_sw_sum[2][COGGING_MAP_NUM];
+static uint16_t cg_sw_cnt[2][COGGING_MAP_NUM];
+
+
 typedef enum {
 	CG_PH_GAP_FWD,
 	CG_PH_SCAN_FWD,
@@ -1061,14 +1082,6 @@ void anticogging_start(void)
 	FOC.calib_mode = false;
 	FOC.calib_vinj_mode = false;
 
-	Controller.ctrl_mode = CONTROL_MODE_POSITION_FILTER;
-	Controller.target_reached = false;
-	CONTROLLER_reset();
-
-	/* 静摩擦需要更大的位置 P; 原 5.0 时每步只有 0.12rps/0.03A,
-	 * 转子不动, 表全落同一 bin */
-	Config.pos_p_gain = 50.0f;
-
 	Config.cogging_map_valid = 0;
 	memset(Config.cogging_map, 0, sizeof(Config.cogging_map));
 	memset(cg_written, 0, sizeof(cg_written));
@@ -1077,14 +1090,40 @@ void anticogging_start(void)
 	cg_total_ticks = 0;
 	cg_valid = false;
 	cg_running = true;
+	cg_iq_sum = 0;
+	cg_iq_n = 0;
+	cg_settle_timeouts = 0;
+
+	if (cg_method == 1U) {
+		/* 恒速扫描: 速度环匀速转, 按机械角分箱累加 */
+		Controller.ctrl_mode = CONTROL_MODE_VELOCITY_RAMP;
+		Controller.target_reached = false;
+		CONTROLLER_reset();
+		cg_ff_save = CONTROLLER_get_friction_ff();
+		CONTROLLER_set_friction_ff(0U); /* 前馈换挡会注入台阶, 扫描期间关 */
+		memset(cg_sw_sum, 0, sizeof(cg_sw_sum));
+		memset(cg_sw_cnt, 0, sizeof(cg_sw_cnt));
+		cg_sw_prev = cg_pos();
+		cg_sw_travel = 0.0f;
+		cg_sw_dir = 1.0f;
+		cg_sw_target = 0.0f;
+		cg_sw_phase = 0U;
+		printf("cogging: sweep start, %.2f rps x %.0f revs x2 dirs "
+		       "(skip %.1f rev), timeout=%us\n",
+		       (double)CG_SW_RPS, (double)CG_SW_REVS,
+		       (double)CG_SW_SKIP_REV, (unsigned)CG_TIMEOUT_S);
+		return;
+	}
+
+	Controller.ctrl_mode = CONTROL_MODE_POSITION_FILTER;
+	Controller.target_reached = false;
+	CONTROLLER_reset();
+	Config.pos_p_gain = 50.0f;
 	cg_phase = CG_PH_GAP_FWD;
 	cg_state = CG_ST_MOVE;
 	cg_step_idx = 0;
 	cg_tick = 0;
 	cg_settle_cnt = 0;
-	cg_iq_sum = 0;
-	cg_iq_n = 0;
-	cg_settle_timeouts = 0;
 	printf("cogging: start, %u pts x2 dirs, pos_p=%.1f, timeout=%us\n",
 	       (unsigned)COGGING_MAP_NUM, (double)Config.pos_p_gain,
 	       (unsigned)CG_TIMEOUT_S);
@@ -1281,6 +1320,125 @@ static void cg_scan_step(float dir)
 	}
 }
 
+/* 选择齿槽标定方法: 0 = 位置保持 (0x28), 1 = 恒速扫描 (0x2D) */
+void anticogging_set_method(uint8_t m)
+{
+	cg_method = (m != 0U) ? 1U : 0U;
+}
+
+/* 恒速扫描: 建表 (正反两方向平均) */
+static void cg_sweep_build(void)
+{
+	uint32_t both = 0, single = 0;
+	float fric_sum = 0.0f;
+	uint32_t fric_n = 0;
+
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+		bool hf = cg_sw_cnt[0][i] > 0U;
+		bool hr = cg_sw_cnt[1][i] > 0U;
+		float f = hf ? ((float)cg_sw_sum[0][i] / (float)cg_sw_cnt[0][i])
+			     : 0.0f;
+		float r = hr ? ((float)cg_sw_sum[1][i] / (float)cg_sw_cnt[1][i])
+			     : 0.0f;
+		float v;
+
+		if (hf && hr) {
+			v = 0.5f * (f + r);
+			fric_sum += 0.5f * (f - r); /* 摩擦随方向反号 */
+			fric_n++;
+			both++;
+		} else if (hf) {
+			v = f;
+			single++;
+		} else if (hr) {
+			v = r;
+			single++;
+		} else {
+			continue;
+		}
+		Config.cogging_map[i] = cg_to_i16((int32_t)v);
+		cg_mark((int)i);
+	}
+	printf("cogging: sweep bins %u both, %u single\n", (unsigned)both,
+	       (unsigned)single);
+	if (fric_n)
+		printf("cogging: sweep friction=%.1f mA (fwd-rev 差值/2)\n",
+		       (double)(fric_sum / (float)fric_n * 1000.0f / COGGING_SCALE));
+	cg_finish_map(); /* 补漏点 + 去均值 + 可选圆周低通 */
+}
+
+/* 恒速扫描主循环 (1kHz): 加速 -> 累加 -> 换向 -> 再累加 -> 建表 */
+static bool cg_sweep_loop(void)
+{
+	float mech = cg_pos();
+	float d = mech - cg_sw_prev;
+
+	while (d > M_PI)
+		d -= M_2PI;
+	while (d < -M_PI)
+		d += M_2PI;
+	cg_sw_prev = mech;
+
+	if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
+		printf("cogging: sweep dir=%+d trav=%.2f rev vel=%.3f "
+		       "iq=%.3f\n",
+		       (cg_sw_dir > 0.0f) ? 1 : -1,
+		       (double)(cg_sw_travel / M_2PI), (double)encoder.vel,
+		       (double)FOC.Iq_filt);
+	}
+
+	if (cg_sw_phase == 0U) { /* 加减速到目标转速 */
+		float step = CG_SW_RAMP / (float)CAL_LOOP_HZ;
+		float tgt = cg_sw_dir * CG_SW_RPS;
+
+		if (cg_sw_target < tgt) {
+			cg_sw_target += step;
+			if (cg_sw_target > tgt)
+				cg_sw_target = tgt;
+		} else if (cg_sw_target > tgt) {
+			cg_sw_target -= step;
+			if (cg_sw_target < tgt)
+				cg_sw_target = tgt;
+		}
+		Controller.input_velocity = cg_sw_target;
+		if (fabsf(cg_sw_target - tgt) < 0.02f) {
+			cg_sw_travel = 0.0f;
+			cg_sw_phase = 1U;
+		}
+		return false;
+	}
+
+	if (cg_sw_phase == 1U) { /* 累加 */
+		float skip = CG_SW_SKIP_REV * M_2PI;
+
+		cg_sw_travel += fabsf(d);
+		if (cg_sw_travel >= skip) {
+			int idx = cg_index(mech);
+			int k = (cg_sw_dir > 0.0f) ? 0 : 1;
+
+			cg_sw_sum[k][idx] +=
+			    (int32_t)(FOC.Iq_filt * COGGING_SCALE);
+			cg_sw_cnt[k][idx]++;
+		}
+		if (cg_sw_travel >= skip + CG_SW_REVS * M_2PI) {
+			if (cg_sw_dir > 0.0f) {
+				cg_sw_dir = -1.0f;
+				cg_sw_phase = 0U; /* 先减速到 0 再反向 */
+			} else {
+				cg_sw_phase = 2U;
+			}
+		}
+		return false;
+	}
+
+	/* phase 2: 收尾 */
+	Controller.input_velocity = 0.0f;
+	cg_sweep_build();
+	cg_valid = true;
+	cg_running = false;
+	return true;
+}
+
 bool anticogging_loop(void)
 {
 	if (!cg_running)
@@ -1299,6 +1457,9 @@ bool anticogging_loop(void)
 		       (double)Controller.input_position, (double)cg_pos(),
 		       (double)FOC.Iq_filt);
 	}
+
+	if (cg_method == 1U)
+		return cg_sweep_loop();
 
 	switch (cg_phase) {
 	case CG_PH_GAP_FWD:
@@ -1331,6 +1492,8 @@ void anticogging_end(void)
 
 	/* 保存 Flash 前必须恢复位置环增益, 否则 50.0 会被写入 */
 	Config.pos_p_gain = cg_pos_p_save;
+	/* 扫描期间关掉的摩擦前馈恢复原状态 */
+	CONTROLLER_set_friction_ff(cg_ff_save);
 
 	/* 停稳超时超过 20% 认为表不可信 */
 	if (cg_settle_timeouts > (2U * COGGING_MAP_NUM / 5U)) {

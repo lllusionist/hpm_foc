@@ -352,6 +352,12 @@ void CONTROLLER_loop(void)
 	    CLAMP(Controller.vel_integrator, -0.5f, 0.5f);
 }
 
+/* 读当前摩擦前馈开关状态 (标定前后保存/恢复用) */
+uint8_t CONTROLLER_get_friction_ff(void)
+{
+	return friction_ff_en ? 1U : 0U;
+}
+
 /* 摩擦前馈在线开关 (0x2B) */
 void CONTROLLER_set_friction_ff(uint8_t en)
 {
