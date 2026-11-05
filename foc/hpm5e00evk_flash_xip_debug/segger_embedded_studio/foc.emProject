@@ -38,7 +38,7 @@
       build_generic_options_file_name=""
       build_output_file_name="$(OutDir)/foc$(EXE)"
       c_additional_options="-Wall;-Wundef;-Wno-format;-fomit-frame-pointer;-fno-builtin;-ffunction-sections;-fdata-sections;-g"
-      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/arch;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/l1c;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/intc;../../hpm_sdk_localized_for_hpm5e00evk/boards/hpm5e00evk;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/ip;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/toolchains;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/boot;../../hpm_sdk_localized_for_hpm5e00evk/drivers/inc;../../hpm_sdk_localized_for_hpm5e00evk/utils;../../hpm_sdk_localized_for_hpm5e00evk/components/debug_console;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/Config;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/RTT;../build_tmp/generated/include;../../core/inner/inc;../../core/outer/inc;"
+      c_user_include_directories="../../hpm_sdk_localized_for_hpm5e00evk/arch;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/l1c;../../hpm_sdk_localized_for_hpm5e00evk/arch/riscv/intc;../../hpm_sdk_localized_for_hpm5e00evk/boards/hpm5e00evk;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/ip;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/toolchains;../../hpm_sdk_localized_for_hpm5e00evk/soc/HPM5E00/HPM5E31/boot;../../hpm_sdk_localized_for_hpm5e00evk/drivers/inc;../../hpm_sdk_localized_for_hpm5e00evk/utils;../../hpm_sdk_localized_for_hpm5e00evk/components/debug_console;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/Config;../../hpm_sdk_localized_for_hpm5e00evk/middleware/segger_rtt/RTT;../build_tmp/generated/include;../../core/inner/inc;../../core/outer/inc;../../core/outer/matlab;"
       debug_target_connection="GDB Server"
       gcc_all_warnings_command_line_options="-Wall;-Wextra;-Wno-format"
       gcc_cplusplus_language_standard="c++11"
@@ -130,6 +130,7 @@
       <file file_name="../../core/outer/inc/usb_driver.h" />
             <file file_name="../../core/outer/inc/util.h" />
             <file file_name="../../core/outer/inc/vofa.h" />
+            <file file_name="../../core/outer/inc/foc_matlab.h" />
           </folder>
           <folder Name="src">
       <file file_name="../../core/outer/src/foc.c" />
@@ -142,6 +143,12 @@
       <file file_name="../../core/outer/src/usb_driver.c" />
             <file file_name="../../core/outer/src/util.c" />
             <file file_name="../../core/outer/src/vofa.c" />
+            <file file_name="../../core/outer/src/foc_matlab.c" />
+          </folder>
+          <folder Name="matlab">
+      <file file_name="../../core/outer/matlab/FOC_Model.c" />
+      <file file_name="../../core/outer/matlab/FOC_Model.h" />
+      <file file_name="../../core/outer/matlab/rtwtypes.h" />
           </folder>
         </folder>
       </folder>

@@ -45,6 +45,7 @@ set(CONFIG_USB_DEVICE_CDC_ACM 1)
 
 sdk_inc(core/inner/inc)
 sdk_inc(core/outer/inc)
+sdk_inc(core/outer/matlab)
 
 sdk_app_src(core/inner/src/main.c)
 sdk_app_src(core/inner/src/sys.c)
@@ -63,6 +64,9 @@ sdk_app_src(core/outer/src/flash.c)
 sdk_app_src(core/outer/src/util.c)
 sdk_app_src(core/outer/src/vofa.c)
 sdk_app_src(core/outer/src/usb_driver.c)
+sdk_app_src(core/outer/src/foc_matlab.c)
+# MATLAB/Simulink 生成的 FOC 模型 (SMO + I/F), 原样保留, 不要格式化
+sdk_app_src(core/outer/matlab/FOC_Model.c)
 
 # 只用 SES, 不生成 IAR 工程
 set(EXCLUDED_IDE_IAR 1)

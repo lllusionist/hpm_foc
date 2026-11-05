@@ -9,8 +9,8 @@ from PySide6.QtCore import Qt, QTimer, QPoint, QUrl, QStandardPaths
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider,
-    QSplitter, QLineEdit, QToolButton, QFrame, QMessageBox, QButtonGroup, QScrollArea,
-    QFileDialog,
+    QSplitter, QLineEdit, QToolButton, QFrame, QMessageBox, QButtonGroup,
+    QScrollArea, QFileDialog, QDoubleSpinBox,
 )
 
 from . import theme
@@ -42,6 +42,9 @@ TARGET_DEFS = {
     3: ("目标角度 (rad)",  "position", -3.14159, 3.14159, 0.001),
 }
 
+# Simulink 模型运行时的目标值 (机械 rps, 固件换算成模型用的 rpm)
+MODEL_TARGET = ("模型目标转速 (rps)", "model_speed", -_VEL_LIM, _VEL_LIM, 0.001)
+
 
 class MainWindow(QWidget):
     def __init__(self, demo=False):
@@ -66,6 +69,7 @@ class MainWindow(QWidget):
         self.io = SerialIO()
         self._enabled = False
         self._mode = None
+        self._model_mode = False
         self._cur_lim = float(self.cfg.get("cur_limit", _CUR_LIM))
         self._vel_lim = float(self.cfg.get("vel_limit", _VEL_LIM))
         self._frozen = False
@@ -176,6 +180,32 @@ class MainWindow(QWidget):
         self.btn_calib.setToolTip("开始 R/L 参数校准 (电机需可自由转动)")
         self.btn_anticog = QPushButton("齿槽标定")
         self.btn_anticog.setToolTip("齿槽转矩补偿标定 (电机需空载且可自由转动, 约几秒)")
+        self.btn_model_start = QPushButton("模型启动")
+        self.btn_model_start.setObjectName("Toggle")
+        self.btn_model_start.setToolTip(
+            "启动 MATLAB/Simulink 生成模型: 固件进入 MATLAB_RUN, "
+            "模型内部自己跑 I/F 强拖 -> SMO 闭环; 目标值改用模型目标转速")
+        # 模型转速: 常驻可用, 不用先选模式; 启动前设好, 启动时一并下发
+        h.addWidget(QLabel("模型转速"))
+        self.sp_model_rps = QDoubleSpinBox()
+        self.sp_model_rps.setObjectName("ModelRps")
+        self.sp_model_rps.setDecimals(2)
+        self.sp_model_rps.setSingleStep(0.1)
+        # 无感可用区间: <2 rps 反电势太小 SMO 锁不住; >8.5 rps 24V 母线电压不够
+        self.sp_model_rps.setRange(2.0, 8.5)
+        self.sp_model_rps.setValue(3.5)
+        self.sp_model_rps.setSuffix(" rps")
+        self.sp_model_rps.setFixedWidth(84)
+        self.sp_model_rps.setToolTip(
+            "MATLAB 模型的机械转速目标 (rps), 可用 2.0~8.5:\n"
+            "  <2 rps 反电势 <2V, SMO 锁不住\n"
+            "  >8.5 rps 24V 母线的相电压不够\n"
+            "开环强拖终速会自动跟随这个值, 交接零误差")
+        h.addWidget(self.sp_model_rps)
+        self.btn_model_stop = QPushButton("模型停止")
+        self.btn_model_stop.setObjectName("Toggle")
+        self.btn_model_stop.setToolTip("停止模型并断输出 (回到 IDLE)")
+        self.btn_model_stop.setEnabled(False)
         self.btn_enable = QPushButton("使能")
         self.btn_enable.setObjectName("Toggle")
         self.btn_enable.setCheckable(True)
@@ -187,7 +217,9 @@ class MainWindow(QWidget):
         self.btn_record.setObjectName("Toggle")
         self.btn_record.setCheckable(True)
         self.btn_record.setToolTip("开始录制全分辨率波形+命令; 再点一下停止并保存到桌面")
-        for b in (self.btn_calib, self.btn_anticog, self.btn_enable, self.btn_disable, self.btn_zero, self.btn_record):
+        for b in (self.btn_calib, self.btn_anticog, self.btn_model_start,
+                  self.btn_model_stop, self.btn_enable, self.btn_disable,
+                  self.btn_zero, self.btn_record):
             h.addWidget(b)
         return bar
 
@@ -275,6 +307,9 @@ class MainWindow(QWidget):
         self.btn_disable.clicked.connect(self.disable)
         self.btn_calib.clicked.connect(lambda: self.send(CMD["calib"]))
         self.btn_anticog.clicked.connect(lambda: self.send(CMD["anticog"]))
+        self.btn_model_start.clicked.connect(self.model_start)
+        self.sp_model_rps.valueChanged.connect(self._on_model_rps)
+        self.btn_model_stop.clicked.connect(self.model_stop)
         self.btn_zero.clicked.connect(lambda: self.send(CMD["home"]))
         self.btn_record.clicked.connect(self.toggle_record)
         self.btn_clear.clicked.connect(self.clear_data)
@@ -350,6 +385,8 @@ class MainWindow(QWidget):
 
     def _clear_mode(self):
         self._mode = None
+        self._model_mode = False
+        self._set_model_ui(False)
         self.mode_group.setExclusive(False)
         for b in self.mode_buttons:
             b.setChecked(False)
@@ -407,9 +444,12 @@ class MainWindow(QWidget):
         self.statusbar.flash("正在读取设备参数…")
 
     def _update_target_defs(self):
+        global MODEL_TARGET
         TARGET_DEFS[0] = ("目标电流 (A)", "torque", -self._cur_lim, self._cur_lim, 0.001)
         TARGET_DEFS[1] = ("目标速度 (rps)", "velocity", -self._vel_lim, self._vel_lim, 0.001)
-        if self._mode is not None:
+        MODEL_TARGET = ("模型目标转速 (rps)", "model_speed",
+                        -self._vel_lim, self._vel_lim, 0.001)
+        if self._mode is not None or self._model_mode:
             self._apply_target(self._mode)
 
     def _apply_device_config(self, line):
@@ -464,6 +504,51 @@ class MainWindow(QWidget):
         self.btn_enable.setChecked(False)
         self.btn_disable.setChecked(False)
 
+    # ================= Simulink 生成模型 =================
+    def model_start(self):
+        """进入 MATLAB_RUN: 模型内部自己跑 I/F 强拖 -> SMO 闭环."""
+        self._model_mode = True
+        self._set_enabled(True)
+        self._set_model_ui(True)
+        # 先把"模型转速"发给固件 (固件会保持这个请求, 模型初始化时用它当
+        # Speed_ref), 再启动, 这样交接进 SMO 闭环时目标就是设定值
+        self.send(CMD["model_speed"], self.sp_model_rps.value())
+        self.send(CMD["model_start"])
+        self._apply_target(self._mode)
+        self.statusbar.flash(
+            "Simulink 模型已启动 (内部 I/F -> SMO); 目标转速 %.2f rps"
+            % self.sp_model_rps.value())
+
+    def model_stop(self):
+        self._model_mode = False
+        self.send(CMD["model_stop"])
+        self._set_enabled(False)
+        self._set_model_ui(False)
+        self._apply_target(self._mode)
+        self.statusbar.flash("Simulink 模型已停止")
+
+    def _on_model_rps(self, v):
+        """「模型转速」框: 任何时候都能改, 模型运行中立即生效 (0x32)."""
+        self.send(CMD["model_speed"], v)
+        # 模型模式下目标滑条显示同一个量, 同步过去不回触发发送
+        if self._target_key == "model_speed":
+            step = self._target_step or 1.0
+            iv = int(round(v / step))
+            iv = min(max(iv, self.sld_target.minimum()),
+                     self.sld_target.maximum())
+            self.sld_target.blockSignals(True)
+            self.sld_target.setValue(iv)
+            self.sld_target.blockSignals(False)
+            self.ent_target.setText(num(iv * step, 3))
+
+    def _set_model_ui(self, on):
+        """模型运行时锁掉模式/校准/使能按钮, 避免和模型抢控制."""
+        for b in self.mode_buttons + [self.btn_calib, self.btn_anticog,
+                                      self.btn_enable, self.btn_disable]:
+            b.setEnabled(not on)
+        self.btn_model_start.setEnabled(not on)
+        self.btn_model_stop.setEnabled(on)
+
     # ================= 模式/目标 =================
     def _on_mode(self, idx):
         self._mode = idx
@@ -471,7 +556,9 @@ class MainWindow(QWidget):
         self._apply_target(idx)
 
     def _apply_target(self, mode):
-        if mode is None:
+        if self._model_mode:
+            label, key, lo, hi, step = MODEL_TARGET
+        elif mode is None:
             self._target_key = None
             self.lbl_target.setText("目标值 (请先选择模式)")
             self.sld_target.blockSignals(True)
@@ -484,7 +571,8 @@ class MainWindow(QWidget):
             self.ent_target.setEnabled(False)
             self.btn_send_target.setEnabled(False)
             return
-        label, key, lo, hi, step = TARGET_DEFS.get(mode, TARGET_DEFS[1])
+        else:
+            label, key, lo, hi, step = TARGET_DEFS.get(mode, TARGET_DEFS[1])
         self._target_key = key
         self._target_step = step
         self.lbl_target.setText(label)
@@ -492,9 +580,19 @@ class MainWindow(QWidget):
         self.sld_target.blockSignals(True)
         self.sld_target.setMinimum(int(round(lo / step)))
         self.sld_target.setMaximum(int(round(hi / step)))
-        self.sld_target.setValue(0)
-        self.sld_target.blockSignals(False)
-        self.ent_target.setText("0")
+        # 模型模式: 滑条直接显示「模型转速」框里的值, 不要复位成 0
+        if key == "model_speed" and hasattr(self, "sp_model_rps"):
+            v0 = self.sp_model_rps.value()
+            iv0 = int(round(v0 / step))
+            iv0 = min(max(iv0, self.sld_target.minimum()),
+                      self.sld_target.maximum())
+            self.sld_target.setValue(iv0)
+            self.sld_target.blockSignals(False)
+            self.ent_target.setText(num(iv0 * step, 3))
+        else:
+            self.sld_target.setValue(0)
+            self.sld_target.blockSignals(False)
+            self.ent_target.setText("0")
         self.sld_target.setEnabled(True)
         self.ent_target.setEnabled(True)
         self.btn_send_target.setEnabled(True)
@@ -504,6 +602,7 @@ class MainWindow(QWidget):
             return
         v = iv * self._target_step
         self.ent_target.setText(num(v, 3))
+        self._sync_model_rps(v)
         now = time.time()
         if now - self._last_tx > 0.05:
             self._last_tx = now
@@ -525,7 +624,16 @@ class MainWindow(QWidget):
         self.sld_target.setValue(iv)
         self.sld_target.blockSignals(False)
         self.ent_target.setText(num(v, 3))
+        self._sync_model_rps(v)
         self.send(CMD.get(self._target_key, CMD["velocity"]), v)
+
+    def _sync_model_rps(self, v):
+        """目标滑条与「模型转速」框同步 (不回触发 0x32 重复发送)."""
+        if self._target_key != "model_speed":
+            return
+        self.sp_model_rps.blockSignals(True)
+        self.sp_model_rps.setValue(v)
+        self.sp_model_rps.blockSignals(False)
 
     def _on_target_jump(self, iv):
         self.ent_target.setText(num(iv * self._target_step, 3))

@@ -1,6 +1,8 @@
 #include "vofa.h"
 #include "cdc_acm.h"
+#include "encoder.h"
 #include "foc_ctrl.h"
+#include "foc_matlab.h"
 #include "config.h"
 #include "math.h"
 #include "stdio.h"
@@ -19,13 +21,14 @@ void vofa_request_config(void)
 /* 以一行 ASCII 回传当前参数: $FOCFG,KEY=VAL,...\n */
 static void vofa_send_config(void)
 {
-	static char line[320];
+	static char line[384];
 	int n = snprintf(
 	    line, sizeof(line),
 	    "$FOCFG,CLIM=%.5g,VLIM=%.5g,POSKP=%.5g,VELKP=%.5g,VELKI=%.5g,"
 	    "CURBW=%.5g,CURKP=%.5g,CURKI=%.5g,UV=%.5g,OV=%.5g,"
 	    "OP=%ld,INV=%ld,PP=%ld,TW=%.5g,PW=%.5g,VRR=%.5g,CRR=%.5g,"
-	    "PFBW=%.5g,CAL=%ld\n",
+	    "PFBW=%.5g,CAL=%ld,R=%.5g,L=%.5g,LAM=%.5g,"
+	    "J=%.5g,FRIC=%.5g\n",
 	    Config.current_limit, Config.velocity_limit, Config.pos_p_gain,
 	    Config.vel_p_gain, Config.vel_i_gain, Config.current_ctrl_bw,
 	    Config.current_kp, Config.current_ki, Config.protect_under_voltage,
@@ -33,7 +36,9 @@ static void vofa_send_config(void)
 	    (long)Config.invert_motor_dir, (long)Config.pole_pairs,
 	    Config.target_velcity_window, Config.target_position_window,
 	    Config.velocity_ramp_rate, Config.current_ramp_rate,
-	    Config.position_filter_bw, (long)Config.calib_valid);
+	    Config.position_filter_bw, (long)Config.calib_valid,
+	    Config.phase_resistance, Config.phase_inductance,
+	    Config.flux_linkage, Config.inertia, Config.friction_current);
 	if (n > 0) {
 		if (n > (int)sizeof(line) - 1)
 			n = (int)sizeof(line) - 1;
@@ -47,7 +52,7 @@ static void vofa_send_config(void)
  * ADC 中断按分频采样入环形缓冲, vofa 任务每 1ms 打包发送,
  * 有效采样率与 USB 包率解耦。
  */
-#define VOFA_NCH 22
+#define VOFA_NCH 27
 #define VOFA_RING 64 /* 环形缓冲样本数 */
 #define VOFA_BATCH_MAX (MAX_BUFFER_SIZE / (VOFA_NCH * 4 + 4))
 
@@ -68,9 +73,9 @@ static void vofa_snapshot(float *d)
 	d[1] = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
 	/* C 相电流 (A) */
 	d[2] = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
-	d[3] = FOC.Id;			     /* d 轴电流反馈 */
-	d[4] = FOC.Iq;			     /* q 轴电流反馈 */
-	d[5] = FOC.Iq_set;		     /* q 轴电流目标 */
+	d[3] = FOC.Id;			     /* d 轴电流反馈 (A) */
+	d[4] = FOC.Iq;			     /* q 轴电流反馈 (A) */
+	d[5] = FOC.Iq_set;		     /* q 轴电流目标 (A) */
 	d[6] = Controller.vel_setpoint;	     /* 速度环目标 (rps) */
 	d[7] = encoder.vel;		     /* 速度反馈 (rps) */
 	d[8] = FOC.torque;		     /* 转矩估算 (N·m) */
@@ -87,6 +92,15 @@ static void vofa_snapshot(float *d)
 	d[19] = FOC.Vc;			     /* C 相电压 (V) */
 	d[20] = (float)FOC.fault_code;	     /* 故障码 */
 	d[21] = FOC.Ibus_filt;		     /* 母线电流 (A) */
+	/* 以下 3 个只在 MATLAB_RUN 有效, 其它模式为 0; 用来和无感观测器对照 */
+	d[22] = FOC_MATLAB_speed_rpm(); /* 模型观测转速 (rpm) */
+	d[23] = FOC_MATLAB_theta();	/* 模型观测电角度 (rad) */
+	/* Chart1: 2=对位 3=开环 4=ThetaAlign 5=闭环 */
+	d[24] = FOC_MATLAB_state();	/* 模型状态 */
+	/* 观测角 - 编码器角 (卷绕到 ±π): 直接看观测器误差, 不会出现 2π 锯齿 */
+	d[25] = FOC_MATLAB_theta_error(); /* 角度观测误差 (rad) */
+	/* 模型速度环目标: 与 22 观测转速对照, 不一致说明调速环没在起作用 */
+	d[26] = FOC_MATLAB_speed_ref_rpm(); /* 模型目标转速 (rpm) */
 }
 
 /* 由 ADC 中断按分频调用 */

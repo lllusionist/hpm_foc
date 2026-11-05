@@ -1,5 +1,6 @@
 #include "foc_task.h"
 #include "foc_ctrl.h"
+#include "foc_matlab.h"
 #include <stdio.h>
 
 static tFSM sFSM;
@@ -83,6 +84,15 @@ static void enter_state(tFSMState state)
 	case ANTICOGGING:
 		anticogging_start();
 		break;
+	case MATLAB_RUN:
+		/* 生成模型自己带 I/F 启动和 SMO, 这里只负责上电使能与使能模型 */
+		FOC_MATLAB_init();
+		foc_arm();
+		if (!FOC.is_armed)
+			foc_request_stage(IDLE);
+		else
+			FOC_MATLAB_set_enable(true);
+		break;
 	default:
 		break;
 	}
@@ -108,6 +118,12 @@ static void exit_state(tFSMState state)
 		anticogging_end();
 		sFSM.state_next_ready = 1;
 		break;
+	case MATLAB_RUN:
+		FOC_MATLAB_set_enable(false);
+		foc_disarm();
+		pwm_output_low_sides();
+		sFSM.state_next_ready = 1;
+		break;
 	default:
 		break;
 	}
@@ -128,6 +144,7 @@ static bool foc_over_current(void)
 static uint8_t foc_protection_check(void)
 {
 	static bool uv_warned = false;
+	static bool ov_warned = false;
 	static uint32_t ov_cnt = 0;
 	static uint32_t uv_cnt = 0;
 	static uint32_t ibus_oc_cnt = 0;
@@ -135,12 +152,23 @@ static uint8_t foc_protection_check(void)
 	float vbus = FOC.Vbus;
 
 	bool uv_ok = (Config.protect_under_voltage < (FOC.Vbus_filt * 0.9f));
+	/* 换 24V 电源后, Flash 里可能还存着 12V 时代的 15V 过压阈值;
+	 * 阈值比实测母线还低就必然误跳, 这里按 UV 同样的办法提示并跳过 */
+	bool ov_ok = (Config.protect_over_voltage > (FOC.Vbus_filt * 1.05f));
 
 	if (!uv_warned && (FOC.Vbus_filt > 1.0f) && !uv_ok) {
 		uv_warned = true;
 		printf("protect: UV threshold %dmV too high for bus %dmV, UV "
 		       "disabled\n",
 		       (int)(Config.protect_under_voltage * 1000.0f),
+		       (int)(FOC.Vbus_filt * 1000.0f));
+	}
+
+	if (!ov_warned && (FOC.Vbus_filt > 1.0f) && !ov_ok) {
+		ov_warned = true;
+		printf("protect: OV threshold %dmV too low for bus %dmV, OV "
+		       "disabled, set 28V and save (3F)\n",
+		       (int)(Config.protect_over_voltage * 1000.0f),
 		       (int)(FOC.Vbus_filt * 1000.0f));
 	}
 
@@ -155,7 +183,7 @@ static uint8_t foc_protection_check(void)
 		ibus_oc_cnt = 0;
 	}
 
-	if (vbus > Config.protect_over_voltage) {
+	if (ov_ok && (vbus > Config.protect_over_voltage)) {
 		if (++ov_cnt >= 3U)
 			return FOC_FAULT_OVER_VOLTAGE;
 	} else {
@@ -250,11 +278,16 @@ static void Task_FOC(void *argument)
 			static bool midpoint_done;
 			if (!midpoint_done) {
 				midpoint_done = true;
-				if (!FOC.adc_ready && !foc_adc_midpoint()) {
-					FOC.fault_code = FOC_FAULT_ADC;
-					printf("ADC midpoint calibration "
-					       "failed\n");
-					foc_request_stage(IDLE);
+				if (!FOC.adc_ready) {
+					if (!foc_adc_midpoint()) {
+						FOC.fault_code = FOC_FAULT_ADC;
+						printf("ADC midpoint calibration "
+						       "failed\n");
+						foc_request_stage(IDLE);
+					} else {
+						/* foc_init 里那次失败留下的故障码要清掉 */
+						FOC.fault_code = FOC_FAULT_NONE;
+					}
 				}
 			}
 		} break;
@@ -273,6 +306,9 @@ static void Task_FOC(void *argument)
 				if (anticogging_loop()) /* 齿槽补偿标定 1kHz */
 					foc_request_stage(IDLE);
 			}
+			foc_check_and_trip();
+			break;
+		case MATLAB_RUN:
 			foc_check_and_trip();
 			break;
 		default:

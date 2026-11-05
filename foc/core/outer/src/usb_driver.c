@@ -2,6 +2,7 @@
 #include "util.h"
 #include "foc_task.h"
 #include "foc_ctrl.h"
+#include "foc_matlab.h"
 #include "vofa.h"
 
 void USB_parse_frame(UsbFrame *frame)
@@ -21,10 +22,12 @@ void USB_parse_frame(UsbFrame *frame)
 	/* 中断里只记请求, 由 1kHz 控制任务执行 */
 	case USB_CMD_SET_OP_MODE: {
 		int mode = (int)data_to_float(&frame->data[0]);
-		if (mode >= 0 && mode <= CONTROL_MODE_POSITION_PROFILE) {
+		if (mode >= 0 && mode <= CONTROL_MODE_IF) {
 			Controller.op_mode_req = (tControlMode)mode;
 			Controller.op_mode_pending = true;
-			Config.default_op_mode = mode;
+			/* IF 只作启动过程模式, 不写进默认模式 */
+			if (mode != CONTROL_MODE_IF)
+				Config.default_op_mode = mode;
 		}
 		break;
 	}
@@ -98,6 +101,23 @@ void USB_parse_frame(UsbFrame *frame)
 		Controller.home_pending = true;
 		break;
 
+	/* MATLAB 生成模型: 启动/停止/目标机械转速 (模型内部自带 I/F 与 SMO) */
+	case USB_CMD_MODEL_START:
+		foc_request_stage(MATLAB_RUN);
+		break;
+
+	case USB_CMD_MODEL_STOP:
+		foc_request_stage(IDLE);
+		break;
+
+	case USB_CMD_SET_MODEL_SPEED: {
+		float rps = CLAMP(data_to_float(&frame->data[0]),
+				  -Config.velocity_limit,
+				  Config.velocity_limit);
+		FOC_MATLAB_set_speed_rps(rps);
+		break;
+	}
+
 	/* 现在就能用: 在线调电流环 PI */
 	case USB_CMD_SET_CUR_KP: {
 		float Cur_Kp = data_to_float(&frame->data[0]);
@@ -166,6 +186,37 @@ void USB_parse_frame(UsbFrame *frame)
 
 	case USB_CMD_ANTICOGGING_START:
 		foc_request_stage(ANTICOGGING);
+		break;
+
+	/* I/F 强拖参数: 先发速度指令(0x24)定方向和交接目标, 再切模式 0x20=4 */
+	case USB_CMD_SET_IF_CURRENT:
+		Config.if_current = CLAMP(data_to_float(&frame->data[0]), 0.05f,
+					  Config.current_limit);
+		break;
+
+	case USB_CMD_SET_IF_ACCEL:
+		Config.if_accel_rps2 = CLAMP(data_to_float(&frame->data[0]),
+					     0.5f, 200.0f);
+		break;
+
+	case USB_CMD_SET_IF_SWITCH:
+		Config.if_switch_rps = CLAMP(data_to_float(&frame->data[0]),
+					     0.2f, Config.velocity_limit);
+		break;
+
+	case USB_CMD_SET_IF_BLEND:
+		Config.if_blend_ms = CLAMP(data_to_float(&frame->data[0]), 0.0f,
+					   1000.0f);
+		break;
+
+	case USB_CMD_SET_IF_STALL:
+		Config.if_stall_deg = CLAMP(data_to_float(&frame->data[0]),
+					    10.0f, 120.0f);
+		break;
+
+	case USB_CMD_SET_IF_HOLD:
+		Config.if_hold_ms = CLAMP(data_to_float(&frame->data[0]), 0.0f,
+					  2000.0f);
 		break;
 
 	default:

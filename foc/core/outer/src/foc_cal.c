@@ -27,11 +27,13 @@
  * 参考 CN103560736B。
  */
 #define L_CAL_CYCLES (CAL_LOOP_HZ / 2U) /* 电感: 每轮正弦注入时长 0.5s */
-/* 步长按量程 5% 派生, 不写死绝对值: 低阻/高阻电机都能 ~20 步扫完 */
-/* Δu2: 电阻升压步长 (V) */
-#define CALIB_R_STEP_V (Config.calib_voltage * 0.05f)
+/* 步长按量程派生, 不写死绝对值: 低阻/高阻电机都能 ~20 步扫完 */
+/* Δu2: 电阻升压步长 (V). 24V 母线下取 10%, ΔI 更大 -> 死区/噪声占比更小 */
+#define CALIB_R_STEP_V (Config.calib_voltage * 0.10f)
 #define R_CAL_WINDOW (CAL_LOOP_HZ / 5U)		     /* 每个工作点停留 200ms */
-#define CALIB_L_MIN_V (Config.calib_voltage * 0.05f) /* 电感注入幅值下限 (V) */
+/* 电感注入幅值下限 (V): 必须让 |Z| 明显大于 R 才解得准 L.
+ * 原来取 5% 在 24V 下只有 0.25V/26mA, Z 与 R 只差 5%, L 误差可达 ±50% */
+#define CALIB_L_MIN_V (Config.calib_voltage * 0.20f)
 
 static int encoder_error_arr[MAX_MOTOR_POLE_PAIRS * SAMPLES_PER_PPAIR];
 
@@ -55,11 +57,13 @@ static float flux_vq_b;		   /* 第二转速点的 Vq 均值 */
 static float flux_vd_sum;	   /* Vd 窗口累加 (矢量差分法用) */
 static float flux_vd_a, flux_vd_b; /* 两个转速点的 Vd 均值 */
 
-/* J 标定: ±I 交替, 两段都正转, 摩擦同向相减:
- * J = Kt·I / (π·(a+ - a-)) */
-#define J_CAL_IQ (Config.calib_current * 0.5f) /* 测试电流: 标定电流的一半 */
+/* J 标定: 加速段用 +I, 减速段**断电流自由滑行**(只有摩擦减速),
+ * 两段斜率都慢到 1 kHz 采样够用: J = Kt·I / (π·(a+ - a-))
+ * 原来减速段给 -I (0.25A), 实测 a- = -432 rps/s -> 7ms 就过零,
+ * 采样点不足, 拟合出来的 J 完全不可信 */
+#define J_CAL_IQ (Config.calib_current * 0.15f) /* 加速测试电流 (A) */
 #define J_CAL_SAMPLES (300U)		       /* 每段采样点数 (1kHz -> 0.3s) */
-#define J_SPINUP_RPS (1.0f) /* 起转目标 (rps), 保证两段都在正转 */
+#define J_SPINUP_RPS (3.0f) /* 起转目标 (rps), 给两段留足够行程 */
 static float j_sum_t, j_sum_v, j_sum_tv, j_sum_tt;
 static uint32_t j_cnt;
 static float j_slope_acc, j_slope_dec;
@@ -84,6 +88,10 @@ static float r_i1;	/* 上一个工作点的稳态电流 Ires1 (A) */
 static float r_isum;	/* 窗口内电流累加 */
 static uint32_t r_icnt; /* 窗口内累加计数 */
 static uint32_t r_s1;	/* 升压次数 */
+/* 多点平均: 每级 ΔI 累加, 最后用 STEP/(平均 ΔI) 算 R,
+ * 比只用最后两级更抗单点噪声 (ΔI 只有几十 mA 时很关键) */
+static float r_di_sum;
+static uint32_t r_di_cnt;
 
 /* 电感: 注入幅值自适应 */
 static float l_v_dc, l_v_amp; /* 注入的直流偏置 / 正弦幅值 */
@@ -102,6 +110,10 @@ void calibration_start(void)
 	Config.calib_valid = false;
 	FOC.calib_mode = false;
 	FOC.calib_vinj_mode = false;
+	/* 强拖模式的强制矢量必须停掉, 否则标定期间中断会走强拖分支 */
+	FOC.if_mode = false;
+	FOC.if_iq = 0.0f;
+	FOC.if_phase_vel = 0.0f;
 
 	loop_count = 0;
 	phase_set = 0;
@@ -155,6 +167,8 @@ void calibration_loop(void)
 		r_isum = 0.0f;
 		r_icnt = 0;
 		r_s1 = 0; /* 升压次数 */
+		r_di_sum = 0.0f;
+		r_di_cnt = 0U;
 		FOC.calib_mode = false;
 		FOC.calib_vinj_mode = false;
 		foc_arm();
@@ -177,21 +191,32 @@ void calibration_loop(void)
 			if ((Is < Config.calib_current) &&
 			    ((r_volt + CALIB_R_STEP_V) <=
 			     (Config.calib_voltage * 0.9f))) {
-				/* 未达阈值: 记录本点, 升压继续 */
+				/* 未达阈值: 累加本级的 ΔI, 升压继续 */
+				if (r_s1 > 0U) {
+					r_di_sum += (Is - r_i1);
+					r_di_cnt++;
+				}
 				r_i1 = Is;
 				r_volt += CALIB_R_STEP_V;
 				r_s1++;
 			} else {
-				/* Rs = Δu2/(Ires2-Ires1), 非线性抵消 */
-				float di = Is - r_i1;
-				if (fabsf(di) > 1e-4f) {
+				/* Rs = Δu / 平均(ΔI), 多点平均抑制单点噪声 */
+				if (r_s1 > 0U) {
+					r_di_sum += (Is - r_i1);
+					r_di_cnt++;
+				}
+				float di_avg =
+				    (r_di_cnt > 0U)
+					? (r_di_sum / (float)r_di_cnt)
+					: (Is - r_i1);
+				if (fabsf(di_avg) > 1e-4f) {
 					Config.phase_resistance =
-					    CALIB_R_STEP_V / di;
+					    CALIB_R_STEP_V / di_avg;
 				}
 				printf("res: %.4f Ohm (ures=%.3f I1=%.4f "
-				       "I2=%.4f steps=%u)\n",
+				       "I2=%.4f steps=%u di_avg=%.5f)\n",
 				       Config.phase_resistance, r_volt, r_i1,
-				       Is, (unsigned)r_s1);
+				       Is, (unsigned)r_s1, (double)di_avg);
 				mCalibStep = CS_MOTOR_R_END;
 			}
 		}
@@ -742,9 +767,9 @@ void calibration_loop(void)
 	case CS_MOTOR_J_SPINUP:
 	case CS_MOTOR_J_ACC:
 	case CS_MOTOR_J_DEC: {
-		/* 用电流环 + 编码器角度直接驱动, 绕开 Controller 指令路径 */
-		float iq =
-		    ((mCalibStep == CS_MOTOR_J_DEC) ? -J_CAL_IQ : J_CAL_IQ);
+		/* 用电流环 + 编码器角度直接驱动, 绕开 Controller 指令路径.
+		 * 减速段断电流自由滑行, 避免 0.25A 反向制动在 7ms 内过零 */
+		float iq = (mCalibStep == CS_MOTOR_J_DEC) ? 0.0f : J_CAL_IQ;
 		/* CALIBRATION 只走 calib_mode 分支; 角度/角速度用编码器实测值,
 		 * 电机才能自由加速 (测 J 所需) */
 		FOC.calib_mode = true;
@@ -812,13 +837,20 @@ void calibration_loop(void)
 		printf("J: a+=%.3f a-=%.3f rps/s  Kt=%.5f -> J=%.3e kg.m2\n",
 		       j_slope_acc, j_slope_dec, kt, J);
 		if ((J > 1e-7f) && (J < 1e-1f)) {
+			/* 存进配置: 换电机后模型/速度环参数可以由 J、λ 自动推导 */
+			Config.inertia = J;
 			/* 由 J 反算速度环初值: Kp=4πζωbw·J/Kt, Ki=2πJωbw²/Kt
 			 * (ζ=1, 带宽 10Hz) */
 			const float wbw = 2.0f * 3.14159265f * 10.0f;
+			float kp_sug = 4.0f * 3.14159265f * wbw * J / kt;
+			float ki_sug = 2.0f * 3.14159265f * J * wbw * wbw / kt;
 			printf(
 			    "J: 建议速度环 Kp=%.2f Ki=%.1f (zeta=1, bw=10Hz)\n",
-			    4.0f * 3.14159265f * wbw * J / kt,
-			    2.0f * 3.14159265f * J * wbw * wbw / kt);
+			    kp_sug, ki_sug);
+			/* 标定值的单位是 A/(rad/s), 本工程用 A/rps: 除以 2π */
+			printf("J: 换算到本工程单位 Kp=%.3f A/rps "
+			       "Ki=%.2f A/(rps·s)\n",
+			       kp_sug / 6.2831853f, ki_sug / 6.2831853f);
 		}
 		mCalibStep = CS_REPORT_OFFSET_LUT;
 	} break;

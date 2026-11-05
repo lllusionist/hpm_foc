@@ -1,6 +1,7 @@
 #include "foc.h"
 #include "adc.h"
 #include "encoder.h"
+#include "foc_matlab.h"
 #include "foc_task.h"
 #include "vofa.h"
 
@@ -13,7 +14,7 @@ volatile foc_data_t FOC;
 #define VBUS_SCALE_FACTOR \
 	(VBUS_DIVIDER_RATIO * ADC_REF_VOLTAGE / ADC_RESOLUTION)
 
-#define VBUS_DEFAULT 12.0f
+#define VBUS_DEFAULT 24.0f
 
 bool foc_adc_midpoint(void)
 {
@@ -206,6 +207,11 @@ void foc_disarm(void)
 
 	FOC.Iq_set = 0;
 
+	/* 失能必须清强拖状态, 否则重新使能瞬间又是满电流 */
+	FOC.if_mode = false;
+	FOC.if_iq = 0;
+	FOC.if_phase_vel = 0;
+
 	FOC.is_armed = false;
 
 	taskEXIT_CRITICAL();
@@ -232,6 +238,10 @@ void foc_arm(void)
 
 	FOC.current_ctrl_integral_d = 0;
 	FOC.current_ctrl_integral_q = 0;
+
+	FOC.if_mode = false;
+	FOC.if_iq = 0;
+	FOC.if_phase_vel = 0;
 
 	enable_bldc_pwm_output();
 
@@ -365,6 +375,24 @@ void foc_adc_callback(void)
 		return;
 	}
 
+	/* I/F 强拖: 角度在中断里积分 (20kHz), 任务只改角速度与电流 */
+	if (FOC.if_mode) {
+		FOC.if_angle += FOC.if_phase_vel * CURRENT_MEASURE_PERIOD;
+		if (FOC.if_angle >= M_2PI)
+			FOC.if_angle -= M_2PI;
+		if (FOC.if_angle < 0.0f)
+			FOC.if_angle += M_2PI;
+		FOC_current(0.0f, FOC.if_iq, FOC.if_angle,
+			    FOC.if_phase_vel);
+		return;
+	}
+
+	/* MATLAB 生成模型: 自带 SMO + I/F 状态机 + 电流环, 直接写占空比 */
+	if (foc_get_stage() == MATLAB_RUN) {
+		FOC_MATLAB_tick();
+		return;
+	}
+
 	if ((foc_get_stage() != RUN) && (foc_get_stage() != ANTICOGGING))
 		return;
 
@@ -389,6 +417,11 @@ void foc_init(void)
 	FOC.phase_offset = 0;
 	FOC.openloop_voltage = 0;
 	FOC.openloop_angle = 0;
+
+	FOC.if_mode = false;
+	FOC.if_angle = 0;
+	FOC.if_phase_vel = 0;
+	FOC.if_iq = 0;
 
 	FOC.Vd_out = 0;
 	FOC.Vq_out = 0;

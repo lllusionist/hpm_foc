@@ -37,6 +37,22 @@ class TestChannelModel(unittest.TestCase):
         self.assertIn("母线电流", CHANNELS[21][1])
         self.assertEqual(FAULT_TEXT[0], "无")
 
+    def test_names_not_generic(self):
+        """每个通道都要有可读短名和显示名, 不能退化成 dataN/dN."""
+        import re
+
+        self.assertEqual(NCH, 27)  # 22 个固件通道 + 5 个模型/观测通道
+        for i, chan in enumerate(CHANNELS):
+            short, disp = chan[0], chan[1]
+            self.assertFalse(re.fullmatch(r"(data|ch|d)\d+", short),
+                             "channel %d 短名为通用占位: %r" % (i, short))
+            self.assertTrue(disp, "channel %d 没有显示名" % i)
+        self.assertEqual(CHANNELS[22][0], "smo_rpm")
+        self.assertEqual(CHANNELS[23][0], "smo_theta")
+        self.assertEqual(CHANNELS[24][0], "model_state")
+        self.assertEqual(CHANNELS[25][0], "ang_err")
+        self.assertEqual(CHANNELS[26][0], "spd_ref")
+
 
 if __name__ == "__main__":
     unittest.main()

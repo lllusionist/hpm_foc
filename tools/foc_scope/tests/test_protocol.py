@@ -16,6 +16,15 @@ class TestPackCmd(unittest.TestCase):
         b = pack_cmd(CMD["torque"], 1.5)
         self.assertEqual(struct.unpack("<f", b[1:5])[0], 1.5)
 
+    def test_model_cmd_ids(self):
+        # MATLAB/Simulink 生成模型: 0x30 启动 / 0x31 停止 / 0x32 目标转速
+        self.assertEqual(CMD["model_start"], 0x30)
+        self.assertEqual(CMD["model_stop"], 0x31)
+        self.assertEqual(CMD["model_speed"], 0x32)
+        b = pack_cmd(CMD["model_speed"], 2.5)
+        self.assertEqual(b[0], 0x32)
+        self.assertEqual(struct.unpack("<f", b[1:5])[0], 2.5)
+
 
 class TestJustfloatParser(unittest.TestCase):
     def _frame(self, *vals):
@@ -40,7 +49,7 @@ class TestJustfloatParser(unittest.TestCase):
         self.assertEqual(out, [(1.0, 2.0, 3.0)])
 
     def test_nch_constant(self):
-        self.assertEqual(NCH, 22)
+        self.assertEqual(NCH, 27)  # 22 个固件通道 + 3 个模型观测器通道
 
 
 if __name__ == "__main__":

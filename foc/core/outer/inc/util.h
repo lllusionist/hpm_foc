@@ -26,6 +26,8 @@
 #define M_PI (3.14159265358f)
 
 #define M_2PI (6.28318530716f)
+#define DEG_TO_RAD (M_PI / 180.0f)
+#define RAD_TO_DEG (180.0f / M_PI)
 #define ONE_BY_SQRT3 (0.57735026919f)
 #define TWO_BY_SQRT3 (2.0f * 0.57735026919f)
 #define SQRT3_BY_2 (0.86602540378f)

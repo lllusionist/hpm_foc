@@ -29,6 +29,7 @@
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer"/>
+  <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;inc"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware"/>
  </Project>
@@ -67,5 +68,5 @@
  <Files>
   <SessionOpenFile windowGroup="DockEditLeft" x="52" y="19" useTextEdit="1" path="../../core/outer/inc/encoder.h" left="0" selected="1" top="0" codecName="Default"/>
  </Files>
- <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*.c" autoConnectTarget="GDB Server" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="1343"/>
+ <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>

@@ -70,7 +70,7 @@ typedef struct {
 	volatile float Id_set; /* d 轴电流目标 (A) */
 	volatile float Iq_set; /* q 轴电流目标 (A) */
 
-	volatile float phase_offset; /* 调试用: 电角度附加偏移 (rad) */
+	volatile float phase_offset; /* 调试/强拖交接: 电角度附加偏移 (rad) */
 
 	/* 调试用: 开环固定电压矢量 (>0 时旁路电流环, 直接输出该矢量) */
 	volatile float openloop_voltage; /* 幅值 (V) */
@@ -97,6 +97,12 @@ typedef struct {
 	volatile bool ff_enable; /* 反电势前馈/解耦使能 (调试用) */
 
 	volatile float isum;
+
+	/* I/F 强拖: 强制电流矢量 (角度由 20kHz 中断按 if_phase_vel 积分) */
+	volatile bool if_mode;	      /* 1 = 中断走强拖分支, 旁路编码器角度 */
+	volatile float if_angle;      /* 强制电角度 (rad), 只由中断写 */
+	volatile float if_phase_vel;  /* 强制电角速度 (rad/s) */
+	volatile float if_iq;	      /* 强制 q 轴电流 (A) */
 
 	/* 校准用: 开环电流模式 (校准任务下发角度, 中断里跑电流环) */
 	volatile bool calib_mode;

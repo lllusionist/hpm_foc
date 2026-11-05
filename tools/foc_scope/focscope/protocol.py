@@ -12,6 +12,8 @@ CMD = {
     "torque": 0x23, "velocity": 0x24, "position": 0x25,
     "calib": 0x27, "anticog": 0x28, "home": 0x2D, "save": 0x3F, "reset": 0x3B,
     "getcfg": 0x3E,
+    # MATLAB/Simulink 生成模型 (SMO + I/F 强拖), 固件侧进入 MATLAB_RUN
+    "model_start": 0x30, "model_stop": 0x31, "model_speed": 0x32,
     "curkp": 0x40, "curki": 0x41, "velkp": 0x42, "velki": 0x43, "poskp": 0x44,
     "curbw": 0x58,
     "uv": 0x56, "ov": 0x57,
@@ -19,7 +21,7 @@ CMD = {
 
 TAIL = b"\x00\x00\x80\x7f"
 CFG_MAGIC = b"$FOCFG,"
-NCH = 22
+NCH = 27
 
 # 运行模式
 MODES = ["电流", "速度", "位置", "轨迹"]

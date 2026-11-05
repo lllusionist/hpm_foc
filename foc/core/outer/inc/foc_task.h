@@ -10,6 +10,7 @@ typedef enum eFSMState {
 	RUN = 2,
 	CALIBRATION = 3,
 	ANTICOGGING = 4,
+	MATLAB_RUN = 5, /* MATLAB 生成模型 (SMO + I/F) 接管控制 */
 } tFSMState;
 
 typedef struct sFSM {

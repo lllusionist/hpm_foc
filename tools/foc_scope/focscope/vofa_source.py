@@ -55,13 +55,26 @@ def _split_comment(cmt, i):
     return (name or "data%d" % (i + 1)), unit
 
 
+_MATLAB_SHORT = {
+    "speed_rpm": "smo_rpm",
+    "speed_ref_rpm": "spd_ref",
+    "theta": "smo_theta",
+    "state": "model_state",
+    "theta_error": "ang_err",
+}
+
+
 def _short_from_expr(expr, i):
+    # 函数调用形式 (如 FOC_MATLAB_speed_rpm()) 优先按已知映射取名
+    m = re.search(r"FOC_MATLAB_(\w+)\s*\(", expr)
+    if m:
+        return _MATLAB_SHORT.get(m.group(1), m.group(1))
     for mod in ("FOC", "Controller", "encoder"):
         m = re.search(mod + r"\.(\w+)", expr)
         if m:
             return m.group(1)
     m = re.search(r"(\w+)\s*$", expr)
-    return m.group(1) if m else "d%d" % i
+    return m.group(1) if m else "ch%d" % i
 
 
 def parse(path):
@@ -76,11 +89,25 @@ def parse(path):
     if not m:
         return None, nch
     entries = {}
+    pending = ""
     for line in m.group(1).splitlines():
-        mm = re.match(r"\s*d\[(\d+)\]\s*=\s*(.+?);\s*(?://\s*(.*))?$", line)
+        # 有些通道的注释写在上一行 (行太长的), 这里先记下来给下一条 d[] 用
+        mc = re.match(r"\s*/\*\s*(.+?)\s*\*/\s*$", line)
+        if mc:
+            pending = mc.group(1).strip()
+            continue
+        # 固件注释已统一成 /* */, 这里同时兼容 // 与 /* */ 两种行尾注释
+        mm = re.match(
+            r"\s*d\[(\d+)\]\s*=\s*(.+?);\s*"
+            r"(?://\s*(?P<lc>.*)|/\*\s*(?P<bc>.*?)\s*\*/)?\s*$", line)
         if mm:
             idx = int(mm.group(1))
-            entries[idx] = (mm.group(2).strip(), (mm.group(3) or "").strip())
+            cmt = mm.group("lc")
+            if cmt is None:
+                cmt = mm.group("bc") or ""
+            cmt = cmt.strip() or pending
+            entries[idx] = (mm.group(2).strip(), cmt)
+            pending = ""
     if not entries:
         return None, nch
     count = max(entries) + 1

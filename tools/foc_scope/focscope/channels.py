@@ -5,6 +5,8 @@
 固件改了波形通道, 上位机重启即同步; 解析失败则回退到内置默认表.
 """
 
+import re
+
 from . import theme
 from .vofa_source import load_channels
 
@@ -32,6 +34,12 @@ _FALLBACK = [
     ("Vc",          "C相电压",     "V"),
     ("fault",       "故障码",      ""),
     ("Ibus",        "母线电流",    "A"),
+    # 模型观测器 (仅 MATLAB_RUN 有效); 22/23/24 号通道
+    ("smo_rpm",     "模型观测转速", "rpm"),
+    ("smo_theta",   "模型观测电角度", "rad"),
+    ("model_state", "模型状态",     ""),
+    ("ang_err",     "角度观测误差",  "rad"),
+    ("spd_ref",     "模型目标转速",  "rpm"),
 ]
 
 _parsed = load_channels()
@@ -136,14 +144,21 @@ class ChannelModel:
     def load_cfg(self, cfg):
         if not cfg:
             return
+        # 旧版本在解析不到通道名时会把 "data1..dataN" 存进配置; 这类占位名
+        # 不能覆盖固件解析出来的真实名字, 否则界面/CSV 全是 dataX
+        generic = re.compile(r"^(data|ch|d)\d+$")
+
         for key, attr in (("name", "disp"), ("short", "short"), ("gain", "gain"),
                           ("off", "off")):
             vals = cfg.get(key)
             if isinstance(vals, list):
                 cur = getattr(self, attr)
                 for i in range(min(len(vals), NCH)):
+                    v = vals[i]
+                    if isinstance(v, str) and generic.match(v.strip()):
+                        continue  # 占位名, 保留固件解析值
                     try:
-                        cur[i] = vals[i]
+                        cur[i] = v
                     except Exception:
                         pass
         shown = cfg.get("shown")

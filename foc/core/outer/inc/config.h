@@ -70,6 +70,20 @@ typedef struct {
 	uint32_t current_gain_magic; /* current_kp/ki 有效标志 */
 	float current_kp;	     /* 电流环 Kp（V/A） */
 	float current_ki;	     /* 电流环 Ki（V/(A·s)） */
+
+	/* I/F 强拖参数 (同样在 crc32 之后; 由 if_cfg_magic 校验有效性) */
+	uint32_t if_cfg_magic;
+	float if_current;	/* 强拖电流 (A) */
+	float if_accel_rps2;	/* 频率斜坡加速度 (机械 rps/s) */
+	float if_switch_rps;	/* 交接转速 (机械 rps) */
+	float if_blend_ms;	/* 角度交接平滑时间 (ms) */
+	float if_stall_deg;	/* 失步/负载角阈值 (电角度) */
+	float if_hold_ms;	/* 交接前稳态保持时间 (ms), 追加在末尾 */
+
+	/* 标定得到的机械参数 (同样在 crc32 之后, 由 mech_cfg_magic 校验) */
+	uint32_t mech_cfg_magic;
+	float inertia;	       /* 转子惯量 J (kg·m²), CS_MOTOR_J_* 实测 */
+	float friction_current; /* 稳速时的摩擦电流 (A), 闭环稳态 Iq 自动记录 */
 } tConfig;
 
 extern tConfig Config;
