@@ -2,7 +2,9 @@
 """自绘波形控件: QPainter 绘制网格/上下时间轴/右侧纵轴/曲线/光标读数/提示框.
 
 交互:
-  滚轮             时间缩放 (跟随状态下缩放右端)
+  左键拖动         左右平移 / 上下缩放 Y (跟随时水平拖动会自动暂停跟随)
+双击             恢复跟随最新数据
+滚轮             时间缩放 (跟随状态下缩放右端)
   Ctrl/Shift+滚轮  或 在左侧刻度区滚轮   幅值缩放
   拖动             平移 (时间 + 幅值)
   双击             自动量程
@@ -319,6 +321,16 @@ class PlotWidget(QWidget):
             p.drawText(QPointF(bx + 8, ty + fm.ascent()), s)
             ty += fm.height()
 
+        # 暂停跟随时在右上角提示 (否则用户可能不知道波形已经不动了)
+        if (not self.follow) and (not self.frozen):
+            p.setFont(QFont(theme.MONO, 9))
+            tip = "已暂停跟随 · 双击恢复"
+            tw = p.fontMetrics().horizontalAdvance(tip) + 12
+            p.setPen(self._pen(theme.ACCENT, 1.0))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(QRectF(x1 - tw - 4, y0 + 4, tw, 18), 5, 5)
+            p.drawText(QPointF(x1 - tw + 2, y0 + 17), tip)
+
     # ================= 交互 =================
     def mouseMoveEvent(self, ev):
         self._cursor = (ev.position().x(), ev.position().y())
@@ -328,9 +340,17 @@ class PlotWidget(QWidget):
             ph = max(1, y1 - y0)
             dx = ev.position().x() - self._drag[0]
             dy = ev.position().y() - self._drag[1]
-            # 跟随中(未暂停)拖动只改 Y 缩放; 已暂停(冻结)或已平移时, 左右拖动平移时间
+            # 水平拖动超过 3px 就退出"跟随最新", 进入平移.
+            # (原来跟随状态下左键拖动只能改 Y 缩放, 所以 Ia/Ib/Ic 那个
+            #  窗口看着像"不能左右拖动"; 双击恢复跟随)
+            if self.follow and not self.frozen and abs(dx) > 3.0:
+                self.follow = False
             if self.frozen or not self.follow:
-                self.t_right = self._drag[2] - dx / pw * self.t_span
+                tr = self._drag[2] - dx / pw * self.t_span
+                # 不要拖到没有数据的区域
+                lo = self.store.t_left() + self.t_span
+                hi = max(lo, self.store.t_right())
+                self.t_right = min(max(tr, lo), hi)
             span = self._drag[4] - self._drag[3]
             self.y_min = self._drag[3] + dy / ph * span
             self.y_max = self._drag[4] + dy / ph * span

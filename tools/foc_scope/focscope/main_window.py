@@ -233,8 +233,15 @@ class MainWindow(QWidget):
 
         self.split = QSplitter(Qt.Vertical)
         self.plot_top = PlotWidget(self.store, self.model)
+        self.plot_top.setToolTip(
+            "左键拖动: 左右平移时间 / 上下缩放数值轴\n"
+            "（第一次水平拖动会自动暂停跟随, 右上角会提示）\n"
+            "双击: 恢复跟随最新数据    滚轮: 缩放时间轴")
         self.overview = OverviewWidget(self.store, self.model)
         self.plot_main = PlotWidget(self.store, self.model)
+        self.plot_main.setToolTip(
+            "左键拖动: 左右平移时间 / 上下缩放数值轴\n"
+            "双击: 恢复跟随最新数据    滚轮: 缩放时间轴")
         self.split.addWidget(self.plot_top)
         self.split.addWidget(self.overview)
         self.split.addWidget(self.plot_main)
