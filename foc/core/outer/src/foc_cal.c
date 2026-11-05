@@ -132,6 +132,14 @@ void calibration_end(void)
 	FOC.calib_vinj_mode = false;
 	foc_disarm();
 	mCalibStep = CS_NULL;
+
+	/* 齿槽补偿表是按"编码器机械角"索引的; 这次标定重算了编码器零位
+	 * 和极对数, 旧表的相位基准已经变了 -> 必须作废, 否则补偿会反过来
+	 * 制造新的转矩脉动 */
+	if (Config.cogging_map_valid) {
+		Config.cogging_map_valid = 0;
+		printf("cogging: map invalidated by calibration, redo 0x28\n");
+	}
 }
 
 void calibration_loop(void)
