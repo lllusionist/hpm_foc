@@ -76,11 +76,25 @@ def parse(path):
     if not m:
         return None, nch
     entries = {}
+    pending = ""
     for line in m.group(1).splitlines():
-        mm = re.match(r"\s*d\[(\d+)\]\s*=\s*(.+?);\s*(?://\s*(.*))?$", line)
+        # 有些通道的注释写在上一行 (表达式太长), 先记下来给下一条 d[] 用
+        mc = re.match(r"\s*/\*\s*(.+?)\s*\*/\s*$", line)
+        if mc:
+            pending = mc.group(1).strip()
+            continue
+        # 固件注释统一成 /* */, 这里同时兼容 // 与 /* */ 两种行尾注释
+        mm = re.match(
+            r"\s*d\[(\d+)\]\s*=\s*(.+?);\s*"
+            r"(?://\s*(?P<lc>.*)|/\*\s*(?P<bc>.*?)\s*\*/)?\s*$", line)
         if mm:
             idx = int(mm.group(1))
-            entries[idx] = (mm.group(2).strip(), (mm.group(3) or "").strip())
+            cmt = mm.group("lc")
+            if cmt is None:
+                cmt = mm.group("bc") or ""
+            cmt = cmt.strip() or pending
+            entries[idx] = (mm.group(2).strip(), cmt)
+            pending = ""
     if not entries:
         return None, nch
     count = max(entries) + 1

@@ -11,6 +11,8 @@
 
 #define USB_CMD_CALIB_START 0x27
 #define USB_CMD_ANTICOGGING_START 0x28
+#define USB_CMD_SET_ANTICOG 0x2A    /* float 0/1: 齿槽补偿在线开关 (A/B 用) */
+#define USB_CMD_SET_FRICTION_FF 0x2B /* float 0/1: 摩擦前馈在线开关 */
 
 #define USB_CMD_SET_TORQUE 0x23
 #define USB_CMD_SET_VELOCITY 0x24

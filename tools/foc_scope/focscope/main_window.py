@@ -10,7 +10,7 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QSlider,
     QSplitter, QLineEdit, QToolButton, QFrame, QMessageBox, QButtonGroup, QScrollArea,
-    QFileDialog,
+    QFileDialog, QCheckBox,
 )
 
 from . import theme
@@ -189,6 +189,24 @@ class MainWindow(QWidget):
         self.btn_record.setToolTip("开始录制全分辨率波形+命令; 再点一下停止并保存到桌面")
         for b in (self.btn_calib, self.btn_anticog, self.btn_enable, self.btn_disable, self.btn_zero, self.btn_record):
             h.addWidget(b)
+
+        # A/B 调试开关 (固件 0x2A / 0x2B, 运行时即时生效)
+        self.cb_anticog = QCheckBox("齿槽补偿")
+        self.cb_anticog.setChecked(True)
+        self.cb_anticog.setToolTip(
+            "齿槽前馈在线开关 (0x2A); 关掉可对比低速转速纹波,\n"
+            "需要先跑过「齿槽标定」")
+        self.cb_ff = QCheckBox("摩擦前馈")
+        self.cb_ff.setChecked(True)
+        self.cb_ff.setToolTip(
+            "摩擦前馈在线开关 (0x2B); 低速 BREAK/MOVE 换挡会注入转矩台阶,\n"
+            "关掉可判断是不是前馈在引起抖动")
+        for cb in (self.cb_anticog, self.cb_ff):
+            h.addWidget(cb)
+        self.cb_anticog.toggled.connect(
+            lambda on: self.send(CMD["set_anticog"], 1.0 if on else 0.0))
+        self.cb_ff.toggled.connect(
+            lambda on: self.send(CMD["set_ff"], 1.0 if on else 0.0))
         return bar
 
     def _build_center(self):

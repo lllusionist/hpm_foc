@@ -5,6 +5,8 @@
 固件改了波形通道, 上位机重启即同步; 解析失败则回退到内置默认表.
 """
 
+import re
+
 from . import theme
 from .vofa_source import load_channels
 
@@ -133,6 +135,9 @@ class ChannelModel:
             "shown": list(self.shown),
         }
 
+    # 旧配置里存过 data1/data2... 这类占位名, 会覆盖固件里的真实通道名
+    _GENERIC = re.compile(r"^(data|ch|d)\d+$", re.I)
+
     def load_cfg(self, cfg):
         if not cfg:
             return
@@ -143,7 +148,14 @@ class ChannelModel:
                 cur = getattr(self, attr)
                 for i in range(min(len(vals), NCH)):
                     try:
-                        cur[i] = vals[i]
+                        v = vals[i]
+                        # 占位名一律丢弃, 保留固件解析出来的名字
+                        if key in ("name", "short") and isinstance(v, str) \
+                                and self._GENERIC.match(v):
+                            continue
+                        if key in ("name", "short") and not str(v).strip():
+                            continue
+                        cur[i] = v
                     except Exception:
                         pass
         shown = cfg.get("shown")

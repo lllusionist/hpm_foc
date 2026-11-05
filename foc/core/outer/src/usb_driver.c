@@ -164,6 +164,17 @@ void USB_parse_frame(UsbFrame *frame)
 		vofa_request_config();
 		break;
 
+	/* A/B 调试开关: 本函数在 USB 中断里跑, 不打 printf */
+	case USB_CMD_SET_ANTICOG:
+		Config.anticogging_enable =
+		    (data_to_float(&frame->data[0]) > 0.5f) ? 1 : 0;
+		break;
+
+	case USB_CMD_SET_FRICTION_FF:
+		CONTROLLER_set_friction_ff(
+		    (data_to_float(&frame->data[0]) > 0.5f) ? 1U : 0U);
+		break;
+
 	case USB_CMD_ANTICOGGING_START:
 		foc_request_stage(ANTICOGGING);
 		break;

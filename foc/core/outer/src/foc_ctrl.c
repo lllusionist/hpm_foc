@@ -21,6 +21,8 @@ tController Controller;
 #define VEL_BOOST_END_VEL 1.0f
 
 static bool friction_boost;
+/* 摩擦前馈开关 (默认开, USB 0x2B 可在线切换做 A/B) */
+static bool friction_ff_en = true;
 
 void CONTROLLER_update_input_pos_filter_gain(float bw)
 {
@@ -287,8 +289,11 @@ void CONTROLLER_loop(void)
 		iq_set = CLAMP(iq_set, Imin, Imax);
 	}
 
-	/* 摩擦前馈: 粘住时给突破电流, 转起来后回到动摩擦偏置 */
-	if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
+	/* 摩擦前馈: 粘住时给突破电流, 转起来后回到动摩擦偏置.
+	 * 低速(0.1rps 级)时前馈的 BREAK/MOVE 换挡本身会注入转矩台阶,
+	 * 可以运行中用 0x2B 关掉做 A/B */
+	if (friction_ff_en &&
+	    (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    low_speed_assist) {
 		float av = fabsf(vel_meas);
 		if (av < FRICTION_FF_ENGAGE_VEL)
@@ -345,4 +350,12 @@ void CONTROLLER_loop(void)
 		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
 	Controller.vel_integrator =
 	    CLAMP(Controller.vel_integrator, -0.5f, 0.5f);
+}
+
+/* 摩擦前馈在线开关 (0x2B) */
+void CONTROLLER_set_friction_ff(uint8_t en)
+{
+	friction_ff_en = (en != 0U);
+	if (!friction_ff_en)
+		friction_boost = false;
 }
