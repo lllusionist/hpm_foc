@@ -1231,6 +1231,33 @@ static void cg_report_harmonics(void)
 	       best_h[0], (double)(best_a[0] * 1000.0f / COGGING_SCALE),
 	       best_h[1], (double)(best_a[1] * 1000.0f / COGGING_SCALE),
 	       best_h[2], (double)(best_a[2] * 1000.0f / COGGING_SCALE));
+	/* 再打印几个"有物理意义"的阶次, 便于判断表里到底是什么:
+	 * 14 = 极对数, 28 = 极数, 24 = 槽数(若 24 槽), 84/168 = 齿槽周期数 */
+	{
+		static const int probe[] = { 6, 12, 14, 24, 28, 42, 84, 168 };
+		printf("cogging: harm of interest ");
+		for (uint32_t k = 0; k < sizeof(probe) / sizeof(probe[0]); k++) {
+			int h = probe[k];
+			float wr = cosf(6.2831853f * (float)h /
+					(float)COGGING_MAP_NUM);
+			float wi = -sinf(6.2831853f * (float)h /
+					 (float)COGGING_MAP_NUM);
+			float cr = 1.0f, ci = 0.0f, sr = 0.0f, si = 0.0f;
+			for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+				float v = (float)Config.cogging_map[i];
+				sr += v * cr;
+				si += v * ci;
+				float t = cr * wr - ci * wi;
+				ci = cr * wi + ci * wr;
+				cr = t;
+			}
+			float a = sqrtf(sr * sr + si * si) * 2.0f /
+				  (float)COGGING_MAP_NUM;
+			printf("%d:%.1fmA ", h,
+			       (double)(a * 1000.0f / COGGING_SCALE));
+		}
+		printf("\n");
+	}
 }
 
 /* 空走阶段: 每 CG_GAP_MS 走一步 */
