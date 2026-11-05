@@ -930,7 +930,7 @@ void calibration_loop(void)
 #define CG_SETTLE_TICKS 5U    /* 连续满足 5ms 认为停稳 */
 #define CG_SETTLE_MAX_MS 300U /* 单点最长等待 */
 #define CG_AVG_SAMPLES 8U     /* 每点平均样本数 (1kHz) */
-#define CG_TIMEOUT_S 120U     /* 总超时 */
+#define CG_TIMEOUT_S 300U     /* 总超时: 512点x2方向, 每点最多 300ms 停稳 */
 #define CG_LP_BINS 1U	      /* 1 = 不做圆周低通 (避免 84 阶相位滞后) */
 
 typedef enum {
@@ -954,6 +954,7 @@ static tCgState cg_state;
 static int cg_step_idx;	 /* 当前阶段内步数 */
 static uint32_t cg_tick; /* 当前步内 1kHz 计数 */
 static uint32_t cg_settle_cnt;
+static uint32_t cg_settle_timeouts; /* 停稳超时点数 (整次标定的质量指标) */
 static int32_t cg_iq_sum;
 static uint32_t cg_iq_n;
 static uint8_t cg_written[(COGGING_MAP_NUM + 7U) / 8U];
@@ -1070,6 +1071,10 @@ void anticogging_start(void)
 	cg_settle_cnt = 0;
 	cg_iq_sum = 0;
 	cg_iq_n = 0;
+	cg_settle_timeouts = 0;
+	printf("cogging: start, %u pts x2 dirs, pos_p=%.1f, timeout=%us\n",
+	       (unsigned)COGGING_MAP_NUM, (double)Config.pos_p_gain,
+	       (unsigned)CG_TIMEOUT_S);
 }
 
 /* 扫完一遍后处理: 去均值 + 圆周低通 */
@@ -1174,10 +1179,15 @@ static void cg_scan_step(float dir)
 			cg_settle_cnt = 0;
 		}
 		if (cg_tick >= CG_SETTLE_MAX_MS) {
-			printf("cogging: settle timeout at step %d\n",
-			       cg_number);
-			cg_valid = false;
-			cg_running = false;
+			/* 个别点被齿槽/静摩擦夹住, 位置误差进不了窗口:
+			 * 原来直接置 cg_valid=false 会把整次标定废掉, 这里改成
+			 * 计数 + 就地采样, 只有超时比例过高才算失败 */
+			cg_settle_timeouts++;
+			printf("cogging: settle timeout #%u at step %d\n",
+			       (unsigned)cg_settle_timeouts, cg_number);
+			cg_iq_sum = 0;
+			cg_iq_n = 0;
+			cg_state = CG_ST_AVG;
 		}
 		break;
 
@@ -1261,6 +1271,13 @@ void anticogging_end(void)
 
 	/* 保存 Flash 前必须恢复位置环增益, 否则 50.0 会被写入 */
 	Config.pos_p_gain = cg_pos_p_save;
+
+	/* 停稳超时超过 20% 认为表不可信 */
+	if (cg_settle_timeouts > (2U * COGGING_MAP_NUM / 5U)) {
+		printf("cogging: too many settle timeouts (%u), mark invalid\n",
+		       (unsigned)cg_settle_timeouts);
+		cg_valid = false;
+	}
 
 	if (cg_valid) {
 		Config.cogging_map_valid = 1;
