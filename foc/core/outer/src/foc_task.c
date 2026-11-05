@@ -259,6 +259,8 @@ static void Task_FOC(void *argument)
 			}
 		} break;
 		case IDLE:
+			if (slow_tick)
+				cogging_dump_loop();
 			break;
 		case RUN:
 			foc_check_and_trip();
@@ -270,6 +272,7 @@ static void Task_FOC(void *argument)
 			break;
 		case ANTICOGGING:
 			if (slow_tick) {
+				cogging_dump_loop();
 				if (anticogging_loop()) /* 齿槽补偿标定 1kHz */
 					foc_request_stage(IDLE);
 			}

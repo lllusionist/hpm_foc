@@ -1352,6 +1352,8 @@ void anticogging_end(void)
 		       (unsigned)cg_settle_timeouts,
 		       (unsigned)(2U * COGGING_MAP_NUM));
 		cg_report_harmonics();
+		/* 自动 dump 整张表(1kHz 任务分块打印), 方便离线做频谱/形状分析 */
+		cg_dump_idx = 0U;
 	} else {
 		Config.cogging_map_valid = 0;
 		printf("cogging: aborted, invalid (step=%d)\n", cg_number);
@@ -1359,4 +1361,28 @@ void anticogging_end(void)
 
 	Controller.input_velocity = 0.0f;
 	Controller.input_velocity_buffer = 0.0f;
+}
+
+/* ---- 齿槽表 dump (0x2C): 每拍打印 8 点, 避开中断阻塞 ---- */
+static uint32_t cg_dump_idx = COGGING_MAP_NUM; /* == NUM 表示空闲 */
+
+void cogging_dump_request(void)
+{
+	cg_dump_idx = 0;
+}
+
+void cogging_dump_loop(void)
+{
+	if (cg_dump_idx >= COGGING_MAP_NUM)
+		return;
+	if (cg_dump_idx == 0U)
+		printf("cogging_dump: begin valid=%ld\n",
+		       (long)Config.cogging_map_valid);
+	for (int k = 0; k < 8 && cg_dump_idx < COGGING_MAP_NUM; k++) {
+		printf("%u,%d\n", (unsigned)cg_dump_idx,
+		       (int)Config.cogging_map[cg_dump_idx]);
+		cg_dump_idx++;
+	}
+	if (cg_dump_idx >= COGGING_MAP_NUM)
+		printf("cogging_dump: end\n");
 }

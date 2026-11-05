@@ -175,6 +175,10 @@ void USB_parse_frame(UsbFrame *frame)
 		    (data_to_float(&frame->data[0]) > 0.5f) ? 1U : 0U);
 		break;
 
+	case USB_CMD_DUMP_COGGING:
+		cogging_dump_request();
+		break;
+
 	case USB_CMD_ANTICOGGING_START:
 		foc_request_stage(ANTICOGGING);
 		break;
