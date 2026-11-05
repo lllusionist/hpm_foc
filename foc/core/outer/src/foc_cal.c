@@ -1144,6 +1144,51 @@ static void cg_finish_map(void)
 		Config.cogging_map[i] = cg_tmp[i];
 }
 
+/* 谐波自检: 表按机械角 512 点存一圈, 第 h 次谐波 = 每机械圈 h 个周期.
+ * 齿槽周期数 = LCM(极数, 槽数): 28极/12槽 -> 84, 28极/24槽 -> 168.
+ * 打印最大的几个谐波, 用来判断这张表测到的到底是齿槽还是摩擦/编码器误差 */
+static void cg_report_harmonics(void)
+{
+	int best_h[3] = { 0, 0, 0 };
+	float best_a[3] = { 0.0f, 0.0f, 0.0f };
+
+	for (int h = 1; h <= 200; h++) {
+		float wr = cosf(6.2831853f * (float)h / (float)COGGING_MAP_NUM);
+		float wi = -sinf(6.2831853f * (float)h / (float)COGGING_MAP_NUM);
+		float cr = 1.0f, ci = 0.0f;
+		float sr = 0.0f, si = 0.0f;
+
+		for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+			float v = (float)Config.cogging_map[i];
+
+			sr += v * cr;
+			si += v * ci;
+			float t = cr * wr - ci * wi;
+
+			ci = cr * wi + ci * wr;
+			cr = t;
+		}
+		float a = sqrtf(sr * sr + si * si) * 2.0f /
+			  (float)COGGING_MAP_NUM;
+
+		for (int k = 0; k < 3; k++) {
+			if (a > best_a[k]) {
+				for (int j = 2; j > k; j--) {
+					best_a[j] = best_a[j - 1];
+					best_h[j] = best_h[j - 1];
+				}
+				best_a[k] = a;
+				best_h[k] = h;
+				break;
+			}
+		}
+	}
+	printf("cogging: top harm h=%d(%.1fmA) h=%d(%.1fmA) h=%d(%.1fmA)\n",
+	       best_h[0], (double)(best_a[0] * 1000.0f / COGGING_SCALE),
+	       best_h[1], (double)(best_a[1] * 1000.0f / COGGING_SCALE),
+	       best_h[2], (double)(best_a[2] * 1000.0f / COGGING_SCALE));
+}
+
 /* 空走阶段: 每 CG_GAP_MS 走一步 */
 static void cg_gap_step(float dir)
 {
@@ -1290,7 +1335,7 @@ void anticogging_end(void)
 	if (cg_valid) {
 		Config.cogging_map_valid = 1;
 		Config.anticogging_enable = 1;
-		CONFIG_save_to_flash();
+		uint8_t sv = CONFIG_save_to_flash();
 		int16_t mn = 32767, mx = -32768;
 		for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
 			if (Config.cogging_map[i] < mn)
@@ -1302,6 +1347,11 @@ void anticogging_end(void)
 		       "(%.3f A)\n",
 		       (unsigned)COGGING_MAP_NUM, cg_number, mn, mx,
 		       (int)(mx - mn), (float)(mx - mn) / COGGING_SCALE);
+		printf("cogging: save %s, timeout %u/%u\n",
+		       (sv == 0U) ? "ok" : "FAIL",
+		       (unsigned)cg_settle_timeouts,
+		       (unsigned)(2U * COGGING_MAP_NUM));
+		cg_report_harmonics();
 	} else {
 		Config.cogging_map_valid = 0;
 		printf("cogging: aborted, invalid (step=%d)\n", cg_number);
