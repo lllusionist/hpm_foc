@@ -65,8 +65,8 @@ void config_init(void)
 
 	Config.invert_motor_dir = 0;
 	Config.pole_pairs = 0;
-	Config.phase_resistance = 5.0f; /* 默认值, 校准后覆盖 */
-	Config.phase_inductance = 0.00164f;
+	Config.phase_resistance = 6.92f; /* 4310 相值(官方相间13.84/2), 校准后覆盖 */
+	Config.phase_inductance = 0.003225f; /* 4310 相值(官方相间6.45mH/2) */
 	Config.velocity_limit = 30.0f;
 
 	/* 当前电机: 线-线 15.2Ω/6.56mH (相 7.6Ω/3.28mH), 额定 0.59A。
@@ -74,7 +74,8 @@ void config_init(void)
 	 * calib_voltage 需 >= R×calib_current。 */
 	Config.current_limit = 1.5f;  /* 额定的 2.5 倍 */
 	Config.calib_current = 0.50f; /* 额定的 85%, 保证拖动转矩 */
-	Config.calib_voltage = 5.0f;  /* R×I = 8.47×0.5 ≈ 4.24, 留裕量 */
+	Config.calib_voltage = 10.0f; /* 24V 母线: R 步进和 L 注入幅值都由它派生,
+				 * 5V 时 L 的交流幅值只剩 0.25V, 测出来只有一半 */
 
 	/* 航模 5210 (R=0.03Ω, L=9µH, 额定 44A) */
 	/* Config.current_limit   = 8.0f; */
@@ -104,8 +105,8 @@ void config_init(void)
 	Config.profile_accel = 50;
 	Config.profile_decel = 50;
 
-	Config.protect_under_voltage = 9.0f;
-	Config.protect_over_voltage = 15.0f;
+	Config.protect_under_voltage = 18.0f;
+	Config.protect_over_voltage = 28.0f;
 	Config.protect_over_current = 2.0f; /* 额定的 3.4 倍 */
 	Config.protect_i_bus_max = 1.5f;
 

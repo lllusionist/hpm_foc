@@ -29,9 +29,9 @@
 #define L_CAL_CYCLES (CAL_LOOP_HZ / 2U) /* 电感: 每轮正弦注入时长 0.5s */
 /* 步长按量程 5% 派生, 不写死绝对值: 低阻/高阻电机都能 ~20 步扫完 */
 /* Δu2: 电阻升压步长 (V) */
-#define CALIB_R_STEP_V (Config.calib_voltage * 0.05f)
+#define CALIB_R_STEP_V (Config.calib_voltage * 0.10f)
 #define R_CAL_WINDOW (CAL_LOOP_HZ / 5U)		     /* 每个工作点停留 200ms */
-#define CALIB_L_MIN_V (Config.calib_voltage * 0.05f) /* 电感注入幅值下限 (V) */
+#define CALIB_L_MIN_V (Config.calib_voltage * 0.20f) /* 电感注入幅值下限 (V) */
 
 static int encoder_error_arr[MAX_MOTOR_POLE_PAIRS * SAMPLES_PER_PPAIR];
 
@@ -57,9 +57,9 @@ static float flux_vd_a, flux_vd_b; /* 两个转速点的 Vd 均值 */
 
 /* J 标定: ±I 交替, 两段都正转, 摩擦同向相减:
  * J = Kt·I / (π·(a+ - a-)) */
-#define J_CAL_IQ (Config.calib_current * 0.5f) /* 测试电流: 标定电流的一半 */
+#define J_CAL_IQ (Config.calib_current * 0.15f) /* 测试电流: 标定电流的一半 */
 #define J_CAL_SAMPLES (300U)		       /* 每段采样点数 (1kHz -> 0.3s) */
-#define J_SPINUP_RPS (1.0f) /* 起转目标 (rps), 保证两段都在正转 */
+#define J_SPINUP_RPS (3.0f) /* 起转目标 (rps), 保证两段都在正转 */
 static float j_sum_t, j_sum_v, j_sum_tv, j_sum_tt;
 static uint32_t j_cnt;
 static float j_slope_acc, j_slope_dec;
@@ -84,6 +84,9 @@ static float r_i1;	/* 上一个工作点的稳态电流 Ires1 (A) */
 static float r_isum;	/* 窗口内电流累加 */
 static uint32_t r_icnt; /* 窗口内累加计数 */
 static uint32_t r_s1;	/* 升压次数 */
+/* 多点平均: 每级 ΔI 累加, 用 STEP/(平均 ΔI) 算 R, 抗单点噪声 */
+static float r_di_sum;
+static uint32_t r_di_cnt;
 
 /* 电感: 注入幅值自适应 */
 static float l_v_dc, l_v_amp; /* 注入的直流偏置 / 正弦幅值 */
@@ -155,6 +158,8 @@ void calibration_loop(void)
 		r_isum = 0.0f;
 		r_icnt = 0;
 		r_s1 = 0; /* 升压次数 */
+		r_di_sum = 0.0f;
+		r_di_cnt = 0U;
 		FOC.calib_mode = false;
 		FOC.calib_vinj_mode = false;
 		foc_arm();
@@ -177,21 +182,31 @@ void calibration_loop(void)
 			if ((Is < Config.calib_current) &&
 			    ((r_volt + CALIB_R_STEP_V) <=
 			     (Config.calib_voltage * 0.9f))) {
-				/* 未达阈值: 记录本点, 升压继续 */
+				/* 未达阈值: 累加本级的 ΔI, 升压继续 */
+				if (r_s1 > 0U) {
+					r_di_sum += (Is - r_i1);
+					r_di_cnt++;
+				}
 				r_i1 = Is;
 				r_volt += CALIB_R_STEP_V;
 				r_s1++;
 			} else {
-				/* Rs = Δu2/(Ires2-Ires1), 非线性抵消 */
-				float di = Is - r_i1;
-				if (fabsf(di) > 1e-4f) {
+				/* Rs = Δu / 平均(ΔI), 多点平均抑制单点噪声 */
+				if (r_s1 > 0U) {
+					r_di_sum += (Is - r_i1);
+					r_di_cnt++;
+				}
+				float di_avg = (r_di_cnt > 0U)
+						   ? (r_di_sum / (float)r_di_cnt)
+						   : (Is - r_i1);
+				if (fabsf(di_avg) > 1e-4f) {
 					Config.phase_resistance =
-					    CALIB_R_STEP_V / di;
+					    CALIB_R_STEP_V / di_avg;
 				}
 				printf("res: %.4f Ohm (ures=%.3f I1=%.4f "
-				       "I2=%.4f steps=%u)\n",
+				       "I2=%.4f steps=%u di_avg=%.5f)\n",
 				       Config.phase_resistance, r_volt, r_i1,
-				       Is, (unsigned)r_s1);
+				       Is, (unsigned)r_s1, (double)di_avg);
 				mCalibStep = CS_MOTOR_R_END;
 			}
 		}
@@ -743,8 +758,9 @@ void calibration_loop(void)
 	case CS_MOTOR_J_ACC:
 	case CS_MOTOR_J_DEC: {
 		/* 用电流环 + 编码器角度直接驱动, 绕开 Controller 指令路径 */
-		float iq =
-		    ((mCalibStep == CS_MOTOR_J_DEC) ? -J_CAL_IQ : J_CAL_IQ);
+		/* 减速段断电流自由滑行: 原来 -0.25A 反制动 7ms 就过零,
+		 * 1kHz 采样点数不足, 算出的 J 不可信 */
+		float iq = (mCalibStep == CS_MOTOR_J_DEC) ? 0.0f : J_CAL_IQ;
 		/* CALIBRATION 只走 calib_mode 分支; 角度/角速度用编码器实测值,
 		 * 电机才能自由加速 (测 J 所需) */
 		FOC.calib_mode = true;
