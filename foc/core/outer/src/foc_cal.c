@@ -933,11 +933,14 @@ void calibration_loop(void)
  */
 #define CG_GAP_STEPS 100      /* 起始/换向空走步数 */
 #define CG_GAP_MS 50U	      /* 空走每步时间 */
-#define CG_SETTLE_POS 0.006f  /* 到位窗口 (rad, 约 0.34° 机械) */
+#define CG_SETTLE_POS 0.0025f /* 到位窗口 (rad, 约 0.14° 机械 = 1/5 bin);
+                               * 原来 0.006 (半个 bin) 会让相邻点索引乱跳 */
 #define CG_SETTLE_VEL 0.05f   /* 停稳速度窗口 (rps) */
-#define CG_SETTLE_TICKS 5U    /* 连续满足 5ms 认为停稳 */
+#define CG_SETTLE_TICKS 15U   /* 连续满足 15ms 认为停稳 (原来 5ms 太短, 还在余振里) */
 #define CG_SETTLE_MAX_MS 300U /* 单点最长等待 */
-#define CG_AVG_SAMPLES 8U     /* 每点平均样本数 (1kHz) */
+#define CG_AVG_SAMPLES 64U    /* 每点平均样本数 (1kHz -> 64ms):
+                               * 单点电流噪声 ~9mA, 取 8 点时均方误差 3.2mA,
+                               * 已占齿槽表幅值(14.5mA)的 22%; 取 64 点降到 1.1mA */
 #define CG_TIMEOUT_S 300U     /* 总超时: 512点x2方向, 每点最多 300ms 停稳 */
 #define CG_LP_BINS 1U	      /* 1 = 不做圆周低通 (避免 84 阶相位滞后) */
 
@@ -1252,7 +1255,9 @@ static void cg_scan_step(float dir)
 			break;
 
 		int16_t v = cg_to_i16(cg_iq_sum / (int32_t)cg_iq_n);
-		int idx = cg_index(cg_pos());
+		/* 用指令位置索引: 每步正好一个 bin, 实测位置有停位误差
+		 * (±0.14°) 时会落到相邻 bin, 造成索引乱跳 */
+		int idx = cg_index(Controller.input_position);
 		if ((cg_phase == CG_PH_SCAN_FWD) || !cg_is_written(idx)) {
 			Config.cogging_map[idx] = v;
 			cg_mark(idx);
