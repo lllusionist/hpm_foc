@@ -1477,6 +1477,9 @@ bool anticogging_loop(void)
 		cg_running = false;
 		return true;
 	}
+	if (cg_method == 1U)
+		return cg_sweep_loop();
+
 	if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
 		printf("cogging: step=%d ph=%d st=%d inpos=%.3f act=%.3f "
 		       "iq=%.2f\n",
@@ -1484,9 +1487,6 @@ bool anticogging_loop(void)
 		       (double)Controller.input_position, (double)cg_pos(),
 		       (double)FOC.Iq_filt);
 	}
-
-	if (cg_method == 1U)
-		return cg_sweep_loop();
 
 	switch (cg_phase) {
 	case CG_PH_GAP_FWD:
