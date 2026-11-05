@@ -954,8 +954,8 @@ void calibration_loop(void)
  * 0.30 rps 时 84 阶齿槽 = 25 Hz, 环路在 25 Hz 已有明显相位滞后 ->
  * 实测这张表对 84 阶速度脉动毫无作用 (A/B 前后都是 0.010 rps).
  * 0.10 rps 时 84 阶 = 8.4 Hz, 相对 80 Hz 带宽滞后仅十几度, 相位可信. */
-#define CG_SW_RPS 0.10f	    /* 扫描转速 (rps) */
-#define CG_SW_REVS 4.0f	    /* 每方向累加圈数 (0.1rps: 4.5圈x2 = 90s, 每箱 ~78 点) */
+#define CG_SW_RPS 0.05f	    /* 扫描转速 (rps): 84 阶齿槽 = 4.2 Hz, 相位滞后可忽略 */
+#define CG_SW_REVS 3.0f	    /* 每方向累加圈数 (0.05rps: 3.5圈x2 = 140s, 每箱 ~117 点) */
 #define CG_SW_RAMP 1.5f	    /* 速度指令斜坡 (rps/s) */
 #define CG_SW_SKIP_REV 0.5f /* 每方向先空转半圈再开始累加 */
 
