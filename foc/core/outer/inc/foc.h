@@ -107,7 +107,6 @@ typedef struct {
 
 	/* 校准用: α 轴正弦电压注入 (电感测量, 解调累加在中断里做) */
 	volatile bool calib_vinj_mode;
-	volatile float calib_l_freq;
 	volatile float vinj_omega; /* 注入角频率 (rad/s) */
 	volatile float vinj_amp;   /* 正弦幅值 (V) */
 	volatile float vinj_dc;	   /* 直流偏置 (V) */
