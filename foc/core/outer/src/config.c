@@ -65,8 +65,8 @@ void config_init(void)
 
 	Config.invert_motor_dir = 0;
 	Config.pole_pairs = 0;
-	Config.phase_resistance = 6.92f; /* 4310 相值(官方相间13.84/2), 校准后覆盖 */
-	Config.phase_inductance = 0.003225f; /* 4310 相值(官方相间6.45mH/2) */
+	Config.phase_resistance = 8.29f; /* 实测: 万用表相间16.86->相8.43, 标定8.29; 官方13.84 与本机不符 */
+	Config.phase_inductance = 0.0034f;  /* 标定 3.34~3.44mH (官方相间6.45/2=3.225 略低) */
 	Config.velocity_limit = 30.0f;
 
 	/* 当前电机: 线-线 15.2Ω/6.56mH (相 7.6Ω/3.28mH), 额定 0.59A。
