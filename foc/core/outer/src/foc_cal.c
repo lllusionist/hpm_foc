@@ -966,6 +966,8 @@ static uint32_t cg_settle_timeouts; /* 停稳超时点数 (整次标定的质量
 static int32_t cg_iq_sum;
 static uint32_t cg_iq_n;
 static uint8_t cg_written[(COGGING_MAP_NUM + 7U) / 8U];
+/* 齿槽表 dump 游标: >= COGGING_MAP_NUM 表示空闲 */
+static uint32_t cg_dump_idx = COGGING_MAP_NUM;
 
 /* 位置指令前进/后退一步 (单圈机械角, 循环卷绕) */
 static void cg_step(float dir)
@@ -1364,8 +1366,6 @@ void anticogging_end(void)
 }
 
 /* ---- 齿槽表 dump (0x2C): 每拍打印 8 点, 避开中断阻塞 ---- */
-static uint32_t cg_dump_idx = COGGING_MAP_NUM; /* == NUM 表示空闲 */
-
 void cogging_dump_request(void)
 {
 	cg_dump_idx = 0;
