@@ -30,7 +30,6 @@
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;inner;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;inc"/>
-  <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;matlab"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;application;core;outer;src"/>
   <ProjectSessionItem path="foc;foc - hpm5e00evk;middleware"/>
  </Project>
@@ -67,8 +66,7 @@
   <Watches active="0" update="Never"/>
  </Watch4>
  <Files>
-  <SessionOpenFile windowGroup="DockEditLeft" x="25" y="7" useTextEdit="1" path="../../core/outer/inc/encoder.h" left="0" top="1" codecName="Default"/>
-  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="0" useTextEdit="1" path="../../core/outer/matlab/FOC_Model.c" left="0" selected="1" top="210" codecName="Default"/>
+  <SessionOpenFile windowGroup="DockEditLeft" x="0" y="12" useTextEdit="1" path="../../core/outer/inc/encoder.h" left="0" selected="1" top="1" codecName="Default"/>
  </Files>
  <EMStudioWindow activeProject="foc - hpm5e00evk" fileDialogDefaultFilter="*.c" autoConnectTarget="J-Link" buildConfiguration="Debug" sessionSettings="" debugSearchFileMap="" fileDialogInitialDirectory="" debugSearchPath="" autoConnectCapabilities="3199"/>
 </session>
