@@ -8,9 +8,7 @@ tController Controller;
 
 #define CTRL_PERIOD (1.0f / 5000.0f) /* Task_FOC 周期 (5kHz) */
 
-/* 低速摩擦前馈 + 增益调度 (4310 实测: 静摩擦约 0.05A, 动摩擦约 0.03A).
- * 把 MOVE/BREAK 设为 0 可关闭前馈; VEL_BOOST_GAIN 设为 1 可关闭调度.
- */
+/* 低速摩擦前馈 + 增益调度 (MOVE/BREAK=0 关前馈; VEL_BOOST_GAIN=1 关调度) */
 #define FRICTION_FF_MOVE_A 0.030f
 #define FRICTION_FF_BREAK_A 0.050f
 #define FRICTION_FF_ENGAGE_VEL 0.010f
@@ -289,9 +287,8 @@ void CONTROLLER_loop(void)
 		iq_set = CLAMP(iq_set, Imin, Imax);
 	}
 
-	/* 摩擦前馈: 粘住时给突破电流, 转起来后回到动摩擦偏置.
-	 * 低速(0.1rps 级)时前馈的 BREAK/MOVE 换挡本身会注入转矩台阶,
-	 * 可以运行中用 0x2B 关掉做 A/B */
+	/* 摩擦前馈: 粘住给突破电流, 转起来回到动摩擦偏置;
+	 * 低速时换挡台阶可用 0x2B 关掉做 A/B */
 	if (friction_ff_en &&
 	    (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    low_speed_assist) {

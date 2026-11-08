@@ -11,10 +11,7 @@ tConfig Config;
 _Static_assert(sizeof(tConfig) <= FLASH_CFG_BUF_SIZE,
 	       "tConfig exceeds flash cfg buffer");
 
-/*
- * debug=1: 关掉斜坡/前馈, 便于阶跃标定外环。
- * 斜坡极大 => 设定值一拍到位; 前馈必须清零, 否则阶跃拍被放大成尖峰。
- */
+/* debug=1: 关斜坡/前馈, 便于外环阶跃标定 (前馈不清零会放大成尖峰) */
 static void config_debug_overrides(void)
 {
 	Config.velocity_ramp_rate = 1.0e6f; /* rps/s, 近似阶跃 */
@@ -69,9 +66,8 @@ void config_init(void)
 	Config.phase_inductance = 0.0034f;  /* 标定 3.34~3.44mH (官方相间6.45/2=3.225 略低) */
 	Config.velocity_limit = 30.0f;
 
-	/* 当前电机: 线-线 15.2Ω/6.56mH (相 7.6Ω/3.28mH), 额定 0.59A。
-	 * calib_current 决定拖动电压, 取额定的 85%; 过小会起转失败。
-	 * calib_voltage 需 >= R×calib_current。 */
+	/* 4310 云台: 相 8.29Ω/3.4mH, 额定 0.9A; calib_current 取额定 55%,
+	 * calib_voltage 需 > R×I 并留 AC 注入余量 */
 	Config.current_limit = 1.5f;  /* 额定的 2.5 倍 */
 	Config.calib_current = 0.50f; /* 额定的 85%, 保证拖动转矩 */
 	Config.calib_voltage = 10.0f; /* 24V 母线: R 步进和 L 注入幅值都由它派生,

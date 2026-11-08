@@ -213,9 +213,7 @@ void pwm_init(void)
 	pwmv2_start_pwm_output_sync(PWM, 0x07);	    /* 同时启动 */
 }
 
-/*
- * 占空比上限: 给低边采样留余量; 0.96 保证最小窗口 >= 周期 4%。
- */
+/* 占空比上限: 给低边采样留余量, 0.96 保证最小窗口 >= 周期 4% */
 #define PWM_DUTY_MAX_LIMIT (0.96f)
 
 void pwm_set_duty(float du, float dv, float dw)

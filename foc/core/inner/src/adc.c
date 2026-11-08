@@ -10,10 +10,7 @@
 #define ADC_CH_IC (2U)	 /* PF21 */
 #define ADC_CH_IBUS (3U) /* PF20 */
 
-/*
- * 采样保持 20→10: 三路串行转换, 采样越短整队完成越早,
- * 越不容易撞上开关沿 (最后一路 Ic 最危险)。
- */
+/* 采样保持 20→10: 三路串行转换越短, 越不容易撞上开关沿(Ic 最危险) */
 #define ADC_SAMPLE_CYCLE (10U)
 #define ADC_PMT_ERROR_MASK \
 	(ADC16_INT_STS_AHB_ERR_MASK | ADC16_INT_STS_DMA_FIFO_FULL_MASK | \
@@ -185,10 +182,7 @@ bool adc1_read_ibus(uint16_t *ibus)
 				    ADC16_INT_STS_DMA_FIFO_FULL_MASK;
 
 	adc16_clear_status_flags(HPM_ADC1, error_mask);
-	/*
-	 * 该轮询队列未开 INTEN, TRG_CMPT_FLAG 不会置位;
-	 * 清通道字段, 等 DMA 发布新结果。
-	 */
+	/* 该队列未开 INTEN, TRG_CMPT_FLAG 不置位: 清通道字段等 DMA 发布 */
 	sample->adc_ch = 0x1FU;
 	adc16_trigger_pmt_by_sw(HPM_ADC1, ADC1_IBUS_TRIG_CH);
 	for (uint32_t i = 0; i < 4000U; i++) {
@@ -284,10 +278,7 @@ void isr_adc(void)
 		FOC.Ib = adc_dma_buf[1].result;
 		FOC.Ic = adc_dma_buf[2].result;
 
-		/*
-		 * 三相电流和恒为 0; Ic 最易采到开关沿, 坏样本时用 Ia+Ib 重建。
-		 * FOC.isum 保留原始值作诊断。
-		 */
+		/* Ic 最易采到开关沿: 坏样本用 -(Ia+Ib) 重建, isum 留作诊断 */
 		FOC.isum =
 		    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
 		     (FOC.Ic - FOC.Ic_midpoint)) *

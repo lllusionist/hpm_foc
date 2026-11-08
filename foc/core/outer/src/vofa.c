@@ -44,11 +44,8 @@ static void vofa_send_config(void)
 }
 
 /* 批量发送 */
-/*
- * USB CDC 全速约 1000 包/s, 单样本 1kHz 已是上限。
- * ADC 中断按分频采样入环形缓冲, vofa 任务每 1ms 打包发送,
- * 有效采样率与 USB 包率解耦。
- */
+/* USB CDC 约 1000 包/s: ADC 分频采样入环形缓冲, 任务每 1ms 打包,
+ * 有效采样率与 USB 包率解耦 */
 #define VOFA_NCH 22
 #define VOFA_RING 64 /* 环形缓冲样本数 */
 #define VOFA_BATCH_MAX (MAX_BUFFER_SIZE / (VOFA_NCH * 4 + 4))

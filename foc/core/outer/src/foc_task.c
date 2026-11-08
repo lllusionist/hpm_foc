@@ -186,10 +186,7 @@ static void foc_check_and_trip(void)
 	if (FOC.adc_current_missed >= 3U)
 		fault = FOC_FAULT_ADC;
 
-	/*
-	 * 停更判据按真实时间而非调用次数: 任务补跑时间隔仅几微秒,
-	 * "连续 N 次相等" 会误报 (阻塞 printf 就会触发)。
-	 */
+	/* 按真实时间判停更: 任务补跑间隔只有几微秒, 按次数会误报 */
 	frames = FOC.adc_current_frames;
 	if (frames != last_frames) {
 		last_frames = frames;
