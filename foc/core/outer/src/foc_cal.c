@@ -133,6 +133,11 @@ void calibration_end(void)
 	}
 }
 
+int calibration_step(void)
+{
+	return (int)mCalibStep;
+}
+
 void calibration_loop(void)
 {
 	float time = (float)loop_count / (float)CAL_LOOP_HZ;
@@ -1440,6 +1445,13 @@ static bool cg_sweep_loop(void)
 	cg_valid = true;
 	cg_running = false;
 	return true;
+}
+
+int anticogging_step(void)
+{
+	if (!cg_running)
+		return -1;
+	return (int)cg_phase;
 }
 
 bool anticogging_loop(void)

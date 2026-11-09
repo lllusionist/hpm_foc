@@ -36,12 +36,14 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.flux_linkage = 0.003031f;
 		Config.current_limit = 8.0f;
 		Config.velocity_limit = 40.0f;
-		Config.protect_over_current = 10.0f;
-		Config.protect_i_bus_max = 10.0f;
+		Config.protect_over_current = 12.0f;
+		Config.protect_i_bus_max = 12.0f;
 		Config.protect_under_voltage = 18.0f;
 		Config.protect_over_voltage = 28.0f;
-		Config.calib_current = 2.0f;
-		Config.calib_voltage = 0.5f;
+		/* R=0.03Ω: 步进 0.1V -> ΔI≈3.3A, 至少 2 点才能差分消死区;
+		 * 目标电流 3A 保证能走 2 级; 24V 下死区 48mV 对小信号影响大 */
+		Config.calib_current = 3.0f;
+		Config.calib_voltage = 1.0f;
 		Config.current_ctrl_bw = 1000.0f;
 		Config.current_ramp_rate = 200.0f;
 		Config.velocity_ramp_rate = 50.0f;

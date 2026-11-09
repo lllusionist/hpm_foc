@@ -471,6 +471,18 @@ class MainWindow(QWidget):
     def _on_motor_profile(self, idx):
         if not self._motor_ready:
             return
+        # 切换会覆盖参数并作废标定, 必须二次确认
+        ret = QMessageBox.question(
+            self, "切换电机配置档",
+            "切换电机配置档会覆盖当前电机参数，并作废标定 / 齿槽表。\n"
+            "切换后必须重新跑「校准」(0x27)。\n\n"
+            "确定切换到「%s」吗？" % self.cb_motor.currentText(),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            self._motor_ready = False
+            self.cb_motor.setCurrentIndex(0 if idx == 1 else 1)
+            self._motor_ready = True
+            return
         self.send(CMD["motor_profile"], 1.0 if idx == 1 else 0.0)
         self.statusbar.flash(
             "已切换电机配置档 → %s；标定已作废，请重新跑「校准」"

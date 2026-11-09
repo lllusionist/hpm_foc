@@ -55,6 +55,10 @@ typedef enum eCalibStep {
 } tCalibStep;
 
 void calibration_start(void);
+/* 当前标定步骤编号 (故障打印用) */
+int calibration_step(void);
+/* 齿槽标定阶段编号 (故障打印用), -1 = 未在跑 */
+int anticogging_step(void);
 void calibration_end(void);
 void calibration_loop(void);
 
