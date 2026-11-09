@@ -11,9 +11,9 @@
 #define MAX_MOTOR_POLE_PAIRS (20U) /* 最大支持的极对数 */
 
 /* 磁链: 开环拖动, 两转速点矢量差分消掉 R 项 */
-#define FLUX_SPEED1 (2.0f * M_PI * 10.0f) /* 低速点 (电角速度 rad/s) */
+#define FLUX_SPEED1 (2.0f * M_PI * 12.0f) /* 低速点 (电角速度 rad/s) */
 /* 高速点: 30Hz 时 0.7A 会电压饱和 */
-#define FLUX_SPEED2 (2.0f * M_PI * 14.0f)
+#define FLUX_SPEED2 (2.0f * M_PI * 30.0f) /* 高速点: 两点拉开, λ 信号 x7 */
 #define FLUX_SETTLE_TIME (1.5f) /* 每个转速稳定时间 (s) */
 /* 每点采样点数 (1.5s, 低速点也够转一圈) */
 #define FLUX_MEAS_SAMPLES (1500U)
@@ -475,7 +475,8 @@ void calibration_loop(void)
 				flux_i_sum = 0.0f;
 				flux_cnt = 0;
 				FOC.calib_iq = Config.calib_current *
-					       FLUX_IQ_GAIN * FLUX_RTEST_RATIO;
+					       Config.calib_flux_iq_gain *
+					       Config.calib_flux_rtest_ratio;
 				mCalibStep = CS_FLUX_RTEST;
 			} else {
 				flux_v2 = v_avg;
@@ -545,7 +546,23 @@ void calibration_loop(void)
 		FOC.calib_mode = false;
 		pwm_output_low_sides();
 
-		if (!flux_sat1 && !flux_sat2 && (flux_i1 > 0.05f) &&
+		/* 拖动没跟上时 λ 一定是错的: 用实测转速和指令转速对比 */
+		bool vel_ok = true;
+		if (Config.pole_pairs > 0) {
+			float exp1 = FLUX_SPEED1 /
+				     (M_2PI * (float)Config.pole_pairs);
+			float exp2 = FLUX_SPEED2 /
+				     (M_2PI * (float)Config.pole_pairs);
+			if ((fabsf(flux_vel1 - exp1) > 0.25f * exp1) ||
+			    (fabsf(flux_vel2 - exp2) > 0.25f * exp2)) {
+				vel_ok = false;
+				printf("flux: 拖动跟不上 (vel %.3f/期望 %.3f, "
+				       "%.3f/期望 %.3f rps), 拒绝 λ\n",
+				       (double)flux_vel1, (double)exp1,
+				       (double)flux_vel2, (double)exp2);
+			}
+		}
+		if (vel_ok && !flux_sat1 && !flux_sat2 && (flux_i1 > 0.05f) &&
 		    (flux_i2 > 0.05f)) {
 			/* y = R·i + ω·λ: 扣掉 ωLi 平方项, 两个转速解 R 和 λ */
 			float t1 =

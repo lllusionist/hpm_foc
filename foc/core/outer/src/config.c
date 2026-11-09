@@ -54,8 +54,11 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		/* 0.03Ω: 0.2V 只有 6.7A 且转动后被反电势吃掉, 抬到 0.3V
 		 * (堵转 10A, 0.86rps 时约 4.5A); 磁链/J 的拖动电流也调大 */
 		Config.calib_drag_v_min = 0.30f;
-		Config.calib_flux_iq_gain = 1.0f;
+		/* 3A 主拖动 + 0.7 降流 = 3.15A, 保证同速校验时转子不卡住
+		 * (实测降到 1.2A 时 0.7rps 会被齿槽卡停) */
+		Config.calib_flux_iq_gain = 1.5f;
 		Config.calib_j_iq_gain = 0.40f;
+		Config.calib_flux_rtest_ratio = 0.7f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
 	} else {
 		/* 4310 云台 (原参数) */
@@ -80,6 +83,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.calib_drag_v_min = 0.20f;
 		Config.calib_flux_iq_gain = 0.8f;
 		Config.calib_j_iq_gain = 0.15f;
+		Config.calib_flux_rtest_ratio = 0.5f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
 	}
 
@@ -129,6 +133,7 @@ uint8_t CONFIG_load_from_flash(void)
 		Config.calib_drag_v_min = 0.20f;
 		Config.calib_flux_iq_gain = 0.8f;
 		Config.calib_j_iq_gain = 0.15f;
+		Config.calib_flux_rtest_ratio = 0.5f;
 	}
 	if (debug)
 		config_debug_overrides();
@@ -204,6 +209,7 @@ void config_init(void)
 	Config.calib_drag_v_min = 0.20f;
 	Config.calib_flux_iq_gain = 0.8f;
 	Config.calib_j_iq_gain = 0.15f;
+	Config.calib_flux_rtest_ratio = 0.5f;
 
 	Config.crc32 = CONFIG_calculate_crc(&Config);
 

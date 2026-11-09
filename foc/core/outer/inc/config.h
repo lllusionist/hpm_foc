@@ -80,6 +80,7 @@ typedef struct {
 	float calib_drag_v_min;	  /* 开环拖动电压下限 (V) */
 	float calib_flux_iq_gain; /* 磁链标定拖动电流 = calib_current × 该系数 */
 	float calib_j_iq_gain;	  /* J 标定加速电流 = calib_current × 该系数 */
+	float calib_flux_rtest_ratio; /* 磁链同速校验的降流比例 */
 } tConfig;
 
 /* 电机配置档编号 */
