@@ -991,6 +991,8 @@ static float cg_sw_prev;  /* 上一拍机械角 */
 static float cg_sw_travel; /* 本方向累计转角 (rad) */
 static float cg_sw_dir;	   /* +1 / -1 */
 static float cg_sw_target; /* 当前速度指令 */
+static float cg_sw_last_travel; /* 上次记录的位置 (判停滞) */
+static uint16_t cg_sw_nomove_ms; /* 连续不动计数 (ms) */
 static uint8_t cg_sw_phase; /* 0=加减速 1=累加 2=收尾 */
 static int32_t cg_sw_sum[2][COGGING_MAP_NUM];
 static uint16_t cg_sw_cnt[2][COGGING_MAP_NUM];
@@ -1138,6 +1140,8 @@ void anticogging_start(void)
 		cg_sw_dir = 1.0f;
 		cg_sw_target = 0.0f;
 		cg_sw_phase = 0U;
+		cg_sw_last_travel = 0.0f;
+		cg_sw_nomove_ms = 0U;
 		printf("cogging: sweep start, %.2f rps x %.0f revs x2 dirs "
 		       "(skip %.1f rev), timeout=%us\n",
 		       (double)CG_SW_RPS, (double)CG_SW_REVS,
@@ -1461,6 +1465,21 @@ static bool cg_sweep_loop(void)
 		float skip = CG_SW_SKIP_REV * M_2PI;
 
 		cg_sw_travel += fabsf(d);
+
+		/* 停滞检测: 5s 内几乎没走就判失败, 别等 300s 超时
+		 * (速度环增益太低/拖不动时就是这种表现) */
+		if (fabsf(cg_sw_travel - cg_sw_last_travel) > 0.02f * M_2PI) {
+			cg_sw_last_travel = cg_sw_travel;
+			cg_sw_nomove_ms = 0U;
+		} else if (++cg_sw_nomove_ms > 5000U) {
+			printf("cogging: sweep 转子 5s 没动 (vel=%.3f) -> "
+			       "检查速度环增益/摩擦\n",
+			       (double)encoder.vel);
+			cg_valid = false;
+			cg_running = false;
+			return true;
+		}
+
 		if (cg_sw_travel >= skip) {
 			int idx = cg_index(mech);
 			int k = (cg_sw_dir > 0.0f) ? 0 : 1;

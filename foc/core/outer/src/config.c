@@ -48,9 +48,11 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.current_ctrl_bw = 1000.0f;
 		Config.current_ramp_rate = 200.0f;
 		Config.velocity_ramp_rate = 50.0f;
-		/* 速度环: 惯量和 4310 不同, 先给保守值, 必须重新整定 */
-		Config.vel_p_gain = 0.05f;
-		Config.vel_i_gain = 0.5f;
+		/* 速度环: Kt 只有 4310 的 1/8.6, 同样的机械带宽需要更大增益.
+		 * 0.05 A/rps 时环路带宽仅 ~1.7 Hz, 连 0.1rps 的齿槽(16.8Hz)都跟
+		 * 不上 -> 齿槽扫描"拖不动". 按 J≈1.5e-4 估: Kp·Kt/J ≈ 40Hz */
+		Config.vel_p_gain = 1.0f;
+		Config.vel_i_gain = 40.0f;
 		/* 0.03Ω: 0.2V 只有 6.7A 且转动后被反电势吃掉, 抬到 0.3V
 		 * (堵转 10A, 0.86rps 时约 4.5A); 磁链/J 的拖动电流也调大 */
 		Config.calib_drag_v_min = 0.30f;
