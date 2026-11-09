@@ -50,6 +50,11 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		/* 速度环: 惯量和 4310 不同, 先给保守值, 必须重新整定 */
 		Config.vel_p_gain = 0.05f;
 		Config.vel_i_gain = 0.5f;
+		/* 0.03Ω: 0.2V 只有 6.7A 且转动后被反电势吃掉, 抬到 0.3V
+		 * (堵转 10A, 0.86rps 时约 4.5A); 磁链/J 的拖动电流也调大 */
+		Config.calib_drag_v_min = 0.30f;
+		Config.calib_flux_iq_gain = 1.0f;
+		Config.calib_j_iq_gain = 0.40f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
 	} else {
 		/* 4310 云台 (原参数) */
@@ -70,6 +75,10 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.velocity_ramp_rate = 50.0f;
 		Config.vel_p_gain = 0.17f;
 		Config.vel_i_gain = 5.3f;
+		/* 8.29Ω: 0.2V 下限 = 24mA 堵转, 拖动够用 */
+		Config.calib_drag_v_min = 0.20f;
+		Config.calib_flux_iq_gain = 0.8f;
+		Config.calib_j_iq_gain = 0.15f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
 	}
 
@@ -78,6 +87,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 	Config.cogging_map_valid = 0;
 	Config.anticogging_enable = 0;
 	Config.motor_cfg_magic = CONFIG_MAGIC;
+	Config.calib_cfg_magic = CONFIG_MAGIC;
 }
 
 /* CRC 覆盖除末尾 crc32 字段以外的全部内容 */
@@ -112,6 +122,12 @@ uint8_t CONFIG_load_from_flash(void)
 	if (Config.motor_cfg_magic != CONFIG_MAGIC) {
 		Config.motor_cfg_magic = CONFIG_MAGIC;
 		Config.motor_profile = MOTOR_PROFILE_4310;
+	}
+	if (Config.calib_cfg_magic != CONFIG_MAGIC) {
+		Config.calib_cfg_magic = CONFIG_MAGIC;
+		Config.calib_drag_v_min = 0.20f;
+		Config.calib_flux_iq_gain = 0.8f;
+		Config.calib_j_iq_gain = 0.15f;
 	}
 	if (debug)
 		config_debug_overrides();
@@ -182,6 +198,11 @@ void config_init(void)
 
 	Config.motor_cfg_magic = CONFIG_MAGIC;
 	Config.motor_profile = MOTOR_PROFILE_4310;
+
+	Config.calib_cfg_magic = CONFIG_MAGIC;
+	Config.calib_drag_v_min = 0.20f;
+	Config.calib_flux_iq_gain = 0.8f;
+	Config.calib_j_iq_gain = 0.15f;
 
 	Config.crc32 = CONFIG_calculate_crc(&Config);
 

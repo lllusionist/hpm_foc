@@ -74,6 +74,12 @@ typedef struct {
 	/* 电机配置档 (同样在 crc32 之后, 由 motor_cfg_magic 校验) */
 	uint32_t motor_cfg_magic;
 	int32_t motor_profile; /* MOTOR_PROFILE_xxx */
+
+	/* 标定拖动参数 (同样在 crc32 之后): 不同电机 R 差 276 倍, 写死不行 */
+	uint32_t calib_cfg_magic;
+	float calib_drag_v_min;	  /* 开环拖动电压下限 (V) */
+	float calib_flux_iq_gain; /* 磁链标定拖动电流 = calib_current × 该系数 */
+	float calib_j_iq_gain;	  /* J 标定加速电流 = calib_current × 该系数 */
 } tConfig;
 
 /* 电机配置档编号 */

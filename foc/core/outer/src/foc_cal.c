@@ -112,9 +112,12 @@ void calibration_start(void)
 	flux_cnt = 0;
 
 	/* 回显实际生效参数, 便于确认配置已下发 */
-	printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm\n",
+	printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm "
+	       "drag_min=%.2fV flux_iq=%.2fA j_iq=%.2fA\n",
 	       Config.calib_current, Config.calib_voltage, CALIB_R_STEP_V,
-	       Config.phase_resistance);
+	       Config.phase_resistance, (double)Config.calib_drag_v_min,
+	       (double)(Config.calib_current * Config.calib_flux_iq_gain),
+	       (double)(Config.calib_current * Config.calib_j_iq_gain));
 
 	mCalibStep = CS_MOTOR_R_START;
 }
@@ -144,10 +147,11 @@ void calibration_loop(void)
 
 	const float ia_meas = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 
+	/* 拖动电压: 高阻电机按 R·I 算, 低阻电机(0.03Ω)必须用电压下限兜底 */
 	float voltage_calc = Config.phase_resistance * Config.calib_current;
 	float drag_v = voltage_calc;
-	if (drag_v < 0.2f)
-		drag_v = 0.2f;
+	if (drag_v < Config.calib_drag_v_min)
+		drag_v = Config.calib_drag_v_min;
 	if (drag_v > (Config.calib_voltage * 0.9f))
 		drag_v = Config.calib_voltage * 0.9f;
 
@@ -391,7 +395,8 @@ void calibration_loop(void)
 	case CS_FLUX_START:
 		Config.flux_linkage = 0;
 		FOC.calib_id = 0;
-		FOC.calib_iq = Config.calib_current * FLUX_IQ_GAIN;
+		FOC.calib_iq =
+		    Config.calib_current * Config.calib_flux_iq_gain;
 		FOC.calib_phase_vel = 0;
 		FOC.calib_angle = 0;
 		FOC.calib_mode = true;
@@ -490,7 +495,8 @@ void calibration_loop(void)
 			       flux_i_a, i_b, flux_vq_a, vq_b,
 			       flux_vel_sum / (float)flux_cnt, flux_r_est);
 
-			FOC.calib_iq = Config.calib_current * FLUX_IQ_GAIN;
+			FOC.calib_iq =
+		    Config.calib_current * Config.calib_flux_iq_gain;
 			flux_v_sum = flux_i_sum = flux_vq_sum = flux_vel_sum =
 			    0.0f;
 			flux_cnt = 0;
@@ -762,7 +768,8 @@ void calibration_loop(void)
 	case CS_MOTOR_J_DEC: {
 		/* 直接驱动(绕开 Controller 指令路径), 角度/角速度用编码器实测 */
 		/* 减速段断电流自由滑行: 反制动 7ms 就过零, 1kHz 采样不够 */
-		float iq = (mCalibStep == CS_MOTOR_J_DEC) ? 0.0f : J_CAL_IQ;
+		float j_iq = Config.calib_current * Config.calib_j_iq_gain;
+		float iq = (mCalibStep == CS_MOTOR_J_DEC) ? 0.0f : j_iq;
 		/* 直接驱动: 角度/角速度用编码器实测, 转子才能自由加速 */
 		FOC.calib_mode = true;
 		FOC.calib_id = 0.0f;
@@ -824,7 +831,8 @@ void calibration_loop(void)
 		    1.5f * (float)Config.pole_pairs * Config.flux_linkage;
 		float J = 0.0f;
 		if (fabsf(da) > 1e-3f)
-			J = kt * J_CAL_IQ / (3.14159265f * da);
+			J = kt * (Config.calib_current * Config.calib_j_iq_gain) /
+		    (3.14159265f * da);
 		printf("J: a+=%.3f a-=%.3f rps/s  Kt=%.5f -> J=%.3e kg.m2\n",
 		       j_slope_acc, j_slope_dec, kt, J);
 		if ((J > 1e-7f) && (J < 1e-1f)) {

@@ -180,7 +180,8 @@ void CONTROLLER_loop(void)
 			uint8_t r = CONFIG_save_to_flash();
 			printf("motor profile: %s Rs=%.3f L=%.1fuH Pn=%ld "
 			       "lam=%.5f CLIM=%.1fA VLIM=%.1frps bw=%.0fHz "
-			       "velkp=%.3f velki=%.2f save=%s\n",
+			       "velkp=%.3f velki=%.2f dragmin=%.2fV "
+			       "fluxiq=%.2fA jiq=%.2fA save=%s\n",
 			       (p == MOTOR_PROFILE_5210) ? "5210" : "4310",
 			       (double)Config.phase_resistance,
 			       (double)(Config.phase_inductance * 1e6f),
@@ -191,6 +192,11 @@ void CONTROLLER_loop(void)
 			       (double)Config.current_ctrl_bw,
 			       (double)Config.vel_p_gain,
 			       (double)Config.vel_i_gain,
+			       (double)Config.calib_drag_v_min,
+			       (double)(Config.calib_current *
+					Config.calib_flux_iq_gain),
+			       (double)(Config.calib_current *
+					Config.calib_j_iq_gain),
 			       (r == 0U) ? "ok" : "fail");
 			printf("motor profile: calibration invalidated, "
 			       "run 0x27 again before use\n");
