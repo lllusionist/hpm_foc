@@ -197,6 +197,22 @@ void ENCODER_loop(void)
 		return;
 	}
 
+	/* 坏帧比例统计: 每秒打一次, 用来判断是偶发干扰还是线束有问题 */
+	encoder.frame_cnt++;
+	{
+		static uint32_t bad_at_last;
+
+		if ((encoder.frame_cnt % 5000U) == 0U) {
+			uint32_t bad = encoder.bad_frame_cnt - bad_at_last;
+
+			if (bad > 0U)
+				printf("enc: bad %lu/5000 frames (%lu%%)\n",
+				       (unsigned long)bad,
+				       (unsigned long)(bad / 50U));
+			bad_at_last = encoder.bad_frame_cnt;
+		}
+	}
+
 	/* 单圈差分做过零修正再累加 */
 	delta = (int32_t)corrected - (int32_t)encoder.count_in_cpr_prev;
 	if (delta > (int32_t)ENCODER_CPR_HALF)
@@ -207,13 +223,7 @@ void ENCODER_loop(void)
 	 * 位翻转的假角度. 一个 5kHz 周期内机械角最大变化按 10rps 算 =
 	 * 1/500 圈, 超过必然是坏帧 -> 丢弃. 坏帧计数定期打印便于定位干扰. */
 	if (abs(delta) > (int32_t)(ENCODER_CPR / 500)) {
-		encoder.bad_frame_cnt++;
-
-		if ((encoder.bad_frame_cnt % 200U) == 1U) {
-			printf("enc: bad frame #%lu (delta=%ld cnt)\n",
-			       (unsigned long)encoder.bad_frame_cnt,
-			       (long)delta);
-		}
+		encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
 
 		return; /* 保留上一拍角度, 不累加、不喂 PLL */
 	}

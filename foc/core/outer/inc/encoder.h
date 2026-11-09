@@ -12,7 +12,9 @@
 #include "task.h"
 
 #define ENCODER_SPI HPM_SPI1
-#define ENCODER_SPI_SCLK_FREQ (10000000UL) /* 芯片上限 16MHz */
+/* 芯片上限 16MHz, 但 10MHz 时长走线/无屏蔽会被开关干扰打挂
+ * (实测坏帧 delta 达 2~8M cnt = 角度高位翻转). 先降到 2MHz 换取裕量 */
+#define ENCODER_SPI_SCLK_FREQ (2000000UL)
 #define ENCODER_CS_GPIO HPM_GPIO0
 #define ENCODER_CS_PORT GPIO_DO_GPIOC
 #define ENCODER_CS_PIN (11U)
@@ -36,6 +38,7 @@
 typedef struct sEncoder {
 	uint8_t need_init; /* 前N次采样只对齐, 不跑 PLL */
 	uint32_t bad_frame_cnt; /* 被合理性检查丢弃的帧数 (SPI 受干扰) */
+	uint32_t frame_cnt;	 /* 总帧数 (坏帧比例用) */
 
 	uint32_t raw;		    /* 传感器原始值 */
 	uint32_t count_in_cpr;	    /* 方向修正后的单圈值 */
