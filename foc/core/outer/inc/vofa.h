@@ -14,9 +14,8 @@
 
 #define MAX_BUFFER_SIZE 1024
 
-/* 采样率 = ADC 中断频率 / VOFA_SAMPLE_DECIM (40k/8=5k), 攒批发出.
- * 40kHz 载波下必须改成 8: 4 分频会变 10kHz, USB CDC 带宽不够会丢数据 */
-#define VOFA_SAMPLE_DECIM 8
+/* 采样率 = ADC 中断频率 / VOFA_SAMPLE_DECIM (20k/4=5k), 攒批发出 */
+#define VOFA_SAMPLE_DECIM 4
 
 void vofa_start(void);
 void vofa_push_sample(void);
