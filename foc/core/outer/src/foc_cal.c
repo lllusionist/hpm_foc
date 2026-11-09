@@ -11,9 +11,9 @@
 #define MAX_MOTOR_POLE_PAIRS (20U) /* 最大支持的极对数 */
 
 /* 磁链: 开环拖动, 两转速点矢量差分消掉 R 项 */
-#define FLUX_SPEED1 (2.0f * M_PI * 12.0f) /* 低速点 (电角速度 rad/s) */
+#define FLUX_SPEED1 (2.0f * M_PI * 20.0f) /* 低速点 (电角速度 rad/s) */
 /* 高速点: 30Hz 时 0.7A 会电压饱和 */
-#define FLUX_SPEED2 (2.0f * M_PI * 30.0f) /* 高速点: 两点拉开, λ 信号 x7 */
+#define FLUX_SPEED2 (2.0f * M_PI * 80.0f) /* 高速点: Δω=377, λ 信号 x3.3 */
 #define FLUX_SETTLE_TIME (1.5f) /* 每个转速稳定时间 (s) */
 /* 每点采样点数 (1.5s, 低速点也够转一圈) */
 #define FLUX_MEAS_SAMPLES (1500U)
@@ -207,7 +207,8 @@ void calibration_loop(void)
 			    ((r_volt + CALIB_R_STEP_V) <=
 			     (Config.calib_voltage * 0.9f))) {
 				/* 未达阈值: 累加本级 ΔI, 继续升压 */
-				if (r_s1 > 0U) {
+				/* 1A 以下死区误差占电压几十 %, 差分 ΔI 偏小 -> 跳过 */
+				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
 					r_di_sum += (Is - r_i1);
 					r_di_cnt++;
 				}
@@ -216,7 +217,7 @@ void calibration_loop(void)
 				r_s1++;
 			} else {
 				/* Rs = Δu / 平均(ΔI) */
-				if (r_s1 > 0U) {
+				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
 					r_di_sum += (Is - r_i1);
 					r_di_cnt++;
 				}

@@ -51,15 +51,16 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		/* 速度环: Kt 只有 4310 的 1/8.6, 同样的机械带宽需要更大增益.
 		 * 0.05 A/rps 时环路带宽仅 ~1.7 Hz, 连 0.1rps 的齿槽(16.8Hz)都跟
 		 * 不上 -> 齿槽扫描"拖不动". 按 J≈1.5e-4 估: Kp·Kt/J ≈ 40Hz */
-		Config.vel_p_gain = 1.0f;
-		Config.vel_i_gain = 40.0f;
+		Config.vel_p_gain = 7.68f;
+		Config.vel_i_gain = 241.2f;
 		/* 0.03Ω: 0.2V 只有 6.7A 且转动后被反电势吃掉, 抬到 0.3V
 		 * (堵转 10A, 0.86rps 时约 4.5A); 磁链/J 的拖动电流也调大 */
 		Config.calib_drag_v_min = 0.30f;
 		/* 3A 主拖动 + 0.7 降流 = 3.15A, 保证同速校验时转子不卡住
 		 * (实测降到 1.2A 时 0.7rps 会被齿槽卡停) */
 		Config.calib_flux_iq_gain = 1.5f;
-		Config.calib_j_iq_gain = 0.40f;
+		/* 1.2A 只有 0.036V, 比死区 48mV 还小 -> J 段转不起来 */
+		Config.calib_j_iq_gain = 1.50f;
 		Config.calib_flux_rtest_ratio = 0.7f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
 	} else {
