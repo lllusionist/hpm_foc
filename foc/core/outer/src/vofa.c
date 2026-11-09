@@ -25,7 +25,8 @@ static void vofa_send_config(void)
 	    "$FOCFG,CLIM=%.5g,VLIM=%.5g,POSKP=%.5g,VELKP=%.5g,VELKI=%.5g,"
 	    "CURBW=%.5g,CURKP=%.5g,CURKI=%.5g,UV=%.5g,OV=%.5g,"
 	    "OP=%ld,INV=%ld,PP=%ld,TW=%.5g,PW=%.5g,VRR=%.5g,CRR=%.5g,"
-	    "PFBW=%.5g,CAL=%ld,R=%.5g,L=%.5g,LAM=%.5g,COG=%ld\n",
+	    "PFBW=%.5g,CAL=%ld,R=%.5g,L=%.5g,LAM=%.5g,COG=%ld,"
+	    "PROF=%ld\n",
 	    Config.current_limit, Config.velocity_limit, Config.pos_p_gain,
 	    Config.vel_p_gain, Config.vel_i_gain, Config.current_ctrl_bw,
 	    Config.current_kp, Config.current_ki, Config.protect_under_voltage,
@@ -35,7 +36,8 @@ static void vofa_send_config(void)
 	    Config.velocity_ramp_rate, Config.current_ramp_rate,
 	    Config.position_filter_bw, (long)Config.calib_valid,
 	    Config.phase_resistance, Config.phase_inductance,
-	    Config.flux_linkage, (long)Config.cogging_map_valid);
+	    Config.flux_linkage, (long)Config.cogging_map_valid,
+	    (long)Config.motor_profile);
 	if (n > 0) {
 		if (n > (int)sizeof(line) - 1)
 			n = (int)sizeof(line) - 1;

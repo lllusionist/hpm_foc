@@ -20,6 +20,64 @@ static void config_debug_overrides(void)
 	Config.position_filter_bw = 200.0f; /* 位置输入滤波加快 (位置模式用) */
 }
 
+/*
+ * 电机配置档: 一键切换两台电机的标称参数.
+ * 只改"参数", 不改 PWM 频率/采样方式/硬件量程; 切换后必须重新标定
+ * (编码器零位/极对数/线性度表都属于具体电机, 所以 calib_valid 置 0).
+ */
+void CONFIG_apply_motor_profile(int32_t profile)
+{
+	if (profile == MOTOR_PROFILE_5210) {
+		/* 5210: KV300, R=0.03Ω, L=9µH, 额定 44A (本板只能到 ±16.5A) */
+		Config.phase_resistance = 0.030f;
+		Config.phase_inductance = 9.0e-6f;
+		Config.pole_pairs = 7; /* 12N14P; 必须用 0x27 标定确认 */
+		/* Kt = 9.55/KV = 0.0318 N·m/A -> λ = Kt/(1.5·Pn) */
+		Config.flux_linkage = 0.003031f;
+		Config.current_limit = 8.0f;
+		Config.velocity_limit = 40.0f;
+		Config.protect_over_current = 10.0f;
+		Config.protect_i_bus_max = 10.0f;
+		Config.protect_under_voltage = 18.0f;
+		Config.protect_over_voltage = 28.0f;
+		Config.calib_current = 2.0f;
+		Config.calib_voltage = 0.5f;
+		Config.current_ctrl_bw = 1000.0f;
+		Config.current_ramp_rate = 200.0f;
+		Config.velocity_ramp_rate = 50.0f;
+		/* 速度环: 惯量和 4310 不同, 先给保守值, 必须重新整定 */
+		Config.vel_p_gain = 0.05f;
+		Config.vel_i_gain = 0.5f;
+		Config.motor_profile = MOTOR_PROFILE_5210;
+	} else {
+		/* 4310 云台 (原参数) */
+		Config.phase_resistance = 8.29f;
+		Config.phase_inductance = 0.0034f;
+		Config.pole_pairs = 14;
+		Config.flux_linkage = 0.013024f;
+		Config.current_limit = 1.5f;
+		Config.velocity_limit = 30.0f;
+		Config.protect_over_current = 2.0f;
+		Config.protect_i_bus_max = 1.5f;
+		Config.protect_under_voltage = 18.0f;
+		Config.protect_over_voltage = 28.0f;
+		Config.calib_current = 0.5f;
+		Config.calib_voltage = 10.0f;
+		Config.current_ctrl_bw = 300.0f;
+		Config.current_ramp_rate = 25.0f;
+		Config.velocity_ramp_rate = 50.0f;
+		Config.vel_p_gain = 0.17f;
+		Config.vel_i_gain = 5.3f;
+		Config.motor_profile = MOTOR_PROFILE_4310;
+	}
+
+	/* 换电机后这些都不再有效 */
+	Config.calib_valid = 0;
+	Config.cogging_map_valid = 0;
+	Config.anticogging_enable = 0;
+	Config.motor_cfg_magic = CONFIG_MAGIC;
+}
+
 /* CRC 覆盖除末尾 crc32 字段以外的全部内容 */
 uint32_t CONFIG_calculate_crc(const tConfig *cfg)
 {
@@ -48,6 +106,11 @@ uint8_t CONFIG_load_from_flash(void)
 		return 3;
 
 	Config = tmp;
+	/* 旧 Flash 记录里 crc32 之后是垃圾值: 用 magic 判定后套默认 */
+	if (Config.motor_cfg_magic != CONFIG_MAGIC) {
+		Config.motor_cfg_magic = CONFIG_MAGIC;
+		Config.motor_profile = MOTOR_PROFILE_4310;
+	}
 	if (debug)
 		config_debug_overrides();
 	return 0;
@@ -114,6 +177,9 @@ void config_init(void)
 	Config.current_gain_magic = 0;
 	Config.current_kp = 0.0f;
 	Config.current_ki = 0.0f;
+
+	Config.motor_cfg_magic = CONFIG_MAGIC;
+	Config.motor_profile = MOTOR_PROFILE_4310;
 
 	Config.crc32 = CONFIG_calculate_crc(&Config);
 

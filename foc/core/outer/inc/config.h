@@ -70,11 +70,21 @@ typedef struct {
 	uint32_t current_gain_magic; /* current_kp/ki 有效标志 */
 	float current_kp;	     /* 电流环 Kp（V/A） */
 	float current_ki;	     /* 电流环 Ki（V/(A·s)） */
+
+	/* 电机配置档 (同样在 crc32 之后, 由 motor_cfg_magic 校验) */
+	uint32_t motor_cfg_magic;
+	int32_t motor_profile; /* MOTOR_PROFILE_xxx */
 } tConfig;
+
+/* 电机配置档编号 */
+#define MOTOR_PROFILE_4310 0 /* 云台 4310: 8.29Ω/3.4mH/14 对极/0.9A */
+#define MOTOR_PROFILE_5210 1 /* 航模 5210: 0.03Ω/9µH/KV300/44A */
 
 extern tConfig Config;
 
 void config_init(void);
+/* 套用电机配置档 (只改参数, 调用方负责重算电流环增益/存 Flash) */
+void CONFIG_apply_motor_profile(int32_t profile);
 uint32_t CONFIG_calculate_crc(const tConfig *cfg);
 uint8_t CONFIG_save_to_flash(void);
 uint8_t CONFIG_load_from_flash(void);

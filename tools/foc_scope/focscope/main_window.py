@@ -185,6 +185,20 @@ class MainWindow(QWidget):
             "位置保持法 (0x28): 位置环把转子锁在每 0.7° 一格, 停稳后取 64 点平均,\n"
             "正反各扫一遍。约 2~4 分钟, 结果噪声较大 (单点约 3 mA)。\n"
             "保留作备用/对比: 电机行程受限、无法连续转圈时用这个")
+        # 电机配置档 (固件 0x5F): 一键切换标称参数, 切换后会作废标定
+        h.addWidget(QLabel("电机"))
+        self.cb_motor = QComboBox()
+        self.cb_motor.addItems(["4310 云台", "5210 航模"])
+        self.cb_motor.setToolTip(
+            "电机配置档 (0x5F):\n"
+            "  4310 云台: 8.29Ω / 3.4mH / 14 对极 / 0.9A / 带宽 300Hz\n"
+            "  5210 航模: 0.03Ω / 9µH / KV300 / 44A / 带宽 1000Hz\n"
+            "⚠ 切换会作废标定 (编码器零位/极对数都变了), 必须重新跑 0x27")
+        self.cb_motor.setFixedWidth(96)
+        h.addWidget(self.cb_motor)
+        self._motor_ready = False
+        self.cb_motor.currentIndexChanged.connect(self._on_motor_profile)
+
         self.btn_enable = QPushButton("使能")
         self.btn_enable.setObjectName("Toggle")
         self.btn_enable.setCheckable(True)
@@ -454,6 +468,15 @@ class MainWindow(QWidget):
         if self._mode is not None:
             self._apply_target(self._mode)
 
+    def _on_motor_profile(self, idx):
+        if not self._motor_ready:
+            return
+        self.send(CMD["motor_profile"], 1.0 if idx == 1 else 0.0)
+        self.statusbar.flash(
+            "已切换电机配置档 → %s；标定已作废，请重新跑「校准」"
+            % self.cb_motor.currentText())
+        QTimer.singleShot(600, self.request_config)
+
     def _apply_device_config(self, line):
         if not line.startswith("$FOCFG"):
             return
@@ -496,6 +519,10 @@ class MainWindow(QWidget):
             extra.append("摩擦=%.0fmA" % (kv["FRIC"] * 1000.0))
         if "CAL" in kv:
             extra.append("标定%s" % ("有效" if kv["CAL"] > 0.5 else "无效"))
+        if "PROF" in kv:
+            self._motor_ready = False
+            self.cb_motor.setCurrentIndex(1 if kv["PROF"] > 0.5 else 0)
+            self._motor_ready = True
         if "COG" in kv:
             extra.append("齿槽表%s" % ("有效" if kv["COG"] > 0.5 else "无效"))
         kvk = kv.get("CURKI")

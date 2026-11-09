@@ -38,6 +38,7 @@ void CONTROLLER_init(void)
 	Controller.op_mode_pending = false;
 	Controller.home_pending = false;
 	Controller.config_cmd_pending = 0;
+	Controller.motor_profile_pending = -1;
 
 	CONTROLLER_update_input_pos_filter_gain(Config.position_filter_bw);
 }
@@ -164,6 +165,35 @@ void CONTROLLER_loop(void)
 		if (Controller.home_pending) {
 			Controller.home_pending = false;
 			CONTROLLER_set_home();
+		}
+	}
+
+	/* 电机配置档切换: 必须失能状态, 套用后重算电流环增益并存 Flash */
+	if (Controller.motor_profile_pending >= 0) {
+		int32_t p = Controller.motor_profile_pending;
+		Controller.motor_profile_pending = -1;
+		if (FOC.is_armed) {
+			printf("motor profile: armed, refused\n");
+		} else {
+			CONFIG_apply_motor_profile(p);
+			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
+			uint8_t r = CONFIG_save_to_flash();
+			printf("motor profile: %s Rs=%.3f L=%.1fuH Pn=%ld "
+			       "lam=%.5f CLIM=%.1fA VLIM=%.1frps bw=%.0fHz "
+			       "velkp=%.3f velki=%.2f save=%s\n",
+			       (p == MOTOR_PROFILE_5210) ? "5210" : "4310",
+			       (double)Config.phase_resistance,
+			       (double)(Config.phase_inductance * 1e6f),
+			       (long)Config.pole_pairs,
+			       (double)Config.flux_linkage,
+			       (double)Config.current_limit,
+			       (double)Config.velocity_limit,
+			       (double)Config.current_ctrl_bw,
+			       (double)Config.vel_p_gain,
+			       (double)Config.vel_i_gain,
+			       (r == 0U) ? "ok" : "fail");
+			printf("motor profile: calibration invalidated, "
+			       "run 0x27 again before use\n");
 		}
 	}
 

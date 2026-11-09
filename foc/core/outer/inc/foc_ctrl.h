@@ -38,6 +38,7 @@ typedef struct sController {
 	volatile tControlMode op_mode_req;
 	volatile bool home_pending;
 	volatile uint8_t config_cmd_pending; /* 1=保存 2=恢复默认 */
+	volatile int32_t motor_profile_pending; /* >=0: 待套用的配置档 */
 } tController;
 
 extern tController Controller;

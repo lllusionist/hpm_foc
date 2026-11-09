@@ -123,6 +123,13 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 	}
 
+	case USB_CMD_SET_MOTOR_PROFILE: {
+		float p = data_to_float(&frame->data[0]);
+		Controller.motor_profile_pending =
+		    (p > 0.5f) ? MOTOR_PROFILE_5210 : MOTOR_PROFILE_4310;
+		break;
+	}
+
 	case USB_CMD_SET_CUR_BW: {
 		float bw = data_to_float(&frame->data[0]);
 		if (bw < 50.0f)
