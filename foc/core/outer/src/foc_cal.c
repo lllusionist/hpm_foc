@@ -158,6 +158,22 @@ void calibration_loop(void)
 	float calib_phase_vel = 12.0f * M_PI;
 	float total_calib_cycles = 14.0f;
 
+	/* 开环拖动阶段每 300ms 打一次: 实际电压/电流/转速 —— 判断"拖不动"到底是
+	 * 电流不够还是相序/方向/极对数不对 */
+	if ((mCalibStep == CS_DIR_PP_LOOP) ||
+	    (mCalibStep == CS_ENCODER_CW_LOOP) ||
+	    (mCalibStep == CS_ENCODER_CCW_LOOP)) {
+		static uint32_t drag_dbg_cnt;
+
+		if (++drag_dbg_cnt >= 300U) {
+			drag_dbg_cnt = 0;
+			printf("drag: v=%.3fV I=%.2fA vel=%.3f rps "
+			       "elec=%.2f rad\n",
+			       (double)drag_v, (double)ia_meas,
+			       (double)encoder.vel, (double)phase_set);
+		}
+	}
+
 	switch (mCalibStep) {
 	case CS_MOTOR_R_START:
 		loop_count = 0;
