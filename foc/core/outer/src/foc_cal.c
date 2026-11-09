@@ -1146,13 +1146,19 @@ void anticogging_start(void)
 {
 	cg_pos_p_save = Config.pos_p_gain;
 
-	if (!Config.calib_valid || (Config.pole_pairs <= 0)) {
-		printf("cogging: refused, calib_valid=%d pole_pairs=%ld "
-		       "-> run 0x27 to completion first\n",
-		       (int)Config.calib_valid, (long)Config.pole_pairs);
+	/* 硬要求只有极对数: 齿槽扫描靠速度环拖动, 需要正确的电角度换算.
+	 * calib_valid 只是"标定走完"的印章, 标定反复中断时不该把扫描一起锁死,
+	 * 降级为警告 (编码器零位可能不准 -> 换相有偏差, 但仍然会转). */
+	if (Config.pole_pairs <= 0) {
+		printf("cogging: refused, pole_pairs=%ld -> run 0x27 "
+		       "to measure pole pairs first\n",
+		       (long)Config.pole_pairs);
 		cg_running = false;
 		return;
 	}
+	if (!Config.calib_valid)
+		printf("cogging: WARN calib_valid=0 (标定未走完), "
+		       "编码器零位可能不准, 仍尝试扫描\n");
 
 	foc_arm();
 	FOC.calib_mode = false;
