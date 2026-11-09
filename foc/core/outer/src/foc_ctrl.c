@@ -388,8 +388,13 @@ void CONTROLLER_loop(void)
 		Controller.vel_integrator *= 0.99f;
 	else
 		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
+	/* 齿槽扫描要在 0.1rps 下克服静摩擦: 误差只有 0.1rps, P 项仅 0.77A,
+	 * 若积分器还卡在 ±0.5A 就永远到不了 2~3A 的起动电流 -> 转子不动.
+	 * 其它工况仍用 ±0.5A 防积分饱和. */
+	float vint_lim =
+	    (foc_get_stage() == ANTICOGGING) ? 4.0f : 0.5f;
 	Controller.vel_integrator =
-	    CLAMP(Controller.vel_integrator, -0.5f, 0.5f);
+	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
 }
 
 /* 读当前摩擦前馈开关状态 (标定前后保存/恢复用) */

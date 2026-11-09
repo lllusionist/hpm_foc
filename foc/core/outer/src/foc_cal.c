@@ -1483,10 +1483,11 @@ static bool cg_sweep_loop(void)
 
 	if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
 		printf("cogging: sweep dir=%+d trav=%.2f rev vel=%.3f "
-		       "iq=%.3f\n",
+		       "iq=%.3f enc_bad=%lu\n",
 		       (cg_sw_dir > 0.0f) ? 1 : -1,
 		       (double)(cg_sw_travel / M_2PI), (double)encoder.vel,
-		       (double)FOC.Iq_filt);
+		       (double)FOC.Iq_filt,
+		       (unsigned long)encoder.bad_frame_cnt);
 	}
 
 	if (cg_sw_phase == 0U) { /* 加减速到目标转速 */
