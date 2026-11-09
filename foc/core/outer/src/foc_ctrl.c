@@ -199,7 +199,11 @@ void CONTROLLER_loop(void)
 					Config.calib_j_iq_gain),
 			       (r == 0U) ? "ok" : "fail");
 			printf("motor profile: calibration invalidated, "
-			       "run 0x27 again before use\n");
+			       "run 0x27 again before use");
+			if (Config.pole_pairs <= 0)
+				printf(" (Pn/lambda unknown -> 0x27 dir_pp "
+				       "will measure them)");
+			printf("\n");
 		}
 	}
 

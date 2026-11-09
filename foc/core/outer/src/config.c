@@ -31,9 +31,10 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		/* 5210: KV300, R=0.03Ω, L=9µH, 额定 44A (本板只能到 ±16.5A) */
 		Config.phase_resistance = 0.030f;
 		Config.phase_inductance = 9.0e-6f;
-		Config.pole_pairs = 7; /* 12N14P; 必须用 0x27 标定确认 */
-		/* Kt = 9.55/KV = 0.0318 N·m/A -> λ = Kt/(1.5·Pn) */
-		Config.flux_linkage = 0.003031f;
+		/* 极对数/磁链未知: 不猜, 由 0x27 的 dir_pp(测极对数+方向) 和
+		 * flux 步骤实测后覆盖. 标定前这两项为 0 不影响 R/L/PP 标定本身 */
+		Config.pole_pairs = 0;
+		Config.flux_linkage = 0.0f;
 		Config.current_limit = 8.0f;
 		Config.velocity_limit = 40.0f;
 		Config.protect_over_current = 12.0f;
