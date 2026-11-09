@@ -203,6 +203,21 @@ void ENCODER_loop(void)
 		delta -= (int32_t)ENCODER_CPR;
 	else if (delta < -(int32_t)ENCODER_CPR_HALF)
 		delta += (int32_t)ENCODER_CPR;
+	/* 帧合理性检查: MT6835 帧里没有可用的校验, SPI 受开关干扰时会读到
+	 * 位翻转的假角度. 一个 5kHz 周期内机械角最大变化按 10rps 算 =
+	 * 1/500 圈, 超过必然是坏帧 -> 丢弃. 坏帧计数定期打印便于定位干扰. */
+	if (abs(delta) > (int32_t)(ENCODER_CPR / 500)) {
+		encoder.bad_frame_cnt++;
+
+		if ((encoder.bad_frame_cnt % 200U) == 1U) {
+			printf("enc: bad frame #%lu (delta=%ld cnt)\n",
+			       (unsigned long)encoder.bad_frame_cnt,
+			       (long)delta);
+		}
+
+		return; /* 保留上一拍角度, 不累加、不喂 PLL */
+	}
+
 	encoder.shadow_count += (int64_t)delta;
 	encoder.count_in_cpr_prev = corrected;
 
