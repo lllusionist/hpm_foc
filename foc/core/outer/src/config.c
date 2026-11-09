@@ -63,6 +63,8 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		 * 拉到 ~16rps -> J_ACC 段过流. 取 1.8A 折中 */
 		Config.calib_j_iq_gain = 0.60f;
 		Config.calib_flux_rtest_ratio = 0.7f;
+		/* 0.1rps 时 5210 会粘滑(实测速度 0.068rps±554%), 0.3rps 才稳 */
+		Config.cog_sweep_rps = 0.30f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
 	} else {
 		/* 4310 云台 (原参数) */
@@ -88,6 +90,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.calib_flux_iq_gain = 0.8f;
 		Config.calib_j_iq_gain = 0.15f;
 		Config.calib_flux_rtest_ratio = 0.5f;
+		Config.cog_sweep_rps = 0.10f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
 	}
 
@@ -138,6 +141,7 @@ uint8_t CONFIG_load_from_flash(void)
 		Config.calib_flux_iq_gain = 0.8f;
 		Config.calib_j_iq_gain = 0.15f;
 		Config.calib_flux_rtest_ratio = 0.5f;
+		Config.cog_sweep_rps = 0.10f;
 	}
 	if (debug)
 		config_debug_overrides();
@@ -214,6 +218,7 @@ void config_init(void)
 	Config.calib_flux_iq_gain = 0.8f;
 	Config.calib_j_iq_gain = 0.15f;
 	Config.calib_flux_rtest_ratio = 0.5f;
+	Config.cog_sweep_rps = 0.10f;
 
 	Config.crc32 = CONFIG_calculate_crc(&Config);
 

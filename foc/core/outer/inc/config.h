@@ -81,6 +81,7 @@ typedef struct {
 	float calib_flux_iq_gain; /* 磁链标定拖动电流 = calib_current × 该系数 */
 	float calib_j_iq_gain;	  /* J 标定加速电流 = calib_current × 该系数 */
 	float calib_flux_rtest_ratio; /* 磁链同速校验的降流比例 */
+	float cog_sweep_rps;	  /* 齿槽扫描速度 (rps) */
 } tConfig;
 
 /* 电机配置档编号 */

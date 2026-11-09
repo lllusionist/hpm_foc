@@ -1019,7 +1019,7 @@ void calibration_loop(void)
  * 齿槽位置锁定(同向叠加), 摩擦随方向反号(相消) */
 /* 扫描转速要让齿槽频率落在速度环带宽内: 0.1rps 时 84 阶=8.4Hz 可信;
  * 0.3rps 时 25Hz 相位滞后, 实测该表对 84 阶无效 */
-#define CG_SW_RPS 0.10f	    /* 扫描转速 (rps). 试过 0.05: 84 阶只从 -29% 改善到 -40%,
+#define CG_SW_RPS_DEFAULT 0.10f	    /* 扫描转速 (rps). 试过 0.05: 84 阶只从 -29% 改善到 -40%,
 				 * 但会粘滑(vel 频繁掉到 0)、14 阶反而从 -84% 退到 -64%,
 				 * 总 std 仅 -19.2% -> -20.7% (在测量噪声内). 回到 0.1 更稳也更快 */
 #define CG_SW_REVS 4.0f	    /* 每方向累加圈数 (0.1rps: 4.5圈x2 = 90s, 每箱 ~78 点) */
@@ -1193,7 +1193,7 @@ void anticogging_start(void)
 		cg_sw_nomove_ms = 0U;
 		printf("cogging: sweep start, %.2f rps x %.0f revs x2 dirs "
 		       "(skip %.1f rev), timeout=%us\n",
-		       (double)CG_SW_RPS, (double)CG_SW_REVS,
+		       (double)Config.cog_sweep_rps, (double)CG_SW_REVS,
 		       (double)CG_SW_SKIP_REV, (unsigned)CG_TIMEOUT_S);
 		return;
 	}
@@ -1490,9 +1490,29 @@ static bool cg_sweep_loop(void)
 		       (unsigned long)encoder.bad_frame_cnt);
 	}
 
+	/* 粘滑检测: 0.1rps 时静/动摩擦差会让转子"跳一下停一下",
+	 * 采到的电流是历史相关而不是位置相关 -> 扫出来的表没用 */
+	if (cg_sw_phase == 1U) {
+		static uint16_t slip_ms;
+	
+		if (fabsf(encoder.vel - cg_sw_target) >
+		    0.5f * fabsf(cg_sw_target)) {
+			if (++slip_ms > 3000U) {
+				printf("cogging: 速度粘滑 (vel=%.3f tgt=%.3f), "
+				       "\u8868\u4e0d\u53ef\u4fe1 -> \u505c\u6b62; \u8c03\u5927 cog_sweep_rps\n",
+				       (double)encoder.vel, (double)cg_sw_target);
+				cg_valid = false;
+				cg_running = false;
+				return true;
+			}
+		} else {
+			slip_ms = 0U;
+		}
+	}
+	
 	if (cg_sw_phase == 0U) { /* 加减速到目标转速 */
 		float step = CG_SW_RAMP / (float)CAL_LOOP_HZ;
-		float tgt = cg_sw_dir * CG_SW_RPS;
+		float tgt = cg_sw_dir * Config.cog_sweep_rps;
 
 		if (cg_sw_target < tgt) {
 			cg_sw_target += step;
