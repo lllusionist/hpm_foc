@@ -11,9 +11,9 @@
 #define MAX_MOTOR_POLE_PAIRS (20U) /* 最大支持的极对数 */
 
 /* 磁链: 开环拖动, 两转速点矢量差分消掉 R 项 */
-#define FLUX_SPEED1 (2.0f * M_PI * 20.0f) /* 低速点 (电角速度 rad/s) */
+#define FLUX_SPEED1 (2.0f * M_PI * 10.0f) /* 低速点: 80Hz 电时 4.5A 拉不住, 丢步 */
 /* 高速点: 30Hz 时 0.7A 会电压饱和 */
-#define FLUX_SPEED2 (2.0f * M_PI * 80.0f) /* 高速点: Δω=377, λ 信号 x3.3 */
+#define FLUX_SPEED2 (2.0f * M_PI * 14.0f) /* 高速点: 回到不丢步范围 */
 #define FLUX_SETTLE_TIME (1.5f) /* 每个转速稳定时间 (s) */
 /* 每点采样点数 (1.5s, 低速点也够转一圈) */
 #define FLUX_MEAS_SAMPLES (1500U)
@@ -181,6 +181,25 @@ void calibration_loop(void)
 			       "elec=%.2f rad\n",
 			       (double)drag_v, (double)ia_meas,
 			       (double)encoder.vel, (double)phase_set);
+		}
+	}
+
+	/* 磁链/极对数/编码器都靠开环拖动: 实测转速跟不上指令 = 丢步.
+	 * 丢步时的 V/I 全是错的, 直接打出来, 别让它悄悄污染 λ */
+	if ((mCalibStep >= CS_FLUX_RAMP1) && (mCalibStep <= CS_FLUX_MEAS2) &&
+	    (Config.pole_pairs > 0) && (FOC.calib_phase_vel > 1.0f)) {
+		static uint32_t slip_dbg;
+
+		float exp_rps = FOC.calib_phase_vel /
+				(M_2PI * (float)Config.pole_pairs);
+		float dev = fabsf(encoder.vel - exp_rps) / exp_rps;
+
+		if (dev > 0.25f) {
+			if ((slip_dbg++ % 200U) == 0U)
+				printf("flux: SLIP vel=%.3f exp=%.3f rps "
+				       "(dev %.0f%%)\n",
+				       (double)encoder.vel, (double)exp_rps,
+				       (double)(dev * 100.0f));
 		}
 	}
 
