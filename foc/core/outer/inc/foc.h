@@ -101,7 +101,10 @@ typedef struct {
 	/* 校准用: 开环电流模式 (校准任务下发角度, 中断里跑电流环) */
 	volatile bool calib_mode;
 	volatile float calib_angle;	/* 电角度 (rad) */
-	volatile float calib_phase_vel; /* 电角速度 (rad/s) */
+	volatile float calib_phase_vel;
+	/* 1 = 由 20kHz 中断按 calib_phase_vel 推进 calib_angle (磁链标定用):
+	 * 1kHz 推进在 500rad/s 时会有 29° 阶梯误差, d 轴电压被拉偏 */
+	volatile bool calib_adv_angle; /* 电角速度 (rad/s) */
 	volatile float calib_id;	/* d 轴目标 (A) */
 	volatile float calib_iq;	/* q 轴目标 (A) */
 

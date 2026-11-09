@@ -360,6 +360,14 @@ void foc_adc_callback(void)
 
 	/* 校准: 开环电流模式 (角度由校准状态机下发) */
 	if (FOC.calib_mode) {
+		if (FOC.calib_adv_angle) {
+			FOC.calib_angle +=
+			    FOC.calib_phase_vel * CURRENT_MEASURE_PERIOD;
+			while (FOC.calib_angle >= M_2PI)
+				FOC.calib_angle -= M_2PI;
+			while (FOC.calib_angle < 0.0f)
+				FOC.calib_angle += M_2PI;
+		}
 		FOC_current(FOC.calib_id, FOC.calib_iq, FOC.calib_angle,
 			    FOC.calib_phase_vel);
 		return;
@@ -403,6 +411,7 @@ void foc_init(void)
 	FOC.calib_iq = 0;
 
 	FOC.calib_vinj_mode = false;
+	FOC.calib_adv_angle = false;
 	FOC.vinj_omega = 0;
 	FOC.vinj_amp = 0;
 	FOC.vinj_dc = 0;

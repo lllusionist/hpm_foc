@@ -412,6 +412,8 @@ void calibration_loop(void)
 
 	case CS_FLUX_START:
 		Config.flux_linkage = 0;
+		/* 角度改由 20kHz 中断推进, 消除 1kHz 阶梯误差 */
+		FOC.calib_adv_angle = true;
 		FOC.calib_id = 0;
 		FOC.calib_iq =
 		    Config.calib_current * Config.calib_flux_iq_gain;
@@ -428,7 +430,6 @@ void calibration_loop(void)
 		    FLUX_SPEED1 / (FLUX_SETTLE_TIME * (float)CAL_LOOP_HZ);
 		if (FOC.calib_phase_vel > FLUX_SPEED1)
 			FOC.calib_phase_vel = FLUX_SPEED1;
-		FOC.calib_angle += FOC.calib_phase_vel / (float)CAL_LOOP_HZ;
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
 		if (time > FLUX_SETTLE_TIME) {
@@ -444,7 +445,6 @@ void calibration_loop(void)
 
 	case CS_FLUX_MEAS1:
 	case CS_FLUX_MEAS2: {
-		FOC.calib_angle += FOC.calib_phase_vel / (float)CAL_LOOP_HZ;
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
 
@@ -494,7 +494,6 @@ void calibration_loop(void)
 
 	case CS_FLUX_RTEST: {
 		/* 同转速变电流: ΔVq = R·ΔIq, 反电势项抵消, 用于校验 R */
-		FOC.calib_angle += FOC.calib_phase_vel / (float)CAL_LOOP_HZ;
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
 
@@ -530,7 +529,6 @@ void calibration_loop(void)
 				       (FLUX_SETTLE_TIME * (float)CAL_LOOP_HZ);
 		if (FOC.calib_phase_vel > FLUX_SPEED2)
 			FOC.calib_phase_vel = FLUX_SPEED2;
-		FOC.calib_angle += FOC.calib_phase_vel / (float)CAL_LOOP_HZ;
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
 		if (time > FLUX_SETTLE_TIME) {
@@ -546,6 +544,7 @@ void calibration_loop(void)
 
 	case CS_FLUX_END: {
 		FOC.calib_mode = false;
+		FOC.calib_adv_angle = false;
 		pwm_output_low_sides();
 
 		/* 拖动没跟上时 λ 一定是错的: 用实测转速和指令转速对比 */
