@@ -127,7 +127,16 @@ void calibration_end(void)
 {
 	FOC.calib_mode = false;
 	FOC.calib_vinj_mode = false;
+	FOC.calib_adv_angle = false;
 	foc_disarm();
+
+	/* 没走到最后的状态 -> 本次标定作废(calib_valid=0), 打印停在哪一步 */
+	if (!Config.calib_valid) {
+		printf("calib: ABORTED at step %d (calib_valid=0, "
+		       "\u5148\u8dd1\u5b8c 0x27 \u624d\u80fd\u7528\u9f7f\u69fd/\u95ed\u73af)\n",
+		       (int)mCalibStep);
+	}
+
 	mCalibStep = CS_NULL;
 
 	/* 编码器零位重算后旧齿槽表相位失效, 必须作废 */
@@ -1119,7 +1128,9 @@ void anticogging_start(void)
 	cg_pos_p_save = Config.pos_p_gain;
 
 	if (!Config.calib_valid || (Config.pole_pairs <= 0)) {
-		printf("cogging: calibration required first\n");
+		printf("cogging: refused, calib_valid=%d pole_pairs=%ld "
+		       "-> run 0x27 to completion first\n",
+		       (int)Config.calib_valid, (long)Config.pole_pairs);
 		cg_running = false;
 		return;
 	}
