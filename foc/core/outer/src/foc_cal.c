@@ -53,7 +53,8 @@ static float flux_vd_a, flux_vd_b; /* 两个转速点的 Vd 均值 */
 /* J 标定: 加速->自由滑行, 摩擦相减: J = Kt·I/(π·(a+ - a-)) */
 #define J_CAL_IQ (Config.calib_current * 0.15f) /* 加速测试电流 (A) */
 #define J_CAL_SAMPLES (300U)		       /* 每段采样点数 (1kHz -> 0.3s) */
-#define J_SPINUP_RPS (3.0f) /* 起转目标 (rps), 保证两段都在正转 */
+#define J_SPINUP_RPS (2.0f) /* 起转目标 (rps): 太高会让 ACC 段冲到过流 */
+#define J_SPINUP_MAX_RPS 12.0f /* 加速段转速上限: 超过就放弃, 防过流 */
 static float j_sum_t, j_sum_v, j_sum_tv, j_sum_tt;
 static uint32_t j_cnt;
 static float j_slope_acc, j_slope_dec;
@@ -804,6 +805,18 @@ void calibration_loop(void)
 		/* 减速段断电流自由滑行: 反制动 7ms 就过零, 1kHz 采样不够 */
 		float j_iq = Config.calib_current * Config.calib_j_iq_gain;
 		float iq = (mCalibStep == CS_MOTOR_J_DEC) ? 0.0f : j_iq;
+		
+		/* 转速上限保护: 小惯量电机 0.3s 加速会冲很高, 过流前先收手 */
+		if ((mCalibStep != CS_MOTOR_J_SPINUP) &&
+		    (fabsf(encoder.vel) > J_SPINUP_MAX_RPS)) {
+			FOC.calib_iq = 0.0f;
+			printf("J: 转速 %.2f rps 超过 %.0f, 放弃本次 J\n",
+			       (double)encoder.vel, (double)J_SPINUP_MAX_RPS);
+			j_slope_acc = 0.0f;
+			j_slope_dec = 0.0f;
+			mCalibStep = CS_MOTOR_J_END;
+			break;
+		}
 		/* 直接驱动: 角度/角速度用编码器实测, 转子才能自由加速 */
 		FOC.calib_mode = true;
 		FOC.calib_id = 0.0f;

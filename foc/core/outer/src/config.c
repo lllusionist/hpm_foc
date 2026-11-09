@@ -59,8 +59,9 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		/* 3A 主拖动 + 0.7 降流 = 3.15A, 保证同速校验时转子不卡住
 		 * (实测降到 1.2A 时 0.7rps 会被齿槽卡停) */
 		Config.calib_flux_iq_gain = 1.5f;
-		/* 1.2A 只有 0.036V, 比死区 48mV 还小 -> J 段转不起来 */
-		Config.calib_j_iq_gain = 1.50f;
+		/* 1.2A 转不起来(0.036V < 死区 48mV); 但 4.5A 在 0.3s 内能把转速
+		 * 拉到 ~16rps -> J_ACC 段过流. 取 1.8A 折中 */
+		Config.calib_j_iq_gain = 0.60f;
 		Config.calib_flux_rtest_ratio = 0.7f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
 	} else {
