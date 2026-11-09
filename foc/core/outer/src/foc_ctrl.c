@@ -217,8 +217,11 @@ void CONTROLLER_loop(void)
 			       (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
 		} else if (cmd == 2U) {
 			config_init();
+			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 			CONFIG_save_to_flash();
-			printf("cfg reset\n");
+			printf("cfg reset (profile=%ld, bw=%.0fHz)\n",
+			       (long)Config.motor_profile,
+			       (double)Config.current_ctrl_bw);
 		}
 	}
 

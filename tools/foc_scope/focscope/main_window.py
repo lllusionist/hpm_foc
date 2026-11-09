@@ -196,8 +196,10 @@ class MainWindow(QWidget):
             "⚠ 切换会作废标定 (编码器零位/极对数都变了), 必须重新跑 0x27")
         self.cb_motor.setFixedWidth(96)
         h.addWidget(self.cb_motor)
-        self._motor_ready = False
-        self.cb_motor.currentIndexChanged.connect(self._on_motor_profile)
+        self._motor_req = None
+        # 用 activated(用户操作才触发): 重复选同一项也能重新下发,
+        # 程序里 setCurrentIndex 同步状态时不会误发
+        self.cb_motor.activated.connect(self._on_motor_profile)
 
         self.btn_enable = QPushButton("使能")
         self.btn_enable.setObjectName("Toggle")
@@ -441,6 +443,8 @@ class MainWindow(QWidget):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if r == QMessageBox.Yes:
             self.send(CMD["reset"])
+            # 固件恢复默认后是 4310 档, 读回让界面同步
+            QTimer.singleShot(500, self.request_config)
 
     # ================= 读取/保存设备参数 =================
     def save_to_flash(self):
@@ -469,8 +473,7 @@ class MainWindow(QWidget):
             self._apply_target(self._mode)
 
     def _on_motor_profile(self, idx):
-        if not self._motor_ready:
-            return
+        prev = 1 - idx
         # 切换会覆盖参数并作废标定, 必须二次确认
         ret = QMessageBox.question(
             self, "切换电机配置档",
@@ -479,10 +482,9 @@ class MainWindow(QWidget):
             "确定切换到「%s」吗？" % self.cb_motor.currentText(),
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if ret != QMessageBox.Yes:
-            self._motor_ready = False
-            self.cb_motor.setCurrentIndex(0 if idx == 1 else 1)
-            self._motor_ready = True
+            self.cb_motor.setCurrentIndex(prev)  # 不触发 activated, 安全
             return
+        self._motor_req = idx
         self.send(CMD["motor_profile"], 1.0 if idx == 1 else 0.0)
         self.statusbar.flash(
             "已切换电机配置档 → %s；标定已作废，请重新跑「校准」"
@@ -532,9 +534,14 @@ class MainWindow(QWidget):
         if "CAL" in kv:
             extra.append("标定%s" % ("有效" if kv["CAL"] > 0.5 else "无效"))
         if "PROF" in kv:
-            self._motor_ready = False
-            self.cb_motor.setCurrentIndex(1 if kv["PROF"] > 0.5 else 0)
-            self._motor_ready = True
+            prof = 1 if kv["PROF"] > 0.5 else 0
+            self.cb_motor.setCurrentIndex(prof)
+            if self._motor_req is not None:
+                if prof != self._motor_req:
+                    self.statusbar.flash(
+                        "切换被固件拒绝（电机需先失能），当前仍是 %s"
+                        % self.cb_motor.currentText())
+                self._motor_req = None
         if "COG" in kv:
             extra.append("齿槽表%s" % ("有效" if kv["COG"] > 0.5 else "无效"))
         kvk = kv.get("CURKI")
