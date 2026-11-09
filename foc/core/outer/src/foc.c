@@ -382,9 +382,33 @@ void foc_adc_callback(void)
 		return;
 	}
 
+	/* 编码器只按 5kHz 更新, 电流环是 20kHz. 若直接用 encoder.phase,
+	 * 高速下电角度会滞后 100~250µs; 9µH/0.03Ω 的电机反电势会落到错误
+	 * 轴, 相电流瞬间失控. 这里用 phase_vel 在每个电流环中断外推, 每来
+	 * 一帧编码器再对齐一次 (补上采样到发布的固定滞后). */
+	static float phase_est;
+	static uint32_t phase_seq_seen;
+
+	if (encoder.phase_seq != phase_seq_seen) {
+		/* 编码器采样到 ENCODER_loop 发布固定滞后半个编码器周期;
+		 * 再补半个电流环周期, 使重同步的残余误差居中 (±25µs). */
+		float sync_latency =
+		    1.0f / (2.0f * (float)ENCODER_TASK_HZ) +
+		    0.5f * CURRENT_MEASURE_PERIOD;
+
+		phase_seq_seen = encoder.phase_seq;
+		phase_est = encoder.phase + encoder.phase_vel * sync_latency;
+	} else {
+		phase_est += encoder.phase_vel * CURRENT_MEASURE_PERIOD;
+	}
+	while (phase_est >= M_2PI)
+		phase_est -= M_2PI;
+	while (phase_est < 0.0f)
+		phase_est += M_2PI;
+
 	float iq_set =
 	    CLAMP(FOC.Iq_set, -Config.current_limit, Config.current_limit);
-	float phase = encoder.phase + FOC.phase_offset;
+	float phase = phase_est + FOC.phase_offset;
 	FOC_current(FOC.Id_set, iq_set, phase, encoder.phase_vel);
 }
 

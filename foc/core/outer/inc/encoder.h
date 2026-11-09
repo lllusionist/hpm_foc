@@ -51,6 +51,7 @@ typedef struct sEncoder {
 	float vel;	 /* 机械速度, 圈/秒 */
 	float phase;	 /* 电角度 rad */
 	float phase_vel; /* 电角速度 rad/s */
+	volatile uint32_t phase_seq; /* phase/phase_vel 每更新一次 +1 (低采样率对齐用) */
 
 	float pll_pos;	      /* PLL 位置, 计数 */
 	float pll_vel;	      /* PLL 速度, 计数/秒 */

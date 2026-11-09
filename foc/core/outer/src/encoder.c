@@ -220,9 +220,18 @@ void ENCODER_loop(void)
 	else if (delta < -(int32_t)ENCODER_CPR_HALF)
 		delta += (int32_t)ENCODER_CPR;
 	/* 帧合理性检查: MT6835 帧里没有可用的校验, SPI 受开关干扰时会读到
-	 * 位翻转的假角度. 一个 5kHz 周期内机械角最大变化按 10rps 算 =
-	 * 1/500 圈, 超过必然是坏帧 -> 丢弃. 坏帧计数定期打印便于定位干扰. */
-	if (abs(delta) > (int32_t)(ENCODER_CPR / 500)) {
+	 * 位翻转的假角度. 但合法运动的单帧差分会随转速增大, 上限必须按
+	 * "配置的最高速"算: 写死 10rps 时, velocity_limit 却是 30~40rps,
+	 * 一旦目标转速超过 10rps 正常帧也被判坏 -> count_in_cpr_prev/PLL
+	 * 冻结 -> 速度反馈丢失 -> 速度环把电流顶到限幅 -> 电机飞车 -> 相对
+	 * 冻结值的角差越积越大并卷绕, 打印出 2~8M cnt 的"假干扰".
+	 * 真正的 SPI 位翻转差分接近半圈, 所以留 3 倍速度余量仍能抓住它. */
+	float max_track_rps = Config.velocity_limit * 3.0f;
+	if (max_track_rps < 30.0f)
+		max_track_rps = 30.0f;
+	int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
+				      (float)ENCODER_UPDATE_FREQ);
+	if (abs(delta) > max_delta) {
 		encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
 
 		return; /* 保留上一拍角度, 不累加、不喂 PLL */
@@ -269,6 +278,7 @@ void ENCODER_loop(void)
 
 	encoder.vel = encoder.pll_vel / ENCODER_CPR_F;
 	encoder.phase_vel = encoder.vel * 6.2831853f * (float)Config.pole_pairs;
+	encoder.phase_seq++;
 }
 
 /* 先发起一帧再处理上一帧, 两者重叠所以周期是 2 个 tick */
