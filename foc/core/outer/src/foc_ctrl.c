@@ -6,21 +6,31 @@
 
 tController Controller;
 
-#define CTRL_PERIOD (1.0f / 5000.0f) /* Task_FOC 周期 (5kHz) */
+#define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
 
-/* 低速摩擦前馈 + 增益调度 (MOVE/BREAK=0 关前馈; VEL_BOOST_GAIN=1 关调度) */
+// 低速摩擦前馈 + 增益调度 (MOVE/BREAK=0 关前馈; VEL_BOOST_GAIN=1 关调度)
 #define FRICTION_FF_MOVE_A 0.030f
 #define FRICTION_FF_BREAK_A 0.050f
 #define FRICTION_FF_ENGAGE_VEL 0.010f
 #define FRICTION_FF_RELEASE_VEL 0.050f
-/* 基础增益已到 0.17/5.3, 低速不再额外放大 */
+// 基础增益已到 0.17/5.3, 低速不再额外放大
 #define VEL_BOOST_GAIN 1.0f
 #define VEL_BOOST_FULL_VEL 0.5f
 #define VEL_BOOST_END_VEL 1.0f
 
 static bool friction_boost;
-/* 摩擦前馈开关 (默认开, USB 0x2B 可在线切换做 A/B) */
+// 摩擦前馈开关 (默认开, USB 0x2B 可在线切换做 A/B)
 static bool friction_ff_en = true;
+
+// 仅用于打印
+static const char *profile_name(int32_t p)
+{
+	if (p == MOTOR_PROFILE_5210)
+		return "5210";
+	if (p == MOTOR_PROFILE_2312)
+		return "2312";
+	return "4310";
+}
 
 void CONTROLLER_update_input_pos_filter_gain(float bw)
 {
@@ -100,9 +110,9 @@ int CONTROLLER_set_home(void)
 			encoder.pos = 0;
 			encoder.pll_pos =
 			    (float)encoder
-				.count_aligned; /* PLL 对齐当前单圈位置 */
+				.count_aligned; // PLL 对齐当前单圈位置
 			encoder.pll_vel = 0;
-			/* 防止产生错误 delta */
+			// 防止产生错误 delta
 			encoder.count_in_cpr_prev = encoder.count_in_cpr;
 
 			Controller.input_position = 0;
@@ -122,7 +132,7 @@ int CONTROLLER_set_home(void)
 	return ret;
 }
 
-/* 命令写入缓冲后立即锁存 (USB/CAN 调用); 状态不满足则只存缓冲 */
+// 命令写入缓冲后立即锁存 (USB/CAN 调用); 状态不满足则只存缓冲
 void CONTROLLER_sync_callback(void)
 {
 	if (foc_get_stage() != RUN)
@@ -149,14 +159,14 @@ void CONTROLLER_sync_callback(void)
 	Controller.target_reached = false;
 }
 
-/* 1kHz 外环: 生成 FOC.Iq_set, 电流环仍在 ADC 中断里执行 */
+// 1kHz 外环: 生成 FOC.Iq_set, 电流环仍在 ADC 中断里执行
 void CONTROLLER_loop(void)
 {
 	float iq_set = 0;
 	float v_err = 0.0f;
 	tFSMState stage = foc_get_stage();
 
-	/* 处理中断里提交的请求 (必须在任务上下文执行) */
+	// 处理中断里提交的请求 (必须在任务上下文执行)
 	if ((stage == IDLE) || (stage == RUN)) {
 		if (Controller.op_mode_pending) {
 			Controller.op_mode_pending = false;
@@ -168,7 +178,7 @@ void CONTROLLER_loop(void)
 		}
 	}
 
-	/* 电机配置档切换: 必须失能状态, 套用后重算电流环增益并存 Flash */
+	// 电机配置档切换: 必须失能状态, 套用后重算电流环增益并存 Flash
 	if (Controller.motor_profile_pending >= 0) {
 		int32_t p = Controller.motor_profile_pending;
 		Controller.motor_profile_pending = -1;
@@ -182,7 +192,7 @@ void CONTROLLER_loop(void)
 			       "lam=%.5f CLIM=%.1fA VLIM=%.1frps bw=%.0fHz "
 			       "velkp=%.3f velki=%.2f dragmin=%.2fV "
 			       "fluxiq=%.2fA jiq=%.2fA save=%s\n",
-			       (p == MOTOR_PROFILE_5210) ? "5210" : "4310",
+			       profile_name(p),
 			       (double)Config.phase_resistance,
 			       (double)(Config.phase_inductance * 1e6f),
 			       (long)Config.pole_pairs,
@@ -228,7 +238,7 @@ void CONTROLLER_loop(void)
 	if ((stage != RUN) && (stage != ANTICOGGING))
 		return;
 
-	const float vel_meas = encoder.vel; /* rps */
+	const float vel_meas = encoder.vel; // rps
 	float vel_des = 0.0f;
 
 	switch (Controller.ctrl_mode) {
@@ -261,19 +271,19 @@ void CONTROLLER_loop(void)
 
 	case CONTROL_MODE_POSITION_FILTER:
 	case CONTROL_MODE_POSITION_PROFILE: {
-		/* 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad */
+		// 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad
 		float th_meas =
 		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
 		float perr = Controller.input_position - th_meas;
 		while (perr > 3.14159265f)
-			perr -= 6.2831853f; /* 最短路径卷绕到 [-π, π] */
+			perr -= 6.2831853f; // 最短路径卷绕到 [-π, π]
 		while (perr < -3.14159265f)
 			perr += 6.2831853f;
 
 		Controller.cur_setpoint = 0.0f;
 		Controller.vel_setpoint = 0.0f;
 		Controller.pos_setpoint = th_meas;
-		vel_des = Config.pos_p_gain * perr; /* 位置 P -> 速度目标 */
+		vel_des = Config.pos_p_gain * perr; // 位置 P -> 速度目标
 
 		if (!Controller.target_reached) {
 			if (ABS(perr) < Config.target_position_window)
@@ -285,15 +295,15 @@ void CONTROLLER_loop(void)
 		break;
 	}
 
-	/* 速度模式用轨迹速度; 位置模式的 vel_des 已在上面按单圈角度 P 给出 */
+	// 速度模式用轨迹速度; 位置模式的 vel_des 已在上面按单圈角度 P 给出
 	if (Controller.ctrl_mode < CONTROL_MODE_POSITION_FILTER)
 		vel_des = Controller.vel_setpoint;
 
-	/* 速度限幅 */
+	// 速度限幅
 	vel_des =
 	    CLAMP(vel_des, -Config.velocity_limit, +Config.velocity_limit);
 
-	/* 速度环 PI */
+	// 速度环 PI
 	iq_set = Controller.cur_setpoint;
 
 	float vel_kp = Config.vel_p_gain;
@@ -301,7 +311,7 @@ void CONTROLLER_loop(void)
 	bool low_speed_assist = (foc_get_stage() != ANTICOGGING);
 
 	if (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) {
-		/* 低速时静摩擦占主导, 平滑提升增益; 1rps 以上恢复原值 */
+		// 低速时静摩擦占主导, 平滑提升增益; 1rps 以上恢复原值
 		float av = fabsf(vel_meas);
 		float boost = 1.0f;
 		if (low_speed_assist) {
@@ -321,7 +331,7 @@ void CONTROLLER_loop(void)
 		iq_set += Controller.vel_integrator;
 	}
 
-	/* 电流模式下的速度限幅 */
+	// 电流模式下的速度限幅
 	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
 		float Imax =
 		    (+Config.velocity_limit - vel_meas) * Config.vel_p_gain;
@@ -330,8 +340,7 @@ void CONTROLLER_loop(void)
 		iq_set = CLAMP(iq_set, Imin, Imax);
 	}
 
-	/* 摩擦前馈: 粘住给突破电流, 转起来回到动摩擦偏置;
-	 * 低速时换挡台阶可用 0x2B 关掉做 A/B */
+	// 摩擦前馈: 粘住给突破电流, 转起来回动摩擦(0x2B 可关)
 	if (friction_ff_en &&
 	    (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    low_speed_assist) {
@@ -349,12 +358,11 @@ void CONTROLLER_loop(void)
 			iq_set -= ff;
 	}
 
-	/* 齿槽转矩前馈补偿 (单圈机械角索引; 位置保持法测得保持电流, */
-	/* 与齿槽转矩同向, 前馈取正) */
+	// 齿槽前馈: 保持电流与齿槽转矩同向, 取正
 	if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    Config.anticogging_enable && Config.cogging_map_valid &&
 	    (foc_get_stage() != ANTICOGGING)) {
-		/* 相邻两点线性插值, 降低 512 点查表的量化毛刺 */
+		// 相邻两点线性插值, 降低 512 点查表的量化毛刺
 		float fidx = (float)COGGING_MAP_NUM *
 			     (float)encoder.count_aligned / ENCODER_CPR_F;
 		int i0 = (int)fidx;
@@ -367,7 +375,7 @@ void CONTROLLER_loop(void)
 		iq_set += cg / COGGING_SCALE;
 	}
 
-	/* 电流限幅 */
+	// 电流限幅
 	bool limited = false;
 	if (iq_set > +Config.current_limit) {
 		limited = true;
@@ -381,29 +389,27 @@ void CONTROLLER_loop(void)
 	FOC.Id_set = 0.0f;
 	FOC.Iq_set = iq_set;
 
-	/* 速度积分器 (抗饱和 + 限幅) */
+	// 速度积分器 (抗饱和 + 限幅)
 	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP)
 		Controller.vel_integrator = 0.0f;
 	else if (limited)
 		Controller.vel_integrator *= 0.99f;
 	else
 		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
-	/* 齿槽扫描要在 0.1rps 下克服静摩擦: 误差只有 0.1rps, P 项仅 0.77A,
-	 * 若积分器还卡在 ±0.5A 就永远到不了 2~3A 的起动电流 -> 转子不动.
-	 * 其它工况仍用 ±0.5A 防积分饱和. */
+	// 齿槽扫描要 2~3A 起动电流, ±0.5A 限幅会把积分器卡死
 	float vint_lim =
 	    (foc_get_stage() == ANTICOGGING) ? 4.0f : 0.5f;
 	Controller.vel_integrator =
 	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
 }
 
-/* 读当前摩擦前馈开关状态 (标定前后保存/恢复用) */
+// 读当前摩擦前馈开关状态 (标定前后保存/恢复用)
 uint8_t CONTROLLER_get_friction_ff(void)
 {
 	return friction_ff_en ? 1U : 0U;
 }
 
-/* 摩擦前馈在线开关 (0x2B) */
+// 摩擦前馈在线开关 (0x2B)
 void CONTROLLER_set_friction_ff(uint8_t en)
 {
 	friction_ff_en = (en != 0U);

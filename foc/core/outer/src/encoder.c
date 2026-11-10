@@ -79,6 +79,9 @@ void ENCODER_reset(void)
 	encoder.need_init = 20;
 
 	encoder.error_cnt = 0;
+	encoder.bad_run = 0;
+	encoder.bad_frame_cnt = 0;
+	encoder.frame_cnt = 0;
 }
 
 void ENCODER_init(void)
@@ -229,13 +232,27 @@ void ENCODER_loop(void)
 	float max_track_rps = Config.velocity_limit * 3.0f;
 	if (max_track_rps < 30.0f)
 		max_track_rps = 30.0f;
+	/* 上限: J 标定会把 velocity_limit 临时设成 10000 解除速度限幅,
+	 * 若不封顶会把坏帧阈值放大到 1e8, 等于在 J 期间关掉乱帧保护 */
+	if (max_track_rps > 150.0f)
+		max_track_rps = 150.0f;
 	int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
 				      (float)ENCODER_UPDATE_FREQ);
 	if (abs(delta) > max_delta) {
 		encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
 
+		/* 连续坏帧说明"参考角"已经过期: 转子在动时, delta 相对冻结的
+		 * prev 只会越来越离谱, 会被永久判坏. 连续 N 帧后以当前采样重
+		 * 同步, 让它能恢复. 单帧干扰仍按原逻辑丢弃. */
+		if (++encoder.bad_run >= 5U) {
+			encoder.bad_run = 0;
+			encoder.count_in_cpr_prev = corrected;
+			encoder.pll_pos = (float)corrected;
+		}
+
 		return; /* 保留上一拍角度, 不累加、不喂 PLL */
 	}
+	encoder.bad_run = 0;
 
 	encoder.shadow_count += (int64_t)delta;
 	encoder.count_in_cpr_prev = corrected;

@@ -50,11 +50,11 @@ static float flux_vq_b;		   /* 第二转速点的 Vq 均值 */
 static float flux_vd_sum;	   /* Vd 窗口累加 (矢量差分法用) */
 static float flux_vd_a, flux_vd_b; /* 两个转速点的 Vd 均值 */
 
-/* J 标定: 加速->自由滑行, 摩擦相减: J = Kt·I/(π·(a+ - a-)) */
+/* J 标定: 加速->自由滑行, 摩擦相减: J = Kt·I/(2π·(a+ - a-)) */
 #define J_CAL_IQ (Config.calib_current * 0.15f) /* 加速测试电流 (A) */
-#define J_CAL_SAMPLES (300U)		       /* 每段采样点数 (1kHz -> 0.3s) */
+#define J_CAL_SAMPLES (150U)		       /* 每段采样点数 (1kHz -> 0.3s) */
 #define J_SPINUP_RPS (2.0f) /* 起转目标 (rps): 太高会让 ACC 段冲到过流 */
-#define J_SPINUP_MAX_RPS 12.0f /* 加速段转速上限: 超过就放弃, 防过流 */
+#define J_SPINUP_MAX_RPS 20.0f /* 加速段转速上限: 超过就放弃, 防过流 */
 static float j_sum_t, j_sum_v, j_sum_tv, j_sum_tt;
 static uint32_t j_cnt;
 static float j_slope_acc, j_slope_dec;
@@ -151,25 +151,30 @@ int calibration_step(void)
 	return (int)mCalibStep;
 }
 
+/* 电流闭环 I/f 拖动: 电流环在中断里锁住 Iq, 电角度由标定循环推进.
+ * 开环电压拖动在低 R/L、低阻尼电机上会电流塌陷 -> 转速 hunting,
+ * 这里改为锁电流: 转矩恒定, 拖动平稳, 不污染极对数/零位. */
+static void calib_drag_if(float iq, float elec_angle, float elec_vel)
+{
+	FOC.calib_vinj_mode = false;
+	FOC.calib_mode = true;
+	FOC.calib_adv_angle = false;
+	FOC.calib_id = 0.0f;
+	FOC.calib_iq = iq;
+	FOC.calib_angle = elec_angle;
+	FOC.calib_phase_vel = elec_vel;
+}
+
 void calibration_loop(void)
 {
 	float time = (float)loop_count / (float)CAL_LOOP_HZ;
 
 	const float ia_meas = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 
-	/* 拖动电压: 高阻电机按 R·I 算, 低阻电机(0.03Ω)必须用电压下限兜底 */
-	float voltage_calc = Config.phase_resistance * Config.calib_current;
-	float drag_v = voltage_calc;
-	if (drag_v < Config.calib_drag_v_min)
-		drag_v = Config.calib_drag_v_min;
-	if (drag_v > (Config.calib_voltage * 0.9f))
-		drag_v = Config.calib_voltage * 0.9f;
-
 	float calib_phase_vel = 12.0f * M_PI;
 	float total_calib_cycles = 14.0f;
 
-	/* 开环拖动阶段每 300ms 打一次: 实际电压/电流/转速 —— 判断"拖不动"到底是
-	 * 电流不够还是相序/方向/极对数不对 */
+	/* 拖动阶段每 300ms 打一次: 电流指令/实测电流/转速/电角度 */
 	if ((mCalibStep == CS_DIR_PP_LOOP) ||
 	    (mCalibStep == CS_ENCODER_CW_LOOP) ||
 	    (mCalibStep == CS_ENCODER_CCW_LOOP)) {
@@ -177,9 +182,9 @@ void calibration_loop(void)
 
 		if (++drag_dbg_cnt >= 300U) {
 			drag_dbg_cnt = 0;
-			printf("drag: v=%.3fV I=%.2fA vel=%.3f rps "
+			printf("drag(if): Iq=%.2fA I=%.2fA vel=%.3f rps "
 			       "elec=%.2f rad\n",
-			       (double)drag_v, (double)ia_meas,
+			       (double)FOC.calib_iq, (double)ia_meas,
 			       (double)encoder.vel, (double)phase_set);
 		}
 	}
@@ -381,7 +386,8 @@ void calibration_loop(void)
 	case CS_DIR_PP_START:
 		if (loop_count == 0)
 			foc_arm();
-		FOC_voltage((drag_v * time / 2.0f), 0, 0.0f);
+		/* 2s 内把拖动电流从 0 拉满, 角度固定 0 先让转子对齐 */
+		calib_drag_if(Config.calib_current * (time / 2.0f), 0.0f, 0.0f);
 
 		if (time >= 2.0f) {
 			encoder.shadow_count = 0;
@@ -394,7 +400,8 @@ void calibration_loop(void)
 		break;
 	case CS_DIR_PP_LOOP:
 		phase_set += calib_phase_vel / (float)CAL_LOOP_HZ;
-		FOC_voltage(drag_v, 0, phase_set);
+		calib_drag_if(Config.calib_current, phase_set,
+			      calib_phase_vel);
 
 		if (!dir_pp_runin) {
 			/* 预跑一圈, 让转子牵入同步, 避免圈数偏少 */
@@ -404,6 +411,7 @@ void calibration_loop(void)
 				dir_pp_runin = true;
 			}
 		} else if (phase_set >= 2.0f * total_calib_cycles * M_2PI) {
+			FOC.calib_mode = false;
 			pwm_output_low_sides();
 			mCalibStep = CS_DIR_PP_END;
 		}
@@ -440,7 +448,7 @@ void calibration_loop(void)
 
 	case CS_FLUX_START:
 		Config.flux_linkage = 0;
-		/* 角度改由 20kHz 中断推进, 消除 1kHz 阶梯误差 */
+		/* 角度改由电流环中断推进, 消除 1kHz 阶梯误差 */
 		FOC.calib_adv_angle = true;
 		FOC.calib_id = 0;
 		FOC.calib_iq =
@@ -698,7 +706,10 @@ void calibration_loop(void)
 	case CS_ENCODER_CW_LOOP:
 		if (sample_count <
 		    (int32_t)(Config.pole_pairs * SAMPLES_PER_PPAIR)) {
-			float mech_phase = phase_set / (float)Config.pole_pairs;
+			/* I/f 用 Iq 拖动时, 电流矢量在 phase_set+90°, 转子 d 轴
+			 * 对齐 phase_set+90°; 编码器参考角要同样加 90° 才不自偏 */
+			float mech_phase = (phase_set + M_PI / 2.0f) /
+					   (float)Config.pole_pairs;
 			float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
 			if (mech_phase_wrapped < 0)
 				mech_phase_wrapped += M_2PI;
@@ -722,11 +733,16 @@ void calibration_loop(void)
 			sample_count--;
 			mCalibStep = CS_ENCODER_CCW_LOOP;
 		}
-		FOC_voltage(drag_v, 0, phase_set);
+		calib_drag_if(Config.calib_current, phase_set,
+			      (M_2PI / (float)SAMPLES_PER_PPAIR) *
+				  (float)CAL_LOOP_HZ);
 		break;
 	case CS_ENCODER_CCW_LOOP:
 		if (sample_count >= 0) {
-			float mech_phase = phase_set / (float)Config.pole_pairs;
+			/* I/f 用 Iq 拖动时, 电流矢量在 phase_set+90°, 转子 d 轴
+			 * 对齐 phase_set+90°; 编码器参考角要同样加 90° 才不自偏 */
+			float mech_phase = (phase_set + M_PI / 2.0f) /
+					   (float)Config.pole_pairs;
 			float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
 			if (mech_phase_wrapped < 0)
 				mech_phase_wrapped += M_2PI;
@@ -745,8 +761,12 @@ void calibration_loop(void)
 			    (encoder_error_arr[sample_count] + error) / 2;
 			sample_count--;
 			phase_set -= M_2PI / (float)SAMPLES_PER_PPAIR;
-			FOC_voltage(drag_v, 0, phase_set);
+			calib_drag_if(
+			    Config.calib_current, phase_set,
+			    -(M_2PI / (float)SAMPLES_PER_PPAIR) *
+				(float)CAL_LOOP_HZ);
 		} else {
+			FOC.calib_mode = false;
 			pwm_output_low_sides();
 			sample_count = 0;
 			loop_count = 0;
@@ -906,7 +926,7 @@ void calibration_loop(void)
 		float J = 0.0f;
 		if (fabsf(da) > 1e-3f)
 			J = kt * (Config.calib_current * Config.calib_j_iq_gain) /
-		    (3.14159265f * da);
+		    (2.0f * 3.14159265f * da);
 		printf("J: a+=%.3f a-=%.3f rps/s  Kt=%.5f -> J=%.3e kg.m2\n",
 		       j_slope_acc, j_slope_dec, kt, J);
 		if ((J > 1e-7f) && (J < 1e-1f)) {

@@ -278,13 +278,14 @@ void isr_adc(void)
 		FOC.Ib = adc_dma_buf[1].result;
 		FOC.Ic = adc_dma_buf[2].result;
 
-		/* Ic 最易采到开关沿: 坏样本用 -(Ia+Ib) 重建, isum 留作诊断 */
+		/* Ic 强制用 -(Ia+Ib) 重构: 低边采样最容易在该相采到开关沿/高
+		 * 占空比窗口不足, 干脆不用实测 Ic. isum 用重构前的实测值算,
+		 * 仅作诊断 (非零 = 实测 Ic 的误差, 不再用于触发重构) */
 		FOC.isum =
 		    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
 		     (FOC.Ic - FOC.Ic_midpoint)) *
 		    FOC_CURRENT_SCALE;
-		if (FOC.adc_ready &&
-		    ((FOC.isum > 0.1f) || (FOC.isum < -0.1f))) {
+		if (FOC.adc_ready) {
 			float ic_fix = FOC.Ic_midpoint -
 				       (FOC.Ia - FOC.Ia_midpoint) -
 				       (FOC.Ib - FOC.Ib_midpoint);

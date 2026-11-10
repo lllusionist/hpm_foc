@@ -136,6 +136,33 @@ void vofa_send(void)
 
 #define VOFA_PERIOD_MS 1 /* USB 发包周期 (ms): 1 = 1kHz */
 
+/* 电流阶跃数据整包上传: "$STEP,FS=..,N=..,CH=3,PRE=..\n" + n*3 个 float.
+ * 分块发送并留间隔, 避免 CDC 上一次没发完就丢包. */
+static void vofa_dump_step(void)
+{
+	char hdr[64];
+	uint16_t n = FOC_step_count();
+	const uint8_t *p = (const uint8_t *)FOC_step_data();
+	uint32_t remaining = (uint32_t)n * 3U * 4U;
+	int len = snprintf(hdr, sizeof(hdr),
+			   "$STEP,FS=%lu,N=%u,CH=3,PRE=%u\n",
+			   (unsigned long)PWM_FREQ_HZ, (unsigned)n,
+			   (unsigned)FOC_step_pre());
+
+	if (len > 0)
+		vofa_transmit((uint8_t *)hdr, (uint16_t)len);
+	vTaskDelay(pdMS_TO_TICKS(5));
+	while (remaining > 0U) {
+		uint32_t chunk = (remaining > 1024U) ? 1024U : remaining;
+
+		vofa_transmit((uint8_t *)p, (uint16_t)chunk);
+		p += chunk;
+		remaining -= chunk;
+		vTaskDelay(pdMS_TO_TICKS(5));
+	}
+	FOC_step_clear();
+}
+
 static void Vofa_task(void *argument)
 {
 	TickType_t last = xTaskGetTickCount();
@@ -144,7 +171,16 @@ static void Vofa_task(void *argument)
 
 	for (;;) {
 		vTaskDelayUntil(&last, pdMS_TO_TICKS(VOFA_PERIOD_MS));
-		vofa_send();
+		uint8_t st = FOC_step_state();
+
+		if (st == 2U) { /* 阶跃采完: 优先上传, 期间不发波形 */
+			vofa_dump_step();
+			last = xTaskGetTickCount(); /* 上传耗时不补跑 */
+			continue;
+		}
+		if (st == 0U)
+			vofa_send();
+		/* st == 1: 阶跃采集中, 不发任何数据 */
 		if (cfg_dump_req) {
 			cfg_dump_req = 0;
 			vofa_send_config();

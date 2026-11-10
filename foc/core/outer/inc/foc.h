@@ -102,7 +102,7 @@ typedef struct {
 	volatile bool calib_mode;
 	volatile float calib_angle;	/* 电角度 (rad) */
 	volatile float calib_phase_vel;
-	/* 1 = 由 20kHz 中断按 calib_phase_vel 推进 calib_angle (磁链标定用):
+	/* 1 = 由电流环中断按 calib_phase_vel 推进 calib_angle (磁链标定用):
 	 * 1kHz 推进在 500rad/s 时会有 29° 阶梯误差, d 轴电压被拉偏 */
 	volatile bool calib_adv_angle; /* 电角速度 (rad/s) */
 	volatile float calib_id;	/* d 轴目标 (A) */
@@ -134,5 +134,14 @@ void pwm_output_low_sides(void);
 void foc_arm(void);
 void foc_disarm(void);
 void foc_init(void);
+
+/* 电流阶跃测试 (临时调试): 40kHz 注入 Iq 阶跃并记录响应 */
+void FOC_step_set_base(float base); /* 偏置电流 (小信号阶跃用) */
+void FOC_step_start(float amp);
+uint8_t FOC_step_state(void);	 /* 0=空闲 1=采集中 2=采完待发 */
+uint16_t FOC_step_count(void);	 /* 每通道采样点数 */
+uint16_t FOC_step_pre(void);	 /* 阶跃前预置点数 */
+const float *FOC_step_data(void); /* [Iq, ref, Vq] * count */
+void FOC_step_clear(void);
 
 #endif /* __FOC_H__ */

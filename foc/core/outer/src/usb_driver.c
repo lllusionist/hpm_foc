@@ -9,7 +9,7 @@ void USB_parse_frame(UsbFrame *frame)
 	uint8_t id = frame->id;
 
 	switch (id) {
-	/* 配置持久化 (延迟到任务里执行: 擦写要关中断几十 ms) */
+	// 配置持久化 (延迟到任务里执行: 擦写要关中断几十 ms)
 	case USB_CMD_SAVE_CONFIG:
 		Controller.config_cmd_pending = 1;
 		break;
@@ -18,7 +18,7 @@ void USB_parse_frame(UsbFrame *frame)
 		Controller.config_cmd_pending = 2;
 		break;
 
-	/* 中断里只记请求, 由 1kHz 控制任务执行 */
+	// 中断里只记请求, 由 1kHz 控制任务执行
 	case USB_CMD_SET_OP_MODE: {
 		int mode = (int)data_to_float(&frame->data[0]);
 		if (mode >= 0 && mode <= CONTROL_MODE_POSITION_PROFILE) {
@@ -31,6 +31,15 @@ void USB_parse_frame(UsbFrame *frame)
 
 	case USB_CMD_CALIB_START:
 		foc_request_stage(CALIBRATION);
+		break;
+
+	case USB_CMD_STEP_BASE:
+		FOC_step_set_base(data_to_float(&frame->data[0]));
+		break;
+
+	case USB_CMD_STEP_TEST:
+		// 40kHz 电流阶跃测试 (锁转子; 采完由 vofa 任务整包回传)
+		FOC_step_start(data_to_float(&frame->data[0]));
 		break;
 
 	case USB_CMD_SET_TORQUE: {
@@ -68,7 +77,7 @@ void USB_parse_frame(UsbFrame *frame)
 	case USB_CMD_SET_POSITION: {
 		float position = data_to_float(&frame->data[0]);
 
-		/* 位置为单圈机械角(rad), 允许正负, 限幅到 [-π, π] */
+		// 位置为单圈机械角(rad), 允许正负, 限幅到 [-π, π]
 		if (position > 3.14159265f)
 			position = 3.14159265f;
 		if (position < -3.14159265f)
@@ -98,7 +107,7 @@ void USB_parse_frame(UsbFrame *frame)
 		Controller.home_pending = true;
 		break;
 
-	/* 现在就能用: 在线调电流环 PI */
+	// 在线调电流环 PI
 	case USB_CMD_SET_CUR_KP: {
 		float Cur_Kp = data_to_float(&frame->data[0]);
 		if (Cur_Kp < 0.0f)
@@ -124,9 +133,14 @@ void USB_parse_frame(UsbFrame *frame)
 	}
 
 	case USB_CMD_SET_MOTOR_PROFILE: {
-		float p = data_to_float(&frame->data[0]);
-		Controller.motor_profile_pending =
-		    (p > 0.5f) ? MOTOR_PROFILE_5210 : MOTOR_PROFILE_4310;
+		// float 里放档位编号: 0=4310 1=5210 2=2312
+		int32_t idx = (int32_t)(data_to_float(&frame->data[0]) + 0.5f);
+
+		if (idx < 0)
+			idx = 0;
+		if (idx > MOTOR_PROFILE_MAX)
+			idx = MOTOR_PROFILE_MAX;
+		Controller.motor_profile_pending = idx;
 		break;
 	}
 
@@ -156,7 +170,7 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 	}
 
-	/* 保护阈值 (改完用 0x3F 存 Flash) */
+	// 保护阈值 (改完用 0x3F 存 Flash)
 	case USB_CMD_SET_UNDER_VOLTAGE: {
 		Config.protect_under_voltage = data_to_float(&frame->data[0]);
 		break;
@@ -171,7 +185,7 @@ void USB_parse_frame(UsbFrame *frame)
 		vofa_request_config();
 		break;
 
-	/* A/B 调试开关: 本函数在 USB 中断里跑, 不打 printf */
+	// A/B 调试开关: 本函数在 USB 中断里跑, 不打 printf
 	case USB_CMD_SET_ANTICOG:
 		Config.anticogging_enable =
 		    (data_to_float(&frame->data[0]) > 0.5f) ? 1 : 0;

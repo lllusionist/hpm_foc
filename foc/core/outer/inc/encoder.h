@@ -39,6 +39,7 @@ typedef struct sEncoder {
 	uint8_t need_init; /* 前N次采样只对齐, 不跑 PLL */
 	uint32_t bad_frame_cnt; /* 被合理性检查丢弃的帧数 (SPI 受干扰) */
 	uint32_t frame_cnt;	 /* 总帧数 (坏帧比例用) */
+	uint8_t bad_run;	 /* 连续坏帧计数 (超过阈值重同步) */
 
 	uint32_t raw;		    /* 传感器原始值 */
 	uint32_t count_in_cpr;	    /* 方向修正后的单圈值 */

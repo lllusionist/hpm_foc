@@ -14,8 +14,10 @@
 
 #define MAX_BUFFER_SIZE 1024
 
-/* 采样率 = ADC 中断频率 / VOFA_SAMPLE_DECIM (20k/4=5k), 攒批发出 */
-#define VOFA_SAMPLE_DECIM 4
+/* 波形采样率固定 5kHz, 分频由载波频率自动派生 (40k/8, 20k/4).
+ * 手写 decim 时改 PWM 频率很容易忘记同步, 会变成 10kHz 把 USB CDC 打爆 */
+#define VOFA_SAMPLE_RATE_HZ (5000U)
+#define VOFA_SAMPLE_DECIM (PWM_FREQ_HZ / VOFA_SAMPLE_RATE_HZ)
 
 void vofa_start(void);
 void vofa_push_sample(void);

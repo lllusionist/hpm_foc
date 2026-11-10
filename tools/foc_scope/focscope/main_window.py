@@ -188,11 +188,12 @@ class MainWindow(QWidget):
         # 电机配置档 (固件 0x5F): 一键切换标称参数, 切换后会作废标定
         h.addWidget(QLabel("电机"))
         self.cb_motor = QComboBox()
-        self.cb_motor.addItems(["4310 云台", "5210 航模"])
+        self.cb_motor.addItems(["4310 云台", "5210 航模", "2312 航模"])
         self.cb_motor.setToolTip(
             "电机配置档 (0x5F):\n"
             "  4310 云台: 8.29Ω / 3.4mH / 14 对极 / 0.9A / 带宽 300Hz\n"
             "  5210 航模: 0.03Ω / 9µH / KV300 / 44A / 带宽 1000Hz\n"
+            "  2312 航模: 0.144Ω / 28.5µH / 7 对极 / KV960 / 带宽 600Hz\n"
             "⚠ 切换会作废标定 (编码器零位/极对数都变了), 必须重新跑 0x27")
         self.cb_motor.setFixedWidth(96)
         h.addWidget(self.cb_motor)
@@ -485,7 +486,7 @@ class MainWindow(QWidget):
             self.cb_motor.setCurrentIndex(prev)  # 不触发 activated, 安全
             return
         self._motor_req = idx
-        self.send(CMD["motor_profile"], 1.0 if idx == 1 else 0.0)
+        self.send(CMD["motor_profile"], float(idx))
         self.statusbar.flash(
             "已切换电机配置档 → %s；标定已作废，请重新跑「校准」"
             % self.cb_motor.currentText())
@@ -534,7 +535,10 @@ class MainWindow(QWidget):
         if "CAL" in kv:
             extra.append("标定%s" % ("有效" if kv["CAL"] > 0.5 else "无效"))
         if "PROF" in kv:
-            prof = 1 if kv["PROF"] > 0.5 else 0
+            # 固件回传的是档位编号 (0/1/2), 直接当索引; 越界按 0 处理
+            prof = int(round(kv["PROF"]))
+            if not 0 <= prof < self.cb_motor.count():
+                prof = 0
             self.cb_motor.setCurrentIndex(prof)
             if self._motor_req is not None:
                 if prof != self._motor_req:

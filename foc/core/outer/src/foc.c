@@ -6,6 +6,69 @@
 
 volatile foc_data_t FOC;
 
+/* ---- 电流阶跃测试 (临时调试) ----
+ * 在 40kHz 电流环中断里注入 Iq 阶跃, 同时按 40kHz 记录响应到 RAM,
+ * 采完后由 vofa 任务整包上传给上位机做带宽分析. */
+#define FOC_STEP_N 800U	  /* 20ms @ 40kHz (前 10ms 稳基值 + 后 10ms 阶跃) */
+#define FOC_STEP_PRE 400U /* 阶跃前 10ms 稳在基值, 小信号测试也够稳 */
+static float step_buf[FOC_STEP_N][3]; /* 每点: Iq, Iq_ref, Vq */
+static volatile uint16_t step_n;
+static volatile float step_amp;
+static volatile float step_base; /* 偏置电流, 小信号阶跃时先用 */
+static volatile uint8_t step_state; /* 0 idle, 1 running, 2 done */
+
+void FOC_step_set_base(float base)
+{
+	float lim = Config.current_limit;
+
+	if (base > lim)
+		base = lim;
+	if (base < -lim)
+		base = -lim;
+	step_base = base;
+}
+
+void FOC_step_start(float amp)
+{
+	float lim = Config.current_limit;
+	float b = step_base;
+
+	if (step_state != 0U)
+		return;
+	if (b + amp > lim)
+		amp = lim - b;
+	if (b + amp < -lim)
+		amp = -lim - b;
+	step_amp = amp;
+	step_n = 0;
+	step_state = 1;
+}
+
+uint8_t FOC_step_state(void)
+{
+	return step_state;
+}
+
+uint16_t FOC_step_count(void)
+{
+	return FOC_STEP_N;
+}
+
+uint16_t FOC_step_pre(void)
+{
+	return FOC_STEP_PRE;
+}
+
+const float *FOC_step_data(void)
+{
+	return &step_buf[0][0];
+}
+
+void FOC_step_clear(void)
+{
+	step_state = 0;
+}
+
 /* ADC */
 #define VBUS_DIVIDER_RATIO 16.0f
 #define ADC_REF_VOLTAGE 3.3f	/* ADC参考电压3.3V */
@@ -311,7 +374,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
 
 	if (0 == SVPWM(alpha, beta, &FOC.dtc_a, &FOC.dtc_b, &FOC.dtc_c)) {
-		foc_deadtime_comp();
+		// foc_deadtime_comp();
 		pwm_set_duty(FOC.dtc_a, FOC.dtc_b, FOC.dtc_c);
 	}
 
@@ -329,12 +392,33 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 void foc_adc_callback(void)
 {
-	/* 波形采样: 40kHz 8 分频 -> 5kHz, 攒批由 vofa 任务发送 */
+	/* 电流阶跃测试: 40kHz 注入 Iq 阶跃并记录 (锁转子时测纯电流环) */
+	if (step_state == 1U) {
+		uint16_t n = step_n;
+		float ref = (n < FOC_STEP_PRE) ? step_base
+					       : (step_base + step_amp);
+
+		FOC_current(0.0f, ref, encoder.phase, 0.0f);
+		if (n < FOC_STEP_N) {
+			step_buf[n][0] = FOC.Iq;
+			step_buf[n][1] = ref;
+			step_buf[n][2] = FOC.Vq_out;
+			step_n = (uint16_t)(n + 1U);
+		}
+		if (step_n >= FOC_STEP_N)
+			step_state = 2U;
+		return;
+	}
+
+	/* 波形采样: 40kHz 8 分频 -> 5kHz, 攒批由 vofa 任务发送.
+	 * 阶跃采完待发期间 (state==2) 暂停, 免得和阶跃数据包混在一起 */
 	static uint8_t vofa_div = 0;
 
-	if (++vofa_div >= VOFA_SAMPLE_DECIM) {
-		vofa_div = 0;
-		vofa_push_sample();
+	if (step_state == 0U) {
+		if (++vofa_div >= VOFA_SAMPLE_DECIM) {
+			vofa_div = 0;
+			vofa_push_sample();
+		}
 	}
 
 	if (!FOC.is_armed)
@@ -382,7 +466,7 @@ void foc_adc_callback(void)
 		return;
 	}
 
-	/* 编码器只按 5kHz 更新, 电流环是 20kHz. 若直接用 encoder.phase,
+	/* 编码器只按 5kHz 更新, 电流环是 40kHz. 若直接用 encoder.phase,
 	 * 高速下电角度会滞后 100~250µs; 9µH/0.03Ω 的电机反电势会落到错误
 	 * 轴, 相电流瞬间失控. 这里用 phase_vel 在每个电流环中断外推, 每来
 	 * 一帧编码器再对齐一次 (补上采样到发布的固定滞后). */
