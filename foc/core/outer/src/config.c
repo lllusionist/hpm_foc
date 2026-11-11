@@ -7,7 +7,6 @@
 tConfig Config;
 #define debug 0
 
-// 越界会静默失败
 _Static_assert(sizeof(tConfig) <= FLASH_CFG_BUF_SIZE,
 	       "tConfig exceeds flash cfg buffer");
 
@@ -113,7 +112,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.motor_profile = MOTOR_PROFILE_4310;
 	}
 
-	// 换电机后这些都不再有效
+	// 切换电机配置档后，原电机的标定数据失效。
 	Config.calib_valid = 0;
 	Config.cogging_map_valid = 0;
 	Config.anticogging_enable = 0;
@@ -121,7 +120,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 	Config.calib_cfg_magic = CONFIG_MAGIC;
 }
 
-// CRC 不含末尾 crc32 字段本身
+// CRC 覆盖 crc32 字段之前的数据，不包含 crc32 本身。
 uint32_t CONFIG_calculate_crc(const tConfig *cfg)
 {
 	return util_crc32((const uint8_t *)cfg, offsetof(tConfig, crc32));
@@ -149,7 +148,7 @@ uint8_t CONFIG_load_from_flash(void)
 		return 3;
 
 	Config = tmp;
-	// 旧记录 crc32 之后是垃圾值
+	// 兼容旧记录：crc32 后新增字段可能未初始化，需设置默认值。
 	if (Config.motor_cfg_magic != CONFIG_MAGIC) {
 		Config.motor_cfg_magic = CONFIG_MAGIC;
 		Config.motor_profile = MOTOR_PROFILE_4310;

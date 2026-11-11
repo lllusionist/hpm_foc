@@ -3,7 +3,7 @@
 
 volatile tEncoder encoder;
 
-/* 收发缓冲: 必须放非 cache 段, DMA 才能直接读写 */
+/* DMA 缓冲区必须位于非缓存区，供 DMA 直接读写。 */
 ATTR_PLACE_AT_NONCACHEABLE static uint8_t encoder_tx_buf[ENCODER_FRAME_LEN];
 ATTR_PLACE_AT_NONCACHEABLE static uint8_t encoder_rx_buf[ENCODER_FRAME_LEN];
 
@@ -12,13 +12,13 @@ static volatile bool txdma_done;  /* 发 DMA 完成 */
 static volatile bool spi_busy;	  /* 有一帧正在传 */
 static volatile bool frame_ready; /* 收到完整一帧, 等处理 */
 
-/* CS 控制: 0 = 选中(拉低), 1 = 释放(拉高) */
+/* CS 拉低时选中编码器。 */
 static void encoder_cs(uint8_t level)
 {
 	gpio_write_pin(ENCODER_CS_GPIO, ENCODER_CS_PORT, ENCODER_CS_PIN, level);
 }
 
-/* 填发送缓冲: A0 = 读角度命令, 03 = 后面跟着读 3 字节 */
+/* 准备读取角度的 SPI 命令。 */
 static void encoder_prepare_tx(void)
 {
 	encoder_tx_buf[0] = 0xA0;
@@ -55,7 +55,7 @@ static void encoder_txdma_callback(uint32_t channel)
 	encoder_try_finish();
 }
 
-/* 复位角度和 PLL; 增益按调用频率折算 */
+/* 重置编码器状态，并按更新频率设置 PLL 增益。 */
 void ENCODER_reset(void)
 {
 	float bw = ENCODER_PLL_BW_HZ * 6.2831853f;
@@ -142,7 +142,7 @@ void ENCODER_init(void)
 	ENCODER_reset();
 }
 
-/* 启动一帧非阻塞读, 传完由 DMA 回调收尾 */
+/* 启动非阻塞 SPI 读取，由 DMA 回调完成本帧处理。 */
 void ENCODER_start_read(void)
 {
 	hpm_stat_t stat;
@@ -167,7 +167,7 @@ void ENCODER_start_read(void)
 	}
 }
 
-/* 处理上一帧; 角度和速度都走 PLL */
+/* 解析最新帧并更新位置与速度。 */
 void ENCODER_loop(void)
 {
 	uint32_t raw, corrected;
@@ -200,7 +200,7 @@ void ENCODER_loop(void)
 		return;
 	}
 
-	/* 坏帧比例统计: 每秒打一次, 用来判断是偶发干扰还是线束有问题 */
+	/* 每秒统计一次坏帧比例。 */
 	encoder.frame_cnt++;
 	{
 		static uint32_t bad_at_last;
@@ -216,24 +216,17 @@ void ENCODER_loop(void)
 		}
 	}
 
-	/* 单圈差分做过零修正再累加 */
+	/* 修正单圈过零差分并累加多圈位置。 */
 	delta = (int32_t)corrected - (int32_t)encoder.count_in_cpr_prev;
 	if (delta > (int32_t)ENCODER_CPR_HALF)
 		delta -= (int32_t)ENCODER_CPR;
 	else if (delta < -(int32_t)ENCODER_CPR_HALF)
 		delta += (int32_t)ENCODER_CPR;
-	/* 帧合理性检查: MT6835 帧里没有可用的校验, SPI 受开关干扰时会读到
-	 * 位翻转的假角度. 但合法运动的单帧差分会随转速增大, 上限必须按
-	 * "配置的最高速"算: 写死 10rps 时, velocity_limit 却是 30~40rps,
-	 * 一旦目标转速超过 10rps 正常帧也被判坏 -> count_in_cpr_prev/PLL
-	 * 冻结 -> 速度反馈丢失 -> 速度环把电流顶到限幅 -> 电机飞车 -> 相对
-	 * 冻结值的角差越积越大并卷绕, 打印出 2~8M cnt 的"假干扰".
-	 * 真正的 SPI 位翻转差分接近半圈, 所以留 3 倍速度余量仍能抓住它. */
+	/* 坏帧阈值按配置最高转速留出余量，以过滤 SPI 位错误。 */
 	float max_track_rps = Config.velocity_limit * 3.0f;
 	if (max_track_rps < 30.0f)
 		max_track_rps = 30.0f;
-	/* 上限: J 标定会把 velocity_limit 临时设成 10000 解除速度限幅,
-	 * 若不封顶会把坏帧阈值放大到 1e8, 等于在 J 期间关掉乱帧保护 */
+	/* 标定提高速度上限时仍限制阈值，避免关闭坏帧过滤。 */
 	if (max_track_rps > 150.0f)
 		max_track_rps = 150.0f;
 	int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
@@ -241,9 +234,7 @@ void ENCODER_loop(void)
 	if (abs(delta) > max_delta) {
 		encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
 
-		/* 连续坏帧说明"参考角"已经过期: 转子在动时, delta 相对冻结的
-		 * prev 只会越来越离谱, 会被永久判坏. 连续 N 帧后以当前采样重
-		 * 同步, 让它能恢复. 单帧干扰仍按原逻辑丢弃. */
+		/* 连续坏帧后重新同步，恢复位置跟踪。 */
 		if (++encoder.bad_run >= 5U) {
 			encoder.bad_run = 0;
 			encoder.count_in_cpr_prev = corrected;
@@ -257,21 +248,21 @@ void ENCODER_loop(void)
 	encoder.shadow_count += (int64_t)delta;
 	encoder.count_in_cpr_prev = corrected;
 
-	/* 减零位 + 偏移表后再算角度 (校准结果) */
+	/* 应用标定零偏和角度修正表。 */
 	uint32_t lut_index =
 	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
 	int32_t aligned_count = (int32_t)corrected - Config.encoder_offset -
 				Config.offset_lut[lut_index];
 	encoder.count_aligned = (uint32_t)aligned_count & ENCODER_MASK;
 	count = (float)encoder.count_aligned;
-	/* 多圈机械位置 (圈), 用于位置环/回零 */
+	/* 多圈机械位置，单位为转。 */
 	encoder.pos = (float)encoder.shadow_count / ENCODER_CPR_F;
 	encoder.phase =
 	    (float)((encoder.count_aligned * (uint32_t)Config.pole_pairs) &
 		    ENCODER_MASK) *
 	    (6.2831853f / ENCODER_CPR_F);
 
-	/* 误差归一化到半圈 */
+	/* 将 PLL 位置误差归一化到最短单圈差值。 */
 	pos_err = count - encoder.pll_pos;
 	if (pos_err > (float)ENCODER_CPR_HALF)
 		pos_err -= ENCODER_CPR_F;
@@ -287,7 +278,7 @@ void ENCODER_loop(void)
 	else if (encoder.pll_pos < 0.0f)
 		encoder.pll_pos += ENCODER_CPR_F;
 
-	/* 静止死区, 防漂 */
+	/* 静止时抑制小幅速度估计，避免零速漂移。 */
 	if ((encoder.pll_vel < encoder.snap_threshold) &&
 	    (encoder.pll_vel > -encoder.snap_threshold)) {
 		encoder.pll_vel = 0;
@@ -298,7 +289,7 @@ void ENCODER_loop(void)
 	encoder.phase_seq++;
 }
 
-/* 先发起一帧再处理上一帧, 两者重叠所以周期是 2 个 tick */
+/* SPI 传输与上一帧处理重叠，按设定频率更新。 */
 static void Encoder_task(void *argument)
 {
 	TickType_t last = xTaskGetTickCount();

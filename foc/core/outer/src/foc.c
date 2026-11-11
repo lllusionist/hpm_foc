@@ -6,12 +6,10 @@
 
 volatile foc_data_t FOC;
 
-/* ---- 电流阶跃测试 (临时调试) ----
- * 在 40kHz 电流环中断里注入 Iq 阶跃, 同时按 40kHz 记录响应到 RAM,
- * 采完后由 vofa 任务整包上传给上位机做带宽分析. */
-#define FOC_STEP_N 800U	  /* 20ms @ 40kHz (前 10ms 稳基值 + 后 10ms 阶跃) */
-#define FOC_STEP_PRE 400U /* 阶跃前 10ms 稳在基值, 小信号测试也够稳 */
-static float step_buf[FOC_STEP_N][3]; /* 每点: Iq, Iq_ref, Vq */
+/* 40 kHz 电流阶跃采样，完成后由 VOFA 整包上传。 */
+#define FOC_STEP_N 800U
+#define FOC_STEP_PRE 400U
+static float step_buf[FOC_STEP_N][3];
 static volatile uint16_t step_n;
 static volatile float step_amp;
 static volatile float step_base; /* 偏置电流, 小信号阶跃时先用 */
@@ -127,7 +125,7 @@ bool foc_adc_midpoint(void)
 	return true;
 }
 
-/* 三相电压 + 母线电压: 1kHz 软件触发 ADC1 采一组, 换算 + 滤波 */
+/* 以 1 kHz 读取并滤波三相电压和母线电压。 */
 void foc_update_voltages(void)
 {
 	uint16_t va, vb, vc, vbus_raw;
@@ -159,10 +157,9 @@ void foc_update_voltages(void)
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
-/* 死区补偿: 按电流方向逐相补 ±(t_dead/T_pwm); ITH 太窄会近似方波,
- * 低速有可听啸叫 */
-#define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U) /* 仅 FD6288 的 100ns */
-#define DT_COMP_ITH (0.8f)		     /* 过零过渡带(A) */
+/* 按相电流方向补偿死区及驱动器约 100 ns 延迟。 */
+#define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U)
+#define DT_COMP_ITH (0.8f)
 
 static void foc_deadtime_comp(void)
 {
@@ -199,14 +196,14 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	float mod_vd = Vd * v_to_mod;
 	float mod_vq = Vq * v_to_mod;
 
-	/* Vector modulation saturation, lock integrator if saturated */
+	/* 电压矢量限幅到线性调制范围，避免过调制。 */
 	float factor = 0.9f * SQRT3_BY_2 / sqrtf(SQ(mod_vd) + SQ(mod_vq));
 	if (factor < 1.0f) {
 		mod_vd *= factor;
 		mod_vq *= factor;
 	}
 
-	/* Inverse park transform */
+	/* 逆 Park 变换，将 dq 电压转换到 αβ 坐标系。 */
 	float alpha, beta;
 	float pwm_phase = phase;
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
@@ -217,20 +214,20 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	}
 }
 
-/* 三相下桥全开, 上桥全关 */
+/* 三相下桥导通，上桥关闭。 */
 void pwm_output_low_sides(void)
 {
 	pwm_set_duty(0, 0, 0);
 }
 
-/* 恢复三相正常 PWM 输出 */
+/* 解除软件强制输出，恢复正常 PWM。 */
 void enable_bldc_pwm_output(void)
 {
 	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++)
 		pwmv2_disable_software_force(PWM, ch);
 }
 
-/* 强制三相输出到无效电平, 完全关断 */
+/* 将 PWM 输出强制到无效电平，关闭功率输出。 */
 void disable_bldc_pwm_output(void)
 {
 	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++) {
@@ -334,7 +331,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	float v_q =
 	    i_q_err * FOC.current_ctrl_p_gain + FOC.current_ctrl_integral_q;
 
-	/* 反电势前馈 + d/q 交叉解耦 (校准模式不启用, 保证磁链标定模型不变) */
+	/* 反电势前馈与 d/q 解耦；标定期间关闭以保持模型不变。 */
 	if (FOC.ff_enable && !FOC.calib_mode) {
 		v_d += -phase_vel * Config.phase_inductance * i_q;
 		v_q += phase_vel *
@@ -345,12 +342,12 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	FOC.Vq_out = v_q;
 	FOC.Vmag = sqrtf(SQ(v_d) + SQ(v_q));
 
-	/* voltage normalize = 1/(2/3*v_bus) */
+	/* 将电压值归一化为 SVPWM 调制输入。 */
 	float v_to_mod = 1.5f / FOC.Vbus_filt;
 	float mod_vd = v_d * v_to_mod;
 	float mod_vq = v_q * v_to_mod;
 
-	/* Vector modulation saturation, lock integrator if saturated */
+	/* 电压矢量限幅到线性调制范围，避免过调制。 */
 	float factor = 0.9f * SQRT3_BY_2 / sqrtf(SQ(mod_vd) + SQ(mod_vq));
 	if (factor < 1.0f) {
 		mod_vd *= factor;
@@ -368,7 +365,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 		    (FOC.current_ctrl_i_gain * CURRENT_MEASURE_PERIOD);
 	}
 
-	/* 角度外推一拍, 补偿计算到生效之间的延迟 */
+	/* 按电角速度外推一个电流环周期，补偿采样至 PWM 生效的延迟。 */
 	float alpha, beta;
 	float pwm_phase = phase + phase_vel * CURRENT_MEASURE_PERIOD;
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
@@ -383,7 +380,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	FOC.Id = i_d;
 	UTILS_LP_FAST(FOC.Id_filt, FOC.Id, 0.01f);
 
-	/* 转矩估算 (表贴式: T = 1.5·p·λ·iq) */
+	/* 表贴式 PMSM 转矩估算：T = 1.5 × 极对数 × 磁链 × Iq。 */
 	FOC.torque =
 	    1.5f * (float)Config.pole_pairs * Config.flux_linkage * i_q;
 
@@ -392,7 +389,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 void foc_adc_callback(void)
 {
-	/* 电流阶跃测试: 40kHz 注入 Iq 阶跃并记录 (锁转子时测纯电流环) */
+	/* 锁定转子时记录 Iq 阶跃响应，用于分析电流环带宽。 */
 	if (step_state == 1U) {
 		uint16_t n = step_n;
 		float ref = (n < FOC_STEP_PRE) ? step_base
@@ -410,8 +407,7 @@ void foc_adc_callback(void)
 		return;
 	}
 
-	/* 波形采样: 40kHz 8 分频 -> 5kHz, 攒批由 vofa 任务发送.
-	 * 阶跃采完待发期间 (state==2) 暂停, 免得和阶跃数据包混在一起 */
+	/* 波形采样由 40 kHz 降采样至 5 kHz；阶跃数据单独打包。 */
 	static uint8_t vofa_div = 0;
 
 	if (step_state == 0U) {
@@ -424,7 +420,7 @@ void foc_adc_callback(void)
 	if (!FOC.is_armed)
 		return;
 
-	/* 校准: α 轴正弦电压注入 (电感测量) */
+	/* 电感标定：在 α 轴注入正弦电压。 */
 	if (FOC.calib_vinj_mode) {
 		FOC.inj_phase += FOC.vinj_omega * CURRENT_MEASURE_PERIOD;
 		if (FOC.inj_phase >= M_2PI)
@@ -442,7 +438,7 @@ void foc_adc_callback(void)
 		return;
 	}
 
-	/* 校准: 开环电流模式 (角度由校准状态机下发) */
+	/* 开环电流标定使用标定任务下发的角度。 */
 	if (FOC.calib_mode) {
 		if (FOC.calib_adv_angle) {
 			FOC.calib_angle +=
@@ -466,16 +462,12 @@ void foc_adc_callback(void)
 		return;
 	}
 
-	/* 编码器只按 5kHz 更新, 电流环是 40kHz. 若直接用 encoder.phase,
-	 * 高速下电角度会滞后 100~250µs; 9µH/0.03Ω 的电机反电势会落到错误
-	 * 轴, 相电流瞬间失控. 这里用 phase_vel 在每个电流环中断外推, 每来
-	 * 一帧编码器再对齐一次 (补上采样到发布的固定滞后). */
+	/* 编码器以 5 kHz 更新，电流环为 40 kHz；按速度外推中间角度。 */
 	static float phase_est;
 	static uint32_t phase_seq_seen;
 
 	if (encoder.phase_seq != phase_seq_seen) {
-		/* 编码器采样到 ENCODER_loop 发布固定滞后半个编码器周期;
-		 * 再补半个电流环周期, 使重同步的残余误差居中 (±25µs). */
+		/* 重同步时补偿编码器采样到发布的固定延迟。 */
 		float sync_latency =
 		    1.0f / (2.0f * (float)ENCODER_TASK_HZ) +
 		    0.5f * CURRENT_MEASURE_PERIOD;

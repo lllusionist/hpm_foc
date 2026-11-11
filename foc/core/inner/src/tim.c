@@ -6,7 +6,7 @@ static uint32_t g_dead_ticks; /* 死区(计数周期数) */
 
 uint32_t reload; /* 载波周期 */
 
-/* ns转计数周期数(向上取整) */
+/* 纳秒换算为 PWM 计数，结果向上取整。 */
 static uint32_t pwm_ns_to_ticks(uint32_t ns)
 {
 	uint64_t ticks =
@@ -20,7 +20,7 @@ static uint32_t pwm_ns_to_ticks(uint32_t ns)
 	return (uint32_t)ticks;
 }
 
-/* 死区专用:最少2个周期,上限16bit */
+/* 死区计数限制在硬件支持范围内。 */
 static uint32_t pwm_dead_ns_to_ticks(uint32_t ns)
 {
 	uint32_t ticks = pwm_ns_to_ticks(ns);
@@ -32,7 +32,7 @@ static uint32_t pwm_dead_ns_to_ticks(uint32_t ns)
 	return ticks;
 }
 
-/* 占空比上限(受死区限制) */
+/* 死区约束下的最大占空比。 */
 float pwm_get_duty_max(void)
 {
 	if ((reload + 1U) <= (4U * g_dead_ticks))
@@ -41,13 +41,13 @@ float pwm_get_duty_max(void)
 	       (2.0f * (float)g_dead_ticks + 4.0f) / (float)(reload + 1U);
 }
 
-/* 占空比下限(受最小脉宽限制) */
+/* 最小脉宽对应的占空比下限。 */
 float pwm_get_duty_min(void)
 {
 	return (float)pwm_ns_to_ticks(PWM_MIN_ON_NS) / (float)(reload + 1U);
 }
 
-/* 故障保护配置 */
+/* 配置 PWM 故障输出及恢复方式。 */
 static void pwm_fault_config(void)
 {
 	for (uint8_t ch = 0; ch < 6; ch++) {
@@ -64,7 +64,7 @@ static void pwm_fault_config(void)
 
 void pwm_init(void)
 {
-	/* 计算死区与周期 */
+	/* 计算 PWM 周期和死区。 */
 	g_pwm_clk_hz = clock_get_frequency(clock_pwm0);
 	g_dead_ticks = pwm_dead_ns_to_ticks(PWM_DEAD_TIME_NS);
 	reload = g_pwm_clk_hz / PWM_FREQ_HZ - 1; /* 周期=(reload+1)个时钟 */
@@ -185,7 +185,7 @@ void pwm_init(void)
 	pwmv2_set_dead_area(PWM, pwm_channel_4, g_dead_ticks);
 	pwmv2_set_dead_area(PWM, pwm_channel_5, g_dead_ticks);
 
-	/* 两点模式 */
+	/* 每个通道使用两个比较点。 */
 	pwmv2_disable_four_cmp(PWM, pwm_channel_0);
 	pwmv2_disable_four_cmp(PWM, pwm_channel_1);
 	pwmv2_disable_four_cmp(PWM, pwm_channel_2);
@@ -193,7 +193,7 @@ void pwm_init(void)
 	pwmv2_disable_four_cmp(PWM, pwm_channel_4);
 	pwmv2_disable_four_cmp(PWM, pwm_channel_5);
 
-	/* 故障保护配置 */
+	/* 配置 PWM 故障输出及恢复方式。 */
 	pwm_fault_config();
 
 	/* 使能输出 */
@@ -213,7 +213,7 @@ void pwm_init(void)
 	pwmv2_start_pwm_output_sync(PWM, 0x07);	    /* 同时启动 */
 }
 
-/* 占空比上限: 给低边采样留余量, 0.96 保证最小窗口 >= 周期 4% */
+/* 占空比限制在 0.96，为低边电流采样保留至少 4% 周期窗口。 */
 #define PWM_DUTY_MAX_LIMIT (0.96f)
 
 void pwm_set_duty(float du, float dv, float dw)

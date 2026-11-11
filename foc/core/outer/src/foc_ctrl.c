@@ -8,21 +8,18 @@ tController Controller;
 
 #define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
 
-// 低速摩擦前馈 + 增益调度 (MOVE/BREAK=0 关前馈; VEL_BOOST_GAIN=1 关调度)
+// 低速摩擦前馈与速度增益调度；MOVE/BREAK 设为 0 可关闭前馈。
 #define FRICTION_FF_MOVE_A 0.030f
 #define FRICTION_FF_BREAK_A 0.050f
 #define FRICTION_FF_ENGAGE_VEL 0.010f
 #define FRICTION_FF_RELEASE_VEL 0.050f
-// 基础增益已到 0.17/5.3, 低速不再额外放大
 #define VEL_BOOST_GAIN 1.0f
 #define VEL_BOOST_FULL_VEL 0.5f
 #define VEL_BOOST_END_VEL 1.0f
 
 static bool friction_boost;
-// 摩擦前馈开关 (默认开, USB 0x2B 可在线切换做 A/B)
 static bool friction_ff_en = true;
 
-// 仅用于打印
 static const char *profile_name(int32_t p)
 {
 	if (p == MOTOR_PROFILE_5210)
@@ -159,14 +156,14 @@ void CONTROLLER_sync_callback(void)
 	Controller.target_reached = false;
 }
 
-// 1kHz 外环: 生成 FOC.Iq_set, 电流环仍在 ADC 中断里执行
+// 5 kHz 外环生成电流给定；电流环在 ADC 中断中执行。
 void CONTROLLER_loop(void)
 {
 	float iq_set = 0;
 	float v_err = 0.0f;
 	tFSMState stage = foc_get_stage();
 
-	// 处理中断里提交的请求 (必须在任务上下文执行)
+	// 在任务上下文处理从中断延后的请求。
 	if ((stage == IDLE) || (stage == RUN)) {
 		if (Controller.op_mode_pending) {
 			Controller.op_mode_pending = false;
@@ -178,7 +175,7 @@ void CONTROLLER_loop(void)
 		}
 	}
 
-	// 电机配置档切换: 必须失能状态, 套用后重算电流环增益并存 Flash
+	// 仅在失能时切换电机配置档。
 	if (Controller.motor_profile_pending >= 0) {
 		int32_t p = Controller.motor_profile_pending;
 		Controller.motor_profile_pending = -1;
@@ -311,7 +308,7 @@ void CONTROLLER_loop(void)
 	bool low_speed_assist = (foc_get_stage() != ANTICOGGING);
 
 	if (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) {
-		// 低速时静摩擦占主导, 平滑提升增益; 1rps 以上恢复原值
+		// 低速时调度速度环增益。
 		float av = fabsf(vel_meas);
 		float boost = 1.0f;
 		if (low_speed_assist) {
@@ -331,7 +328,7 @@ void CONTROLLER_loop(void)
 		iq_set += Controller.vel_integrator;
 	}
 
-	// 电流模式下的速度限幅
+	// 电流模式下按速度限值约束 Iq 给定。
 	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
 		float Imax =
 		    (+Config.velocity_limit - vel_meas) * Config.vel_p_gain;
@@ -340,7 +337,7 @@ void CONTROLLER_loop(void)
 		iq_set = CLAMP(iq_set, Imin, Imax);
 	}
 
-	// 摩擦前馈: 粘住给突破电流, 转起来回动摩擦(0x2B 可关)
+	// 根据静摩擦或动摩擦补偿前馈电流，USB 0x2B 可在线关闭。
 	if (friction_ff_en &&
 	    (Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    low_speed_assist) {
@@ -358,11 +355,10 @@ void CONTROLLER_loop(void)
 			iq_set -= ff;
 	}
 
-	// 齿槽前馈: 保持电流与齿槽转矩同向, 取正
+	// 对齿槽补偿表相邻点线性插值。
 	if ((Controller.ctrl_mode >= CONTROL_MODE_VELOCITY_RAMP) &&
 	    Config.anticogging_enable && Config.cogging_map_valid &&
 	    (foc_get_stage() != ANTICOGGING)) {
-		// 相邻两点线性插值, 降低 512 点查表的量化毛刺
 		float fidx = (float)COGGING_MAP_NUM *
 			     (float)encoder.count_aligned / ENCODER_CPR_F;
 		int i0 = (int)fidx;
@@ -396,20 +392,19 @@ void CONTROLLER_loop(void)
 		Controller.vel_integrator *= 0.99f;
 	else
 		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
-	// 齿槽扫描要 2~3A 起动电流, ±0.5A 限幅会把积分器卡死
+	// 齿槽标定期间放宽速度积分限幅。
 	float vint_lim =
 	    (foc_get_stage() == ANTICOGGING) ? 4.0f : 0.5f;
 	Controller.vel_integrator =
 	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
 }
 
-// 读当前摩擦前馈开关状态 (标定前后保存/恢复用)
+// 读取摩擦前馈开关状态，供标定流程保存和恢复。
 uint8_t CONTROLLER_get_friction_ff(void)
 {
 	return friction_ff_en ? 1U : 0U;
 }
 
-// 摩擦前馈在线开关 (0x2B)
 void CONTROLLER_set_friction_ff(uint8_t en)
 {
 	friction_ff_en = (en != 0U);

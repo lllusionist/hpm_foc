@@ -10,7 +10,7 @@
 #define ADC_CH_IC (2U)	 /* PF21 */
 #define ADC_CH_IBUS (3U) /* PF20 */
 
-/* 采样保持 20→10: 三路串行转换越短, 越不容易撞上开关沿(Ic 最危险) */
+/* 缩短采样保持时间，降低开关沿干扰。 */
 #define ADC_SAMPLE_CYCLE (10U)
 #define ADC_PMT_ERROR_MASK \
 	(ADC16_INT_STS_AHB_ERR_MASK | ADC16_INT_STS_DMA_FIFO_FULL_MASK | \
@@ -54,7 +54,7 @@ void adc_init(void)
 
 	clock_add_to_group(clock_adc0, 0);
 
-	/* ADC 时钟源选 ahb0(200MHz) */
+	/* ADC 时钟为 AHB0 / 4，即 50 MHz。 */
 	clock_set_adc_source(clock_adc0, clk_adc_src_ahb0);
 
 	adc16_get_default_config(&cfg);
@@ -166,7 +166,7 @@ void adc1_init(void)
 	adc16_enable_pmt_queue(HPM_ADC1, ADC1_TRIG_CH);
 	adc16_enable_pmt_queue(HPM_ADC1, ADC1_IBUS_TRIG_CH);
 
-	/* 电压输入设为模拟脚 */
+	/* 电压采样引脚配置为模拟输入。 */
 	HPM_IOC->PAD[IOC_PAD_PF16].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
 	HPM_IOC->PAD[IOC_PAD_PF18].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
 	HPM_IOC->PAD[IOC_PAD_PF19].FUNC_CTL = IOC_PAD_FUNC_CTL_ANALOG_MASK;
@@ -182,7 +182,7 @@ bool adc1_read_ibus(uint16_t *ibus)
 				    ADC16_INT_STS_DMA_FIFO_FULL_MASK;
 
 	adc16_clear_status_flags(HPM_ADC1, error_mask);
-	/* 该队列未开 INTEN, TRG_CMPT_FLAG 不置位: 清通道字段等 DMA 发布 */
+	/* 该队列未开完成中断，以 DMA 通道字段标记采样就绪。 */
 	sample->adc_ch = 0x1FU;
 	adc16_trigger_pmt_by_sw(HPM_ADC1, ADC1_IBUS_TRIG_CH);
 	for (uint32_t i = 0; i < 4000U; i++) {
@@ -278,9 +278,7 @@ void isr_adc(void)
 		FOC.Ib = adc_dma_buf[1].result;
 		FOC.Ic = adc_dma_buf[2].result;
 
-		/* Ic 强制用 -(Ia+Ib) 重构: 低边采样最容易在该相采到开关沿/高
-		 * 占空比窗口不足, 干脆不用实测 Ic. isum 用重构前的实测值算,
-		 * 仅作诊断 (非零 = 实测 Ic 的误差, 不再用于触发重构) */
+		/* 由 Ia、Ib 重构 Ic；实测电流和仅用于诊断。 */
 		FOC.isum =
 		    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
 		     (FOC.Ic - FOC.Ic_midpoint)) *
