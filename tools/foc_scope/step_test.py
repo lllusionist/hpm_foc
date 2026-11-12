@@ -142,9 +142,10 @@ class StepApp:
         if self.ser is None:
             messagebox.showwarning("提示", "请先连接串口")
             return False
-        payload = bytes([cid])
-        if value is not None:
-            payload += struct.pack("<f", value)
+        # 固件按 5 字节一帧切分 (1B id + 4B float), 无参命令也必须补齐 5 字节,
+        # 否则整包被丢弃
+        payload = bytes([cid]) + struct.pack(
+            "<f", 0.0 if value is None else float(value))
         self.ser.write(payload)
         return True
 
