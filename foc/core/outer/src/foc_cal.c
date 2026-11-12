@@ -87,6 +87,12 @@ static uint32_t r_di_cnt;
 static float l_v_dc, l_v_amp; /* 注入的直流偏置 / 正弦幅值 */
 static uint8_t l_pass;	      /* 0 = 探测轮, 1 = 测量轮 */
 
+/* 标定期间临时改动的运行参数, calibration_end 无论成功与否都要恢复,
+ * 否则中途失败会把临时值 (如 velocity_limit=10000) 留在 Config 里被保存 */
+static float cal_vel_limit_save;
+static int cal_ctrl_mode_save;
+static bool cal_saved;
+
 void calibration_start(void)
 {
 	if (!FOC.adc_ready) {
@@ -95,6 +101,10 @@ void calibration_start(void)
 		mCalibStep = CS_NULL;
 		return;
 	}
+
+	cal_vel_limit_save = Config.velocity_limit;
+	cal_ctrl_mode_save = Controller.ctrl_mode;
+	cal_saved = true;
 
 	Config.encoder_dir = +1;
 	Config.calib_valid = false;
@@ -129,6 +139,14 @@ void calibration_end(void)
 	FOC.calib_vinj_mode = false;
 	FOC.calib_adv_angle = false;
 	foc_disarm();
+
+	if (cal_saved) {
+		Config.velocity_limit = cal_vel_limit_save;
+		Controller.ctrl_mode = cal_ctrl_mode_save;
+		Controller.input_current = 0.0f;
+		Controller.cur_setpoint = 0.0f;
+		cal_saved = false;
+	}
 
 	/* 没走到最后的状态 -> 本次标定作废(calib_valid=0), 打印停在哪一步 */
 	if (!Config.calib_valid) {
@@ -1010,6 +1028,16 @@ void calibration_loop(void)
 			sample_count = 0;
 			next_sample_time = 0;
 			mCalibStep = CS_NULL;
+			/* 写 Flash 期间全局关中断几十 ms: 必须先停电流环并失能,
+			 * 否则 PWM 保持最后一拍占空比无人控制 */
+			FOC.calib_mode = false;
+			FOC.calib_adv_angle = false;
+			foc_disarm();
+			if (cal_saved) {
+				Config.velocity_limit = cal_vel_limit_save;
+				Controller.ctrl_mode = cal_ctrl_mode_save;
+				cal_saved = false;
+			}
 			CONFIG_save_to_flash();
 			foc_request_stage(IDLE);
 		}
