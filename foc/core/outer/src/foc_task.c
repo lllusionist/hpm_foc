@@ -202,10 +202,17 @@ static void foc_check_and_trip(void)
 		fault = FOC_FAULT_ADC;
 
 	if (fault != FOC_FAULT_NONE) {
+		/* 先关断再打印: printf 走阻塞 UART, 一行约 5ms.
+		 * 现场值在关断前取出 (foc_disarm 会清零 Iq) */
+		float iq_at_fault = FOC.Iq;
+		float vbus_at_fault = FOC.Vbus;
+
+		foc_disarm();
 		FOC.fault_code = fault;
+		foc_request_stage(IDLE);
 		printf("FAULT %u: Vbus %dmV, I %.2fA (uv %dmV ov %dmV)",
-		       (unsigned)fault, (int)(FOC.Vbus * 1000.0f),
-		       (double)FOC.Iq,
+		       (unsigned)fault, (int)(vbus_at_fault * 1000.0f),
+		       (double)iq_at_fault,
 		       (int)(Config.protect_under_voltage * 1000.0f),
 		       (int)(Config.protect_over_voltage * 1000.0f));
 		if (foc_get_stage() == CALIBRATION)
@@ -213,8 +220,6 @@ static void foc_check_and_trip(void)
 		if (foc_get_stage() == ANTICOGGING)
 			printf(" anticog_step=%d", anticogging_step());
 		printf("\n");
-		foc_disarm();
-		foc_request_stage(IDLE);
 	}
 }
 
