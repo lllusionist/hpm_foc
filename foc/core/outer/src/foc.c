@@ -19,6 +19,8 @@ void FOC_step_set_base(float base)
 {
 	float lim = Config.current_limit;
 
+	if (!isfinite(base))
+		return;
 	if (base > lim)
 		base = lim;
 	if (base < -lim)
@@ -32,6 +34,11 @@ void FOC_step_start(float amp)
 	float b = step_base;
 
 	if (step_state != 0U)
+		return;
+	/* 只在使能的 RUN 状态下接受, 否则电流环会在失能时驱动 PWM */
+	if (!FOC.is_armed || (foc_get_stage() != RUN))
+		return;
+	if (!isfinite(amp) || !isfinite(b))
 		return;
 	if (b + amp > lim)
 		amp = lim - b;
@@ -389,6 +396,12 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 void foc_adc_callback(void)
 {
+	/* 阶跃测试只在使能的 RUN 状态下执行; 失能时立即作废, 防止绕过使能输出 PWM */
+	if ((step_state == 1U) &&
+	    (!FOC.is_armed || (foc_get_stage() != RUN))) {
+		step_state = 0U;
+	}
+
 	/* 锁定转子时记录 Iq 阶跃响应，用于分析电流环带宽。 */
 	if (step_state == 1U) {
 		uint16_t n = step_n;
