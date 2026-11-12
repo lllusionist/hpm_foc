@@ -371,7 +371,7 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
 
 	if (0 == SVPWM(alpha, beta, &FOC.dtc_a, &FOC.dtc_b, &FOC.dtc_c)) {
-		// foc_deadtime_comp();
+		foc_deadtime_comp();
 		pwm_set_duty(FOC.dtc_a, FOC.dtc_b, FOC.dtc_c);
 	}
 
