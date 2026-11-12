@@ -167,6 +167,18 @@ void ENCODER_start_read(void)
 	}
 }
 
+/* 方向修正后的单圈值 -> 扣除标定零偏和偏移表后的单圈值.
+ * PLL 跟踪的是对齐后的计数, 初始化/重同步必须用同一坐标域 */
+static uint32_t encoder_align(uint32_t corrected)
+{
+	uint32_t lut_index =
+	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
+	int32_t aligned = (int32_t)corrected - Config.encoder_offset -
+			  Config.offset_lut[lut_index];
+
+	return (uint32_t)aligned & ENCODER_MASK;
+}
+
 /* 解析最新帧并更新位置与速度。 */
 void ENCODER_loop(void)
 {
@@ -194,7 +206,7 @@ void ENCODER_loop(void)
 	/* 前几拍只对齐, 不参与累加和 PLL */
 	if (encoder.need_init > 0U) {
 		encoder.count_in_cpr_prev = corrected;
-		encoder.pll_pos = (float)corrected;
+		encoder.pll_pos = (float)encoder_align(corrected);
 		encoder.pll_vel = 0;
 		encoder.need_init--;
 		return;
@@ -238,7 +250,7 @@ void ENCODER_loop(void)
 		if (++encoder.bad_run >= 5U) {
 			encoder.bad_run = 0;
 			encoder.count_in_cpr_prev = corrected;
-			encoder.pll_pos = (float)corrected;
+			encoder.pll_pos = (float)encoder_align(corrected);
 		}
 
 		return; /* 保留上一拍角度, 不累加、不喂 PLL */
@@ -249,11 +261,7 @@ void ENCODER_loop(void)
 	encoder.count_in_cpr_prev = corrected;
 
 	/* 应用标定零偏和角度修正表。 */
-	uint32_t lut_index =
-	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
-	int32_t aligned_count = (int32_t)corrected - Config.encoder_offset -
-				Config.offset_lut[lut_index];
-	encoder.count_aligned = (uint32_t)aligned_count & ENCODER_MASK;
+	encoder.count_aligned = encoder_align(corrected);
 	count = (float)encoder.count_aligned;
 	/* 多圈机械位置，单位为转。 */
 	encoder.pos = (float)encoder.shadow_count / ENCODER_CPR_F;
