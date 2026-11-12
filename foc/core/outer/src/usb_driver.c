@@ -4,9 +4,24 @@
 #include "foc_ctrl.h"
 #include "vofa.h"
 
+/* 把参数钳到 [lo, hi]; 调用前已保证 v 有限 */
+static float clampf(float v, float lo, float hi)
+{
+	if (v < lo)
+		return lo;
+	if (v > hi)
+		return hi;
+	return v;
+}
+
 void USB_parse_frame(UsbFrame *frame)
 {
 	uint8_t id = frame->id;
+
+	/* 所有命令的参数都是 float: NaN/Inf 一律丢弃整帧.
+	 * NaN 经 CLAMP(MIN/MAX) 会变成下限, 导致负向满幅输出 */
+	if (!isfinite(data_to_float(&frame->data[0])))
+		return;
 
 	switch (id) {
 	// 配置持久化 (延迟到任务里执行: 擦写要关中断几十 ms)
@@ -158,28 +173,33 @@ void USB_parse_frame(UsbFrame *frame)
 	}
 
 	case USB_CMD_SET_VEL_KP: {
-		Config.vel_p_gain = data_to_float(&frame->data[0]);
+		Config.vel_p_gain =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 100.0f);
 		break;
 	}
 
 	case USB_CMD_SET_VEL_KI: {
-		Config.vel_i_gain = data_to_float(&frame->data[0]);
+		Config.vel_i_gain =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 10000.0f);
 		break;
 	}
 
 	case USB_CMD_SET_POS_KP: {
-		Config.pos_p_gain = data_to_float(&frame->data[0]);
+		Config.pos_p_gain =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 1000.0f);
 		break;
 	}
 
-	// 保护阈值 (改完用 0x3F 存 Flash)
+	// 保护阈值 (改完用 0x3F 存 Flash); 量程按 16:1 分压 × 3.3V 约 52.8V
 	case USB_CMD_SET_UNDER_VOLTAGE: {
-		Config.protect_under_voltage = data_to_float(&frame->data[0]);
+		Config.protect_under_voltage =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 52.0f);
 		break;
 	}
 
 	case USB_CMD_SET_OVER_VOLTAGE: {
-		Config.protect_over_voltage = data_to_float(&frame->data[0]);
+		Config.protect_over_voltage =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 52.0f);
 		break;
 	}
 
