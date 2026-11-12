@@ -93,7 +93,9 @@ void USB_parse_frame(UsbFrame *frame)
 
 	case USB_CMD_MOTOR_ENABLE:
 		if (!Config.calib_valid) {
-			printf("enable refused: not calibrated\n");
+			/* 本函数在 USB 中断里执行, 不能 printf (阻塞 UART + 中断不可嵌套),
+			 * 置标志由 FOC 任务打印 */
+			Controller.enable_refused_pending = true;
 			break;
 		}
 		foc_request_stage(RUN);

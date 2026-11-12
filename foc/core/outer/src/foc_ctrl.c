@@ -163,6 +163,11 @@ void CONTROLLER_loop(void)
 	float v_err = 0.0f;
 	tFSMState stage = foc_get_stage();
 
+	if (Controller.enable_refused_pending) {
+		Controller.enable_refused_pending = false;
+		printf("enable refused: not calibrated\n");
+	}
+
 	// 在任务上下文处理从中断延后的请求。
 	if ((stage == IDLE) || (stage == RUN)) {
 		if (Controller.op_mode_pending) {
@@ -178,7 +183,8 @@ void CONTROLLER_loop(void)
 	// 仅在失能时切换电机配置档。
 	if (Controller.motor_profile_pending >= 0) {
 		int32_t p = Controller.motor_profile_pending;
-		Controller.motor_profile_pending = -1;
+	Controller.motor_profile_pending = -1;
+	Controller.enable_refused_pending = false;
 		if (FOC.is_armed) {
 			printf("motor profile: armed, refused\n");
 		} else {
