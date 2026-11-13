@@ -137,6 +137,7 @@
       <file file_name="../../core/outer/src/foc_cal.c" />
       <file file_name="../../core/outer/src/foc_ctrl.c" />
             <file file_name="../../core/outer/src/foc_task.c" />
+            <file file_name="../../core/outer/src/anticog.c" />
             <file file_name="../../core/outer/src/config.c" />
       <file file_name="../../core/outer/src/encoder.c" />
       <file file_name="../../core/outer/src/flash.c" />
