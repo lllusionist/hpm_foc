@@ -28,9 +28,8 @@ bool CONTROLLER_cmd_timed_out(void)
 
 #define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
 
-// 低速摩擦前馈与速度增益调度；MOVE/BREAK 设为 0 可关闭前馈。
-#define FRICTION_FF_MOVE_A 0.030f
-#define FRICTION_FF_BREAK_A 0.050f
+// 低速摩擦前馈与速度增益调度; 电流值来自 Config 随电机档位变化
+// ENGAGE/RELEASE 速度阈值保持固定 (与电机无关)
 #define FRICTION_FF_ENGAGE_VEL 0.010f
 #define FRICTION_FF_RELEASE_VEL 0.050f
 #define VEL_BOOST_GAIN 1.0f
@@ -374,7 +373,8 @@ void CONTROLLER_loop(void)
 			friction_boost = false;
 
 		float ff =
-		    friction_boost ? FRICTION_FF_BREAK_A : FRICTION_FF_MOVE_A;
+		    friction_boost ? Config.friction_break_a
+				   : Config.friction_move_a;
 		if (vel_des > FRICTION_FF_ENGAGE_VEL)
 			iq_set += ff;
 		else if (vel_des < -FRICTION_FF_ENGAGE_VEL)
@@ -418,9 +418,10 @@ void CONTROLLER_loop(void)
 		Controller.vel_integrator *= 0.99f;
 	else
 		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
-	// 齿槽标定期间放宽速度积分限幅。
+	// 齿槽标定期间放宽速度积分限幅; 正常运行用配置值 (随电机档位变化)
 	float vint_lim =
-	    (foc_get_stage() == ANTICOGGING) ? 4.0f : 0.5f;
+	    (foc_get_stage() == ANTICOGGING) ? 4.0f
+					     : Config.vel_integrator_limit;
 	Controller.vel_integrator =
 	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
 }

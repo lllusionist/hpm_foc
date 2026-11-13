@@ -52,6 +52,11 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 0.1rps 会粘滑
 		Config.cog_sweep_rps = 0.30f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
+		// 速度积分器 / 摩擦前馈随电机档位配置
+		Config.ctrl_cfg_magic = CONFIG_MAGIC;
+		Config.vel_integrator_limit = 4.0f; // 5210 限流 8A, 积分器半幅
+		Config.friction_move_a = 0.08f;
+		Config.friction_break_a = 0.12f;
 	} else if (profile == MOTOR_PROFILE_2312) {
 		// 2312: 12N14P, KV960(Kt 为 5210 的 1/3)
 		Config.phase_resistance = 0.144f;
@@ -85,6 +90,10 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 84 格/圈, 21Hz
 		Config.cog_sweep_rps = 0.25f;
 		Config.motor_profile = MOTOR_PROFILE_2312;
+		Config.ctrl_cfg_magic = CONFIG_MAGIC;
+		Config.vel_integrator_limit = 3.0f;
+		Config.friction_move_a = 0.05f;
+		Config.friction_break_a = 0.08f;
 	} else {
 		// 4310 云台, 0.9A
 		Config.phase_resistance = 8.29f;
@@ -110,6 +119,10 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.calib_flux_rtest_ratio = 0.5f;
 		Config.cog_sweep_rps = 0.10f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
+		Config.ctrl_cfg_magic = CONFIG_MAGIC;
+		Config.vel_integrator_limit = 0.5f; // 4310 限流 1.5A
+		Config.friction_move_a = 0.030f;
+		Config.friction_break_a = 0.050f;
 	}
 
 	// 切换电机配置档后，原电机的标定数据失效。
@@ -160,6 +173,13 @@ uint8_t CONFIG_load_from_flash(void)
 		Config.calib_j_iq_gain = 0.15f;
 		Config.calib_flux_rtest_ratio = 0.5f;
 		Config.cog_sweep_rps = 0.10f;
+	}
+	if (Config.ctrl_cfg_magic != CONFIG_MAGIC) {
+		/* 旧 Flash 记录没有这组字段, 使用保守默认值 */
+		Config.ctrl_cfg_magic = CONFIG_MAGIC;
+		Config.vel_integrator_limit = 0.5f;
+		Config.friction_move_a = 0.030f;
+		Config.friction_break_a = 0.050f;
 	}
 	if (debug)
 		config_debug_overrides();
@@ -225,6 +245,12 @@ void config_init(void)
 	Config.calib_j_iq_gain = 0.15f;
 	Config.calib_flux_rtest_ratio = 0.5f;
 	Config.cog_sweep_rps = 0.10f;
+
+	/* 控制器参数 (随电机档位变化) */
+	Config.ctrl_cfg_magic = CONFIG_MAGIC;
+	Config.vel_integrator_limit = 0.5f; /* 4310 默认 */
+	Config.friction_move_a = 0.030f;
+	Config.friction_break_a = 0.050f;
 
 	Config.crc32 = CONFIG_calculate_crc(&Config);
 

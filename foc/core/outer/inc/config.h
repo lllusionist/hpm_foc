@@ -82,6 +82,12 @@ typedef struct {
 	float calib_j_iq_gain;        // J 标定加速电流 = calib_current × 该系数
 	float calib_flux_rtest_ratio; // 磁链同速校验的降流比例
 	float cog_sweep_rps;          // 齿槽扫描速度 (rps)
+
+	// 控制器参数 (随电机档位变化; 在 crc32 之后由 ctrl_cfg_magic 校验)
+	uint32_t ctrl_cfg_magic;
+	float vel_integrator_limit; // 速度积分器限幅 (A), 原写死 0.5A 对大电机不够
+	float friction_move_a;      // 动摩擦前馈电流 (A)
+	float friction_break_a;     // 静摩擦前馈电流 (A)
 } tConfig;
 
 // 电机配置档编号 (USB 0x5F 下发时直接传编号, $FOCFG 的 PROF 也是它)
