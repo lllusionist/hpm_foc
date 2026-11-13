@@ -6,6 +6,26 @@
 
 tController Controller;
 
+/* 指令超时: 超过 CMD_TIMEOUT_MS 没收到有效指令就主动失能.
+ * 防止上位机崩溃/串口断开时电机按最后一条命令永远运行. */
+#define CMD_TIMEOUT_MS (500U)
+static volatile TickType_t s_last_cmd_tick;
+static volatile bool s_cmd_ever_received;
+
+void CONTROLLER_cmd_heartbeat(void)
+{
+	s_last_cmd_tick = xTaskGetTickCount();
+	s_cmd_ever_received = true;
+}
+
+bool CONTROLLER_cmd_timed_out(void)
+{
+	if (!s_cmd_ever_received)
+		return false; /* 上电后从未收到命令, 不触发超时 */
+	return (xTaskGetTickCount() - s_last_cmd_tick) >
+	       pdMS_TO_TICKS(CMD_TIMEOUT_MS);
+}
+
 #define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
 
 // 低速摩擦前馈与速度增益调度；MOVE/BREAK 设为 0 可关闭前馈。

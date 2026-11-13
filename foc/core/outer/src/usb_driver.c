@@ -70,6 +70,7 @@ void USB_parse_frame(UsbFrame *frame)
 		else
 			Controller.input_current_buffer = current;
 		CONTROLLER_sync_callback();
+		CONTROLLER_cmd_heartbeat();
 		break;
 	}
 
@@ -86,6 +87,7 @@ void USB_parse_frame(UsbFrame *frame)
 		else
 			Controller.input_velocity_buffer = velocity;
 		CONTROLLER_sync_callback();
+		CONTROLLER_cmd_heartbeat();
 		break;
 	}
 
@@ -103,6 +105,7 @@ void USB_parse_frame(UsbFrame *frame)
 		else
 			Controller.input_position_buffer = position;
 		CONTROLLER_sync_callback();
+		CONTROLLER_cmd_heartbeat();
 		break;
 	}
 

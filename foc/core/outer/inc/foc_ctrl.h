@@ -46,6 +46,9 @@ extern tController Controller;
 
 void CONTROLLER_init(void);
 void CONTROLLER_reset(void);
+/* 指令心跳: 每收到有效指令调一次; FOC 任务检查超时 */
+void CONTROLLER_cmd_heartbeat(void);
+bool CONTROLLER_cmd_timed_out(void);
 /* 摩擦前馈在线开关 (0x2B) */
 void CONTROLLER_set_friction_ff(uint8_t en);
 uint8_t CONTROLLER_get_friction_ff(void);

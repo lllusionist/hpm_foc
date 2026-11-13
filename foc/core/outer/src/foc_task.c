@@ -293,6 +293,13 @@ static void Task_FOC(void *argument)
 			break;
 		case RUN:
 			foc_check_and_trip();
+			/* 指令超时: 上位机断连后主动失能, 防止电机按
+			 * 最后命令无限运行 */
+			if (CONTROLLER_cmd_timed_out()) {
+				printf("cmd timeout: auto disable\n");
+				foc_disarm();
+				foc_request_stage(IDLE);
+			}
 			break;
 		case CALIBRATION:
 			if (slow_tick)
