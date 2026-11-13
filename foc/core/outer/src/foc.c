@@ -322,7 +322,6 @@ void FOC_update_current_ctrl_gain(float bw)
 
 	Config.current_kp = FOC.current_ctrl_p_gain;
 	Config.current_ki = FOC.current_ctrl_i_gain;
-	Config.current_gain_magic = CONFIG_MAGIC;
 }
 
 void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
@@ -564,8 +563,8 @@ void foc_init(void)
 	FOC.current_ctrl_integral_q = 0;
 	FOC.Power_filt = 0;
 
-	if (Config.current_gain_magic == CONFIG_MAGIC &&
-	    Config.current_kp > 0.0f && Config.current_kp < 1.0e5f &&
+	/* 从 Flash 加载的 kp/ki 若有效则直接用, 否则按带宽重算 */
+	if (Config.current_kp > 0.0f && Config.current_kp < 1.0e5f &&
 	    Config.current_ki >= 0.0f && Config.current_ki < 1.0e7f) {
 		FOC.current_ctrl_p_gain = Config.current_kp;
 		FOC.current_ctrl_i_gain = Config.current_ki;

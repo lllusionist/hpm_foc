@@ -1,4 +1,4 @@
-#include <stddef.h>
+﻿#include <stddef.h>
 #include <string.h>
 #include "config.h"
 #include "util.h"
@@ -53,7 +53,6 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.cog_sweep_rps = 0.30f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
 		// 速度积分器 / 摩擦前馈随电机档位配置
-		Config.ctrl_cfg_magic = CONFIG_MAGIC;
 		Config.vel_integrator_limit = 4.0f; // 5210 限流 8A, 积分器半幅
 		Config.friction_move_a = 0.08f;
 		Config.friction_break_a = 0.12f;
@@ -90,7 +89,6 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 84 格/圈, 21Hz
 		Config.cog_sweep_rps = 0.25f;
 		Config.motor_profile = MOTOR_PROFILE_2312;
-		Config.ctrl_cfg_magic = CONFIG_MAGIC;
 		Config.vel_integrator_limit = 3.0f;
 		Config.friction_move_a = 0.05f;
 		Config.friction_break_a = 0.08f;
@@ -119,7 +117,6 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.calib_flux_rtest_ratio = 0.5f;
 		Config.cog_sweep_rps = 0.10f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
-		Config.ctrl_cfg_magic = CONFIG_MAGIC;
 		Config.vel_integrator_limit = 0.5f; // 4310 限流 1.5A
 		Config.friction_move_a = 0.030f;
 		Config.friction_break_a = 0.050f;
@@ -129,8 +126,6 @@ void CONFIG_apply_motor_profile(int32_t profile)
 	Config.calib_valid = 0;
 	Config.cogging_map_valid = 0;
 	Config.anticogging_enable = 0;
-	Config.motor_cfg_magic = CONFIG_MAGIC;
-	Config.calib_cfg_magic = CONFIG_MAGIC;
 }
 
 // CRC 覆盖 crc32 字段之前的数据，不包含 crc32 本身。
@@ -155,32 +150,16 @@ uint8_t CONFIG_load_from_flash(void)
 
 	if (flash_read_config(&tmp, sizeof(tConfig)) != 0)
 		return 1;
+	/* magic 和 version 双重检查: magic 变更确保 v1 记录失效 */
 	if (tmp.magic != CONFIG_MAGIC)
 		return 2;
+	if (tmp.version != CONFIG_VERSION)
+		return 4; /* 布局版本不符, 回退默认值 */
+	/* CRC 现在覆盖全部字段 (crc32 本身除外) */
 	if (tmp.crc32 != CONFIG_calculate_crc(&tmp))
 		return 3;
 
 	Config = tmp;
-	// 兼容旧记录：crc32 后新增字段可能未初始化，需设置默认值。
-	if (Config.motor_cfg_magic != CONFIG_MAGIC) {
-		Config.motor_cfg_magic = CONFIG_MAGIC;
-		Config.motor_profile = MOTOR_PROFILE_4310;
-	}
-	if (Config.calib_cfg_magic != CONFIG_MAGIC) {
-		Config.calib_cfg_magic = CONFIG_MAGIC;
-		Config.calib_drag_v_min = 0.20f;
-		Config.calib_flux_iq_gain = 0.8f;
-		Config.calib_j_iq_gain = 0.15f;
-		Config.calib_flux_rtest_ratio = 0.5f;
-		Config.cog_sweep_rps = 0.10f;
-	}
-	if (Config.ctrl_cfg_magic != CONFIG_MAGIC) {
-		/* 旧 Flash 记录没有这组字段, 使用保守默认值 */
-		Config.ctrl_cfg_magic = CONFIG_MAGIC;
-		Config.vel_integrator_limit = 0.5f;
-		Config.friction_move_a = 0.030f;
-		Config.friction_break_a = 0.050f;
-	}
 	if (debug)
 		config_debug_overrides();
 	return 0;
@@ -191,6 +170,7 @@ void config_init(void)
 	memset(&Config, 0, sizeof(tConfig));
 
 	Config.magic = CONFIG_MAGIC;
+	Config.version = CONFIG_VERSION;
 	Config.calib_valid = false;
 
 	Config.invert_motor_dir = 0;
@@ -232,14 +212,11 @@ void config_init(void)
 	Config.cogging_map_crc = 0;
 	Config.cogging_map_valid = 0;
 
-	Config.current_gain_magic = 0;
 	Config.current_kp = 0.0f;
 	Config.current_ki = 0.0f;
 
-	Config.motor_cfg_magic = CONFIG_MAGIC;
 	Config.motor_profile = MOTOR_PROFILE_4310;
 
-	Config.calib_cfg_magic = CONFIG_MAGIC;
 	Config.calib_drag_v_min = 0.20f;
 	Config.calib_flux_iq_gain = 0.8f;
 	Config.calib_j_iq_gain = 0.15f;
@@ -247,7 +224,6 @@ void config_init(void)
 	Config.cog_sweep_rps = 0.10f;
 
 	/* 控制器参数 (随电机档位变化) */
-	Config.ctrl_cfg_magic = CONFIG_MAGIC;
 	Config.vel_integrator_limit = 0.5f; /* 4310 默认 */
 	Config.friction_move_a = 0.030f;
 	Config.friction_break_a = 0.050f;

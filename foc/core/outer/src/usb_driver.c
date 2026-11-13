@@ -144,7 +144,6 @@ void USB_parse_frame(UsbFrame *frame)
 			Cur_Kp = 1.0e5f;
 		FOC.current_ctrl_p_gain = Cur_Kp;
 		Config.current_kp = Cur_Kp;
-		Config.current_gain_magic = CONFIG_MAGIC;
 		break;
 	}
 
@@ -156,7 +155,6 @@ void USB_parse_frame(UsbFrame *frame)
 			Cur_Ki = 1.0e7f;
 		FOC.current_ctrl_i_gain = Cur_Ki;
 		Config.current_ki = Cur_Ki;
-		Config.current_gain_magic = CONFIG_MAGIC;
 		break;
 	}
 
