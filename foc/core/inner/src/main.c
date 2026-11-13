@@ -15,6 +15,26 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+/* FreeRTOS 栈溢出钩子: 关中断停机, 串口打印任务名 */
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+	(void)xTask;
+	taskDISABLE_INTERRUPTS();
+	/* 此处 printf 可能无法完整输出 (栈已破坏), 但尝试一下 */
+	printf("STACK OVERFLOW: %s\n", pcTaskName);
+	for (;;) {
+	}
+}
+
+/* FreeRTOS heap 分配失败钩子 */
+void vApplicationMallocFailedHook(void)
+{
+	taskDISABLE_INTERRUPTS();
+	printf("MALLOC FAILED\n");
+	for (;;) {
+	}
+}
+
 int main(void)
 {
 	config_init();
