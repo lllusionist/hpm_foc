@@ -218,12 +218,21 @@ void pwm_init(void)
 
 void pwm_set_duty(float du, float dv, float dw)
 {
+	/* 上限: 为低边电流采样保留窗口 */
 	if (du > PWM_DUTY_MAX_LIMIT)
 		du = PWM_DUTY_MAX_LIMIT;
 	if (dv > PWM_DUTY_MAX_LIMIT)
 		dv = PWM_DUTY_MAX_LIMIT;
 	if (dw > PWM_DUTY_MAX_LIMIT)
 		dw = PWM_DUTY_MAX_LIMIT;
+
+	/* 下限: 防止死区补偿将占空比推成负数后转 uint32 发生未定义行为 */
+	if (du < 0.0f)
+		du = 0.0f;
+	if (dv < 0.0f)
+		dv = 0.0f;
+	if (dw < 0.0f)
+		dw = 0.0f;
 
 	uint32_t half = reload >> 1;
 	/* 每相导通宽度的一半 */
