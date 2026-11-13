@@ -120,7 +120,15 @@ void USB_parse_frame(UsbFrame *frame)
 		break;
 
 	case USB_CMD_MOTOR_DISABLE:
+		foc_clear_fault_req(); /* 允许下一次使能 */
 		foc_request_stage(IDLE);
+		break;
+
+	/* 故障锁存后必须先禁用再发 0x26 清除, 才能重新使能 */
+	case USB_CMD_CLEAR_FAULT:
+		if (!FOC.is_armed) {
+			FOC.fault_code = FOC_FAULT_NONE;
+		}
 		break;
 
 	case USB_CMD_SET_HOME:

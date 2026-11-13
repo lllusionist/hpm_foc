@@ -22,6 +22,7 @@
 
 #define USB_CMD_MOTOR_ENABLE 0x21
 #define USB_CMD_MOTOR_DISABLE 0x22
+#define USB_CMD_CLEAR_FAULT 0x26  /* 故障锁存后需显式清除再使能 */
 
 #define USB_CMD_SET_HOME 0x2D
 

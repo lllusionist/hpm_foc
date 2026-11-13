@@ -19,6 +19,10 @@ typedef struct sFSM {
 } tFSM;
 
 void foc_request_stage(tFSMState state);
+/* 故障专用请求: 锁住请求槽防止 USB 覆盖 */
+void foc_fault_request(tFSMState state);
+/* 解锁请求槽 (CLEAR_FAULT / DISABLE 后调用) */
+void foc_clear_fault_req(void);
 tFSMState foc_get_stage(void);
 void foc_smf_init(void);
 void foc_app_start(void);

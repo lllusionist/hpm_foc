@@ -302,7 +302,13 @@ void foc_arm(void)
 
 	enable_bldc_pwm_output();
 
-	FOC.fault_code = FOC_FAULT_NONE;
+	/* 不在 arm 时清故障码: 故障锁存, 需上位机显式发 0x22 禁用后再 0x21 使能 */
+	if (FOC.fault_code != FOC_FAULT_NONE) {
+		taskEXIT_CRITICAL();
+		/* 故障未清除, 立即重新失能 */
+		disable_bldc_pwm_output();
+		return;
+	}
 	FOC.is_armed = true;
 
 	taskEXIT_CRITICAL();

@@ -8,11 +8,31 @@ static tFSM sFSM;
 /* 外部请求 */
 static volatile tFSMState s_req = BOOT_UP;
 static volatile uint8_t s_req_valid = 0;
+/* 故障请求优先: 置位后非故障请求被拒绝, 直到 foc_clear_fault_req() */
+static volatile uint8_t s_fault_req = 0;
 
 void foc_request_stage(tFSMState state)
 {
+	/* 故障触发的请求 (IDLE) 优先于上位机的 RUN/CALIBRATION 请求.
+	 * s_fault_req 置位后, 只有 IDLE 请求能通过; 其它请求被丢弃. */
+	if (s_fault_req && state != IDLE)
+		return;
 	s_req = state;
 	s_req_valid = 1;
+}
+
+/* 由 foc_check_and_trip 调用: 故障关断后锁定请求槽 */
+void foc_fault_request(tFSMState state)
+{
+	s_fault_req = 1;
+	s_req = state;
+	s_req_valid = 1;
+}
+
+/* 由上位机 CLEAR_FAULT 或 DISABLE 后调用: 解锁请求槽 */
+void foc_clear_fault_req(void)
+{
+	s_fault_req = 0;
 }
 
 tFSMState foc_get_stage(void)
@@ -231,7 +251,7 @@ static void foc_check_and_trip(void)
 
 		foc_disarm();
 		FOC.fault_code = fault;
-		foc_request_stage(IDLE);
+		foc_fault_request(IDLE);
 		printf("FAULT %u: Vbus %dmV, I %.2fA (uv %dmV ov %dmV)",
 		       (unsigned)fault, (int)(vbus_at_fault * 1000.0f),
 		       (double)iq_at_fault,
@@ -298,7 +318,7 @@ static void Task_FOC(void *argument)
 			if (CONTROLLER_cmd_timed_out()) {
 				printf("cmd timeout: auto disable\n");
 				foc_disarm();
-				foc_request_stage(IDLE);
+				foc_fault_request(IDLE);
 			}
 			break;
 		case CALIBRATION:
