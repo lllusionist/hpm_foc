@@ -34,6 +34,10 @@
  * 凹陷. 速度环带宽只有 ~10Hz, PLL 降到 150Hz 仍远高于它, 但更平滑 */
 #define ENCODER_PLL_BW_HZ (150.0f) /* 环路带宽 */
 #define ENCODER_PLL_SNAP_VEL (ENCODER_CPR_F / 60.0f) /* 约 1 转/分 */
+/* spi_busy 连续多少个采样周期没被 DMA 回调清除, 判为 DMA 卡死并强制释放 */
+#define ENCODER_SPI_TIMEOUT_FRAMES (5U)
+/* FOC 任务检测 phase_seq 停更的超时 (ms) */
+#define ENCODER_SEQ_TIMEOUT_MS (5U)
 
 /* 方向/零位/极对数来自校准后的 Config */
 

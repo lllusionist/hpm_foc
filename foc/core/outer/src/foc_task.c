@@ -1,5 +1,6 @@
 #include "foc_task.h"
 #include "foc_ctrl.h"
+#include "encoder.h"
 #include <stdio.h>
 
 static tFSM sFSM;
@@ -176,6 +177,8 @@ static void foc_check_and_trip(void)
 {
 	static uint32_t last_frames;
 	static TickType_t last_change_tick;
+	static uint32_t last_phase_seq;
+	static TickType_t last_seq_tick;
 	uint8_t fault = foc_protection_check();
 	float vbus = FOC.Vbus;
 	uint32_t frames;
@@ -200,6 +203,16 @@ static void foc_check_and_trip(void)
 		fault = FOC_FAULT_ADC;
 	if (FOC.adc_ibus_missed >= 3U)
 		fault = FOC_FAULT_ADC;
+
+	/* 编码器停更检测: phase_seq 应每 200µs (5kHz) 递增,
+	 * 超过 5ms 没变说明 SPI/DMA 链路断了 */
+	if (encoder.phase_seq != last_phase_seq) {
+		last_phase_seq = encoder.phase_seq;
+		last_seq_tick = xTaskGetTickCount();
+	} else if ((xTaskGetTickCount() - last_seq_tick) >
+		   pdMS_TO_TICKS(ENCODER_SEQ_TIMEOUT_MS)) {
+		fault = FOC_FAULT_ENCODER;
+	}
 
 	/* ISR 级硬限幅已关断并置码, 任务只需补做状态切换 */
 	if (FOC.fault_code == FOC_FAULT_PHASE_OC_ISR)

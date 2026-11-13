@@ -147,8 +147,18 @@ void ENCODER_start_read(void)
 {
 	hpm_stat_t stat;
 
-	if (spi_busy)
-		return; /* 上一帧还没传完, 这一拍跳过 */
+	if (spi_busy) {
+		/* 上一帧 DMA 回调没来: 计数并看是否超时 */
+		encoder.error_cnt++;
+		if (encoder.error_cnt >= ENCODER_SPI_TIMEOUT_FRAMES) {
+			/* DMA 卡死: 强制释放, 下一拍重新开始 */
+			spi_busy = false;
+			encoder_cs(1);
+			encoder.bad_frame_cnt +=
+			    ENCODER_SPI_TIMEOUT_FRAMES;
+		}
+		return;
+	}
 
 	rxdma_done = false;
 	txdma_done = false;
