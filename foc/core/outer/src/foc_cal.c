@@ -999,7 +999,26 @@ void calibration_loop(void)
 					cg_max = v;
 			}
 
-			Config.calib_valid = true;
+			/* 只有关键参数全部有效才置 calib_valid.
+			 * 原来无条件置 true: 方向检测失败/磁链无效也会通过.
+			 * 任意一项失败都会在前面的步骤里通过 foc_request_stage(IDLE)
+			 * 中止流程, 实际上不会走到这里, 但加显式检查更安全. */
+			bool calib_ok =
+			    (Config.pole_pairs > 0) &&
+			    (Config.pole_pairs <= (int32_t)MAX_MOTOR_POLE_PAIRS) &&
+			    (Config.flux_linkage > 0.00001f) &&
+			    (Config.phase_resistance > 0.0001f) &&
+			    (Config.phase_inductance > 1e-9f);
+
+			if (!calib_ok) {
+				printf("calib: REJECTED (pp=%ld lam=%.6f "
+				       "R=%.4f L=%.6f)\n",
+				       (long)Config.pole_pairs,
+				       (double)Config.flux_linkage,
+				       (double)Config.phase_resistance,
+				       (double)Config.phase_inductance);
+			}
+			Config.calib_valid = calib_ok;
 
 			printf("\n===== CALIB RESULT =====\n");
 			printf(" R      = %.5f Ohm\n", R);
