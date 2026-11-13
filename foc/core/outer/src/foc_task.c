@@ -125,49 +125,54 @@ static bool foc_over_current(void)
 	       (fabsf(ic) > limit);
 }
 
-/* 保护: 相过流(立即) / 母线过压 / 母线欠压; 返回故障码, 0 = 正常 */
+/* 保护: 相过流(立即) / 母线过压 / 母线欠压; 返回故障码, 0 = 正常
+ *
+ * L4 修正: 欠压阈值改为固定比较, 不再与滤波值挂钩, 否则缓慢下跌时
+ *         保护会把自己关掉; 阈值 0 表示禁用.
+ * L5 修正: 过压/欠压去抖改为"连续 N 次 1kHz 新采样"而不是任务调用次数.
+ *         电压 1kHz 更新, 任务 5kHz 执行, 原"3次"实为同一采样重复比较. */
 static uint8_t foc_protection_check(void)
 {
-	static bool uv_warned = false;
-	static uint32_t ov_cnt = 0;
-	static uint32_t uv_cnt = 0;
-	static uint32_t ibus_oc_cnt = 0;
+	/* 电压去抖: 只在 adc_voltage_missed 没有增加时才认为是新采样 */
+	static uint32_t last_volt_frames = 0;
+	static uint32_t ov_new_cnt = 0;
+	static uint32_t uv_new_cnt = 0;
+	static uint32_t ibus_new_cnt = 0;
 
 	float vbus = FOC.Vbus;
+	bool new_volt_sample = (FOC.adc_voltage_missed == 0U) &&
+			       (FOC.adc_current_frames != last_volt_frames);
 
-	bool uv_ok = (Config.protect_under_voltage < (FOC.Vbus_filt * 0.9f));
-
-	if (!uv_warned && (FOC.Vbus_filt > 1.0f) && !uv_ok) {
-		uv_warned = true;
-		printf("protect: UV threshold %dmV too high for bus %dmV, UV "
-		       "disabled\n",
-		       (int)(Config.protect_under_voltage * 1000.0f),
-		       (int)(FOC.Vbus_filt * 1000.0f));
-	}
+	if (new_volt_sample)
+		last_volt_frames = FOC.adc_current_frames;
 
 	if (foc_over_current())
 		return FOC_FAULT_PHASE_OC;
 
-	/* 母线电流保护 (滤波值 + 计数去抖, 与过压一致) */
+	/* 母线电流保护: 滤波值 + 新采样去抖 */
 	if (FOC.Ibus_filt > Config.protect_i_bus_max) {
-		if (++ibus_oc_cnt >= 3U)
+		if (new_volt_sample && (++ibus_new_cnt >= 3U))
 			return FOC_FAULT_IBUS_OC;
 	} else {
-		ibus_oc_cnt = 0;
+		ibus_new_cnt = 0;
 	}
 
+	/* 过压: 需连续 3 次真实新采样 */
 	if (vbus > Config.protect_over_voltage) {
-		if (++ov_cnt >= 3U)
+		if (new_volt_sample && (++ov_new_cnt >= 3U))
 			return FOC_FAULT_OVER_VOLTAGE;
 	} else {
-		ov_cnt = 0;
+		ov_new_cnt = 0;
 	}
 
-	if (uv_ok && (vbus < Config.protect_under_voltage)) {
-		if (++uv_cnt >= 20U)
+	/* 欠压: 阈值 0 = 禁用; 需连续 5 次真实新采样 (~5ms)
+	 * 不再与 Vbus_filt 比较, 防止缓慢下跌时阈值跟着降导致保护自闭 */
+	if ((Config.protect_under_voltage > 0.0f) &&
+	    (vbus < Config.protect_under_voltage)) {
+		if (new_volt_sample && (++uv_new_cnt >= 5U))
 			return FOC_FAULT_UNDER_VOLTAGE;
 	} else {
-		uv_cnt = 0;
+		uv_new_cnt = 0;
 	}
 
 	return FOC_FAULT_NONE;
