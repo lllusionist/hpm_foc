@@ -11,6 +11,7 @@
 #include "flash.h"
 #include "foc_ctrl.h"
 #include "foc_task.h"
+#include "log.h"
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -18,6 +19,7 @@ int main(void)
 {
 	config_init();
 	sys_board_init();
+	log_start();
 
 	flash_init();
 	if (CONFIG_load_from_flash() != 0)

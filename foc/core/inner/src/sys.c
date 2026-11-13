@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "cdc_acm.h"
+#include "log.h"
 
 static void sys_init(void)
 {
@@ -103,23 +104,8 @@ static void sys_pmp_init(void)
 
 static void sys_console_init(void)
 {
-	console_config_t cfg;
-
-	/* 先配引脚再开时钟: 否则 RX 电平跳变会被当成起始位 */
-	HPM_IOC->PAD[SYS_CONSOLE_TX_PAD].FUNC_CTL = SYS_CONSOLE_TX_FUNC;
-	HPM_IOC->PAD[SYS_CONSOLE_RX_PAD].FUNC_CTL = SYS_CONSOLE_RX_FUNC;
-
-	clock_add_to_group(SYS_CONSOLE_UART_CLK, 0);
-
-	cfg.type = CONSOLE_TYPE_UART;
-	cfg.base = (uint32_t)SYS_CONSOLE_UART;
-	cfg.src_freq_in_hz = clock_get_frequency(SYS_CONSOLE_UART_CLK);
-	cfg.baudrate = SYS_CONSOLE_BAUDRATE;
-
-	if (console_init(&cfg) != status_success) {
-		while (1) {
-		}
-	}
+	/* printf 底层改为非阻塞环形缓冲 (log.c), 这里只初始化 UART */
+	log_uart_init();
 }
 
 void sys_board_init(void)

@@ -47,6 +47,7 @@ sdk_inc(core/inner/inc)
 sdk_inc(core/outer/inc)
 
 sdk_app_src(core/inner/src/main.c)
+sdk_app_src(core/inner/src/log.c)
 sdk_app_src(core/inner/src/sys.c)
 sdk_app_src(core/inner/src/adc.c)
 sdk_app_src(core/inner/src/tim.c)
