@@ -40,47 +40,37 @@ tFSMState foc_get_stage(void)
 	return sFSM.state;
 }
 
-void foc_smf_init(void)
+/* 合法状态转移表:
+ * - BOOT_UP  -> IDLE (ADC 零点完成后自动, 或零点失败后 IDLE 等待)
+ * - IDLE     -> RUN / CALIBRATION / ANTICOGGING
+ * - RUN      -> IDLE (故障/禁用)
+ * - CALIBRATION -> IDLE (完成/故障)
+ * - ANTICOGGING -> IDLE (完成/故障)
+ * 任何不在表里的转移都被拒绝 (打印日志, 不改状态) */
+static bool transition_allowed(tFSMState from, tFSMState to)
 {
-	sFSM.state = BOOT_UP;
-	sFSM.state_next = BOOT_UP;
-	sFSM.state_next_ready = 0;
+	switch (from) {
+	case BOOT_UP:
+		return (to == IDLE);
+	case IDLE:
+		return (to == RUN) || (to == CALIBRATION) ||
+		       (to == ANTICOGGING) || (to == IDLE);
+	case RUN:
+		return (to == IDLE);
+	case CALIBRATION:
+		return (to == IDLE);
+	case ANTICOGGING:
+		return (to == IDLE);
+	default:
+		return false;
+	}
 }
 
 int foc_smf_set_state(tFSMState now_state)
 {
-	int ret = 0;
-	/* 当前状态 */
-	switch (sFSM.state) {
-	case BOOT_UP:
-		if (now_state == IDLE)
-			sFSM.state_next = IDLE;
-		else
-			ret = -1;
-		break;
-	case IDLE:
-		switch (now_state) {
-		case IDLE:
-			foc_disarm();
-			sFSM.state_next = IDLE;
-			break;
-		case RUN:
-			break;
-		case CALIBRATION:
-			break;
-		default:
-			break;
-		}
-		break;
-	case RUN:
-		break;
-	case CALIBRATION:
-		break;
-	default:
-		break;
-	}
-
-	return ret;
+	/* 保留此函数防止链接警告; 实际转移逻辑已移入 Task_FOC */
+	(void)now_state;
+	return -1;
 }
 
 static void enter_state(tFSMState state)
@@ -279,8 +269,13 @@ static void Task_FOC(void *argument)
 
 		if (s_req_valid) {
 			s_req_valid = 0;
-			sFSM.state_next = s_req;
-			sFSM.state_next_ready = 0;
+			if (transition_allowed(sFSM.state, s_req)) {
+				sFSM.state_next = s_req;
+				sFSM.state_next_ready = 0;
+			} else {
+				printf("FSM: rejected %d->%d\n",
+				       (int)sFSM.state, (int)s_req);
+			}
 		}
 
 		if (sFSM.state_next != sFSM.state) {
@@ -303,9 +298,12 @@ static void Task_FOC(void *argument)
 					FOC.fault_code = FOC_FAULT_ADC;
 					printf("ADC midpoint calibration "
 					       "failed\n");
-					foc_request_stage(IDLE);
+					foc_fault_request(IDLE);
 				}
 			}
+			/* ADC 零点已就绪: 自动进 IDLE, 不等上位机命令 */
+			if (FOC.adc_ready && (foc_get_stage() == BOOT_UP))
+				foc_request_stage(IDLE);
 		} break;
 		case IDLE:
 			if (slow_tick)
