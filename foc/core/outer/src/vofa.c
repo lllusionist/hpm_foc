@@ -95,8 +95,11 @@ void vofa_push_sample(void)
 {
 	uint16_t next = (uint16_t)((vofa_head + 1U) % VOFA_RING);
 
-	if (next == vofa_tail) /* 满: 丢最旧 */
-		vofa_tail = (uint16_t)((vofa_tail + 1U) % VOFA_RING);
+	if (next == vofa_tail) {
+		/* 缓冲满: 丢弃本次最新样本 (不动 tail), 保留 ISR 只操作 head.
+		 * 原来是丢最旧 (修改 tail), ISR 和任务两个写者会竞争 tail */
+		return;
+	}
 
 	vofa_snapshot(vofa_ring[vofa_head]);
 	vofa_head = next;
