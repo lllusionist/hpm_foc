@@ -201,6 +201,10 @@ static void foc_check_and_trip(void)
 	if (FOC.adc_ibus_missed >= 3U)
 		fault = FOC_FAULT_ADC;
 
+	/* ISR 级硬限幅已关断并置码, 任务只需补做状态切换 */
+	if (FOC.fault_code == FOC_FAULT_PHASE_OC_ISR)
+		fault = FOC_FAULT_PHASE_OC_ISR;
+
 	if (fault != FOC_FAULT_NONE) {
 		/* 先关断再打印: printf 走阻塞 UART, 一行约 5ms.
 		 * 现场值在关断前取出 (foc_disarm 会清零 Iq) */

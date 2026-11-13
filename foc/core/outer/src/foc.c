@@ -433,6 +433,27 @@ void foc_adc_callback(void)
 	if (!FOC.is_armed)
 		return;
 
+	/* ===== 中断级相电流硬限幅 (第 1 级保护) =====
+	 * 本板无硬件过流引脚, 必须在 ISR 里补一级软件快速关断.
+	 * 阈值取 protect_over_current (5kHz 任务的软保护值), 响应在下一拍
+	 * (25µs) 内生效, 远快于 5kHz 任务的 200µs. */
+	{
+		float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+		float ib = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
+		float ic = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
+		float lim = Config.protect_over_current;
+
+		if ((fabsf(ia) > lim) || (fabsf(ib) > lim) ||
+		    (fabsf(ic) > lim)) {
+			disable_bldc_pwm_output(); /* 立即关断, 不等任务 */
+			FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;
+			FOC.is_armed = false;
+			/* ISR 里不能调 foc_disarm(含临界区), 只置标志;
+			 * FOC 任务在下一拍检测到 fault_code 后转 IDLE */
+			return;
+		}
+	}
+
 	/* 电感标定：在 α 轴注入正弦电压。 */
 	if (FOC.calib_vinj_mode) {
 		FOC.inj_phase += FOC.vinj_omega * CURRENT_MEASURE_PERIOD;

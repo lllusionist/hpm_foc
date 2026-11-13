@@ -25,11 +25,13 @@
 
 /* 故障码 */
 #define FOC_FAULT_NONE 0
-#define FOC_FAULT_PHASE_OC 1	  /* 相过流 */
-#define FOC_FAULT_OVER_VOLTAGE 2  /* 母线过压 */
-#define FOC_FAULT_UNDER_VOLTAGE 3 /* 母线欠压 */
-#define FOC_FAULT_ADC 4
-#define FOC_FAULT_IBUS_OC 5 /* 母线过流 */
+#define FOC_FAULT_PHASE_OC 1	    /* 相过流 (5kHz 任务检测) */
+#define FOC_FAULT_OVER_VOLTAGE 2    /* 母线过压 */
+#define FOC_FAULT_UNDER_VOLTAGE 3   /* 母线欠压 */
+#define FOC_FAULT_ADC 4             /* ADC / 采样异常 */
+#define FOC_FAULT_IBUS_OC 5         /* 母线过流 */
+#define FOC_FAULT_PHASE_OC_ISR 6    /* 相过流硬限幅 (40kHz ISR 检测) */
+#define FOC_FAULT_ENCODER 7         /* 编码器停更或错误率过高 */
 
 typedef struct {
 
