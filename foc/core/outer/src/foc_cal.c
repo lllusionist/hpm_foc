@@ -408,7 +408,9 @@ void calibration_loop(void)
 		calib_drag_if(Config.calib_current * (time / 2.0f), 0.0f, 0.0f);
 
 		if (time >= 2.0f) {
+			taskENTER_CRITICAL();
 			encoder.shadow_count = 0;
+			taskEXIT_CRITICAL();
 			start_count_long = 0;
 			dir_pp_runin = false;
 			loop_count = 0;
@@ -424,7 +426,9 @@ void calibration_loop(void)
 		if (!dir_pp_runin) {
 			/* 预跑一圈, 让转子牵入同步, 避免圈数偏少 */
 			if (phase_set >= total_calib_cycles * M_2PI) {
+				taskENTER_CRITICAL();
 				encoder.shadow_count = 0;
+				taskEXIT_CRITICAL();
 				start_count_long = 0;
 				dir_pp_runin = true;
 			}
@@ -435,7 +439,9 @@ void calibration_loop(void)
 		}
 		break;
 	case CS_DIR_PP_END: {
+		taskENTER_CRITICAL();
 		int64_t diff = encoder.shadow_count - start_count_long;
+		taskEXIT_CRITICAL();
 
 		if (abs((int)diff) < 500) {
 			Config.calib_valid = false;
