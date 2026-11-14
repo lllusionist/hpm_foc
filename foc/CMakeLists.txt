@@ -10,7 +10,9 @@ set(RV_ARCH "rv32imafc")
 # 产物名，缺省为 demo（SDK application.cmake: if(NOT APP_NAME) set(APP_NAME demo)）
 set(APP_NAME foc)
 
-# SEGGER RTT：printf 走 J-Link，不占用 UART0 引脚
+# SEGGER RTT: 编译进去但当前 SES 工程通过 hpm_debug_console.c (UART) 输出.
+# log.c 实现了非阻塞环形缓冲日志; 若改走 RTT 只需在 SES 工程里
+# 重新启用 SEGGER_RTT_Syscalls_SES.c 并设 CONFIG_NDEBUG_CONSOLE=1.
 set(CONFIG_SEGGER_RTT 1)
 
 
