@@ -183,57 +183,19 @@ static void calib_drag_if(float iq, float elec_angle, float elec_vel)
 	FOC.calib_phase_vel = elec_vel;
 }
 
-void calibration_loop(void)
+/* ====== 各标定阶段 (原 calibration_loop 内的 switch case, 提取为函数) ====== */
+
+/* R/L 标定 (CS_MOTOR_R_* ~ CS_MOTOR_L_END) */
+static void cal_rl_step(float time, float ia_meas)
 {
-	float time = (float)loop_count / (float)CAL_LOOP_HZ;
-
-	const float ia_meas = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
-
-	float calib_phase_vel = 12.0f * M_PI;
-	float total_calib_cycles = 14.0f;
-
-	/* 拖动阶段每 300ms 打一次: 电流指令/实测电流/转速/电角度 */
-	if ((mCalibStep == CS_DIR_PP_LOOP) ||
-	    (mCalibStep == CS_ENCODER_CW_LOOP) ||
-	    (mCalibStep == CS_ENCODER_CCW_LOOP)) {
-		static uint32_t drag_dbg_cnt;
-
-		if (++drag_dbg_cnt >= 300U) {
-			drag_dbg_cnt = 0;
-			printf("drag(if): Iq=%.2fA I=%.2fA vel=%.3f rps "
-			       "elec=%.2f rad\n",
-			       (double)FOC.calib_iq, (double)ia_meas,
-			       (double)encoder.vel, (double)phase_set);
-		}
-	}
-
-	/* 磁链/极对数/编码器都靠开环拖动: 实测转速跟不上指令 = 丢步.
-	 * 丢步时的 V/I 全是错的, 直接打出来, 别让它悄悄污染 λ */
-	if ((mCalibStep >= CS_FLUX_RAMP1) && (mCalibStep <= CS_FLUX_MEAS2) &&
-	    (Config.pole_pairs > 0) && (FOC.calib_phase_vel > 1.0f)) {
-		static uint32_t slip_dbg;
-
-		float exp_rps = FOC.calib_phase_vel /
-				(M_2PI * (float)Config.pole_pairs);
-		float dev = fabsf(encoder.vel - exp_rps) / exp_rps;
-
-		if (dev > 0.25f) {
-			if ((slip_dbg++ % 200U) == 0U)
-				printf("flux: SLIP vel=%.3f exp=%.3f rps "
-				       "(dev %.0f%%)\n",
-				       (double)encoder.vel, (double)exp_rps,
-				       (double)(dev * 100.0f));
-		}
-	}
-
 	switch (mCalibStep) {
 	case CS_MOTOR_R_START:
 		loop_count = 0;
-		r_volt = CALIB_R_STEP_V; /* ures = Δu2 */
-		r_i1 = 0.0f;		 /* Ires1 */
+		r_volt = CALIB_R_STEP_V;
+		r_i1 = 0.0f;
 		r_isum = 0.0f;
 		r_icnt = 0;
-		r_s1 = 0; /* 升压次数 */
+		r_s1 = 0;
 		r_di_sum = 0.0f;
 		r_di_cnt = 0U;
 		FOC.calib_mode = false;
@@ -243,23 +205,17 @@ void calibration_loop(void)
 		break;
 
 	case CS_MOTOR_R_LOOP: {
-		FOC_voltage(r_volt, 0, 0); /* d 轴注入恒定电压 (开环) */
-
-		/* 200ms 窗口平均 = 该工作点的稳态电流 */
+		FOC_voltage(r_volt, 0, 0);
 		r_isum += ia_meas;
 		r_icnt++;
-
 		if (loop_count >= R_CAL_WINDOW) {
 			float Is = fabsf(r_isum / (float)r_icnt);
 			r_isum = 0.0f;
 			r_icnt = 0;
 			loop_count = 0;
-
 			if ((Is < Config.calib_current) &&
 			    ((r_volt + CALIB_R_STEP_V) <=
 			     (Config.calib_voltage * 0.9f))) {
-				/* 未达阈值: 累加本级 ΔI, 继续升压 */
-				/* 1A 以下死区误差占电压几十 %, 差分 ΔI 偏小 -> 跳过 */
 				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
 					r_di_sum += (Is - r_i1);
 					r_di_cnt++;
@@ -268,7 +224,6 @@ void calibration_loop(void)
 				r_volt += CALIB_R_STEP_V;
 				r_s1++;
 			} else {
-				/* Rs = Δu / 平均(ΔI) */
 				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
 					r_di_sum += (Is - r_i1);
 					r_di_cnt++;
@@ -298,20 +253,15 @@ void calibration_loop(void)
 
 	case CS_MOTOR_L_START: {
 		l_v_dc = Config.calib_current * Config.phase_resistance;
-		l_pass = 0; /* 第 0 轮 = 探测轮 */
-
-		/* 自适应幅值: u_amp = I_target×R, 保证不过流 */
+		l_pass = 0;
 		l_v_amp = Config.calib_current * Config.phase_resistance;
 		if (l_v_amp < CALIB_L_MIN_V)
 			l_v_amp = CALIB_L_MIN_V;
-
 		if ((l_v_dc + l_v_amp) > Config.calib_voltage * 0.9f) {
 			l_v_amp = (Config.calib_voltage * 0.9f) - l_v_dc;
 			if (l_v_amp < CALIB_L_MIN_V)
 				l_v_amp = CALIB_L_MIN_V;
 		}
-
-		/* 1kHz 正弦注入(更高频在 1kHz 循环里会退化成直流) */
 		FOC.vinj_omega = 2.0f * M_PI * Config.current_ctrl_bw;
 		FOC.vinj_amp = l_v_amp;
 		FOC.vinj_dc = l_v_dc;
@@ -320,7 +270,6 @@ void calibration_loop(void)
 		FOC.vinj_sum_cos = 0;
 		FOC.vinj_samples = 0;
 		FOC.vinj_acc = false;
-
 		loop_count = 0;
 		FOC.calib_vinj_mode = true;
 		foc_arm();
@@ -328,12 +277,10 @@ void calibration_loop(void)
 	} break;
 
 	case CS_MOTOR_L_LOOP:
-		/* 丢弃起始瞬态后解调 */
 		if (!FOC.vinj_acc && (loop_count >= 100U))
 			FOC.vinj_acc = true;
 		if (loop_count >= L_CAL_CYCLES) {
 			FOC.vinj_acc = false;
-			/* 注入保持, 由 L_END 决定是否复测 */
 			mCalibStep = CS_MOTOR_L_END;
 		}
 		break;
@@ -348,7 +295,6 @@ void calibration_loop(void)
 			: 0.0f;
 		float Z = (I_amp > 0.005f) ? (l_v_amp / I_amp) : 9999.0f;
 
-		/* 探测轮: 按 |Z| 修正幅值后再测一轮 */
 		if (l_pass == 0) {
 			float new_amp = Config.calib_current * Z;
 			if (new_amp < CALIB_L_MIN_V)
@@ -359,11 +305,9 @@ void calibration_loop(void)
 				if (new_amp < CALIB_L_MIN_V)
 					new_amp = CALIB_L_MIN_V;
 			}
-
 			printf(
 			    "ind-probe: Iamp=%.3f Z=%.3f Vamp %.3f -> %.3f\n",
 			    I_amp, Z, l_v_amp, new_amp);
-
 			l_v_amp = new_amp;
 			FOC.vinj_amp = new_amp;
 			FOC.inj_phase = 0;
@@ -377,36 +321,38 @@ void calibration_loop(void)
 			break;
 		}
 
-		/* ---- 测量轮: 计算电感 ---- */
 		float sys_R = Config.phase_resistance;
-
 		float X_L = 0.0f;
 		if (Z > sys_R)
 			X_L = sqrtf(Z * Z - sys_R * sys_R);
 		else
-			X_L = 0.001f; /* 测不出感抗时给极小值 */
-
+			X_L = 0.001f;
 		float L_eq = X_L / omega;
 		Config.phase_inductance = L_eq * 1.0f;
-
 		FOC.calib_vinj_mode = false;
 		pwm_output_low_sides();
 		FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
-
 		printf("ind: %.6f H (Iamp=%.3f Z=%.3f Vdc=%.3f Vamp=%.3f)\n",
 		       Config.phase_inductance, I_amp, Z, l_v_dc, l_v_amp);
-
 		phase_set = 0;
 		loop_count = 0;
 		mCalibStep = CS_DIR_PP_START;
 	} break;
 
+	default:
+		break;
+	}
+}
+
+/* 方向/极对数标定 (CS_DIR_PP_* ) */
+static void cal_dir_pp_step(float time, float calib_phase_vel,
+			    float total_calib_cycles)
+{
+	switch (mCalibStep) {
 	case CS_DIR_PP_START:
 		if (loop_count == 0)
 			foc_arm();
-		/* 2s 内把拖动电流从 0 拉满, 角度固定 0 先让转子对齐 */
 		calib_drag_if(Config.calib_current * (time / 2.0f), 0.0f, 0.0f);
-
 		if (time >= 2.0f) {
 			taskENTER_CRITICAL();
 			encoder.shadow_count = 0;
@@ -418,13 +364,11 @@ void calibration_loop(void)
 			mCalibStep = CS_DIR_PP_LOOP;
 		}
 		break;
+
 	case CS_DIR_PP_LOOP:
 		phase_set += calib_phase_vel / (float)CAL_LOOP_HZ;
-		calib_drag_if(Config.calib_current, phase_set,
-			      calib_phase_vel);
-
+		calib_drag_if(Config.calib_current, phase_set, calib_phase_vel);
 		if (!dir_pp_runin) {
-			/* 预跑一圈, 让转子牵入同步, 避免圈数偏少 */
 			if (phase_set >= total_calib_cycles * M_2PI) {
 				taskENTER_CRITICAL();
 				encoder.shadow_count = 0;
@@ -438,11 +382,11 @@ void calibration_loop(void)
 			mCalibStep = CS_DIR_PP_END;
 		}
 		break;
+
 	case CS_DIR_PP_END: {
 		taskENTER_CRITICAL();
 		int64_t diff = encoder.shadow_count - start_count_long;
 		taskEXIT_CRITICAL();
-
 		if (abs((int)diff) < 500) {
 			Config.calib_valid = false;
 		} else {
@@ -450,14 +394,11 @@ void calibration_loop(void)
 			float mech_revs = fabsf((float)diff / ENCODER_CPR_F);
 			float pp_raw = total_calib_cycles / mech_revs;
 			Config.pole_pairs = (int)roundf(pp_raw);
-			/* pp_raw 应非常接近整数; 若像 14.93 说明仍有瞬态残差 */
 			printf("dir_pp: diff=%lld mech_revs=%.5f pp_raw=%.4f "
 			       "-> %d\n",
 			       (long long)diff, mech_revs, pp_raw,
 			       (int)Config.pole_pairs);
 		}
-
-		/* 极对数无效则直接结束, 避免 encoder_error_arr 越界 */
 		if ((Config.pole_pairs <= 0) ||
 		    (Config.pole_pairs > (int)MAX_MOTOR_POLE_PAIRS)) {
 			Config.calib_valid = false;
@@ -466,260 +407,18 @@ void calibration_loop(void)
 			foc_request_stage(IDLE);
 			break;
 		}
-
 		mCalibStep = CS_ENCODER_START;
 	} break;
 
-	case CS_FLUX_START:
-		Config.flux_linkage = 0;
-		/* 角度改由电流环中断推进, 消除 1kHz 阶梯误差 */
-		FOC.calib_adv_angle = true;
-		FOC.calib_id = 0;
-		FOC.calib_iq =
-		    Config.calib_current * Config.calib_flux_iq_gain;
-		FOC.calib_phase_vel = 0;
-		FOC.calib_angle = 0;
-		FOC.calib_mode = true;
-		loop_count = 0;
-		mCalibStep = CS_FLUX_RAMP1;
+	default:
 		break;
+	}
+}
 
-	case CS_FLUX_RAMP1:
-		/* 缓缓升到 FLUX_SPEED1, 让转子平稳同步 */
-		FOC.calib_phase_vel +=
-		    FLUX_SPEED1 / (FLUX_SETTLE_TIME * (float)CAL_LOOP_HZ);
-		if (FOC.calib_phase_vel > FLUX_SPEED1)
-			FOC.calib_phase_vel = FLUX_SPEED1;
-		if (FOC.calib_angle >= M_2PI)
-			FOC.calib_angle -= M_2PI;
-		if (time > FLUX_SETTLE_TIME) {
-			flux_v_sum = 0;
-			flux_i_sum = 0;
-			flux_vel_sum = 0.0f;
-			flux_cnt = 0;
-			flux_sat = false;
-			loop_count = 0;
-			mCalibStep = CS_FLUX_MEAS1;
-		}
-		break;
-
-	case CS_FLUX_MEAS1:
-	case CS_FLUX_MEAS2: {
-		if (FOC.calib_angle >= M_2PI)
-			FOC.calib_angle -= M_2PI;
-
-		flux_v_sum += sqrtf(SQ(FOC.Vd_out) + SQ(FOC.Vq_out));
-		flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
-		flux_vq_sum += FOC.Vq_out;
-		flux_vd_sum += FOC.Vd_out;
-		flux_vel_sum += encoder.vel;
-		if (FOC.saturated)
-			flux_sat = true;
-		flux_cnt++;
-
-		if (flux_cnt >= FLUX_MEAS_SAMPLES) {
-			float v_avg = flux_v_sum / (float)flux_cnt;
-			float i_avg = flux_i_sum / (float)flux_cnt;
-
-			if (mCalibStep == CS_FLUX_MEAS1) {
-				flux_v1 = v_avg;
-				flux_i1 = i_avg;
-				flux_sat1 = flux_sat;
-				flux_vel1 = flux_vel_sum / (float)flux_cnt;
-				flux_vq_a = flux_vq_sum / (float)flux_cnt;
-				flux_vd_a = flux_vd_sum / (float)flux_cnt;
-				flux_i_a = i_avg;
-				loop_count = 0;
-				flux_vel_sum = 0.0f;
-				flux_vq_sum = 0.0f;
-				flux_vd_sum = 0.0f;
-				flux_v_sum = 0.0f;
-				flux_i_sum = 0.0f;
-				flux_cnt = 0;
-				FOC.calib_iq = Config.calib_current *
-					       Config.calib_flux_iq_gain *
-					       Config.calib_flux_rtest_ratio;
-				mCalibStep = CS_FLUX_RTEST;
-			} else {
-				flux_v2 = v_avg;
-				flux_i2 = i_avg;
-				flux_sat2 = flux_sat;
-				flux_vel2 = flux_vel_sum / (float)flux_cnt;
-				flux_vq_b = flux_vq_sum / (float)flux_cnt;
-				flux_vd_b = flux_vd_sum / (float)flux_cnt;
-				mCalibStep = CS_FLUX_END;
-			}
-		}
-	} break;
-
-	case CS_FLUX_RTEST: {
-		/* 同转速变电流: ΔVq = R·ΔIq, 反电势项抵消, 用于校验 R */
-		if (FOC.calib_angle >= M_2PI)
-			FOC.calib_angle -= M_2PI;
-
-		flux_vq_sum += FOC.Vq_out;
-		flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
-		flux_vel_sum += encoder.vel;
-		flux_cnt++;
-
-		if (flux_cnt >= FLUX_MEAS_SAMPLES) {
-			float vq_b = flux_vq_sum / (float)flux_cnt;
-			float i_b = flux_i_sum / (float)flux_cnt;
-			float di = flux_i_a - i_b;
-			if (fabsf(di) > 0.1f)
-				flux_r_est = (flux_vq_a - vq_b) / di;
-			printf("flux Rtest: I %.3f->%.3f A, Vq %.4f->%.4f V, "
-			       "vel %.3f rps, R_est=%.4f Ohm\n",
-			       flux_i_a, i_b, flux_vq_a, vq_b,
-			       flux_vel_sum / (float)flux_cnt, flux_r_est);
-
-			FOC.calib_iq =
-		    Config.calib_current * Config.calib_flux_iq_gain;
-			flux_v_sum = flux_i_sum = flux_vq_sum = flux_vel_sum =
-			    0.0f;
-			flux_cnt = 0;
-			loop_count = 0;
-			mCalibStep = CS_FLUX_RAMP2;
-		}
-	} break;
-
-	case CS_FLUX_RAMP2:
-		/* 从 FLUX_SPEED1 升到 FLUX_SPEED2 */
-		FOC.calib_phase_vel += (FLUX_SPEED2 - FLUX_SPEED1) /
-				       (FLUX_SETTLE_TIME * (float)CAL_LOOP_HZ);
-		if (FOC.calib_phase_vel > FLUX_SPEED2)
-			FOC.calib_phase_vel = FLUX_SPEED2;
-		if (FOC.calib_angle >= M_2PI)
-			FOC.calib_angle -= M_2PI;
-		if (time > FLUX_SETTLE_TIME) {
-			flux_v_sum = 0;
-			flux_i_sum = 0;
-			flux_vel_sum = 0.0f;
-			flux_cnt = 0;
-			flux_sat = false;
-			loop_count = 0;
-			mCalibStep = CS_FLUX_MEAS2;
-		}
-		break;
-
-	case CS_FLUX_END: {
-		FOC.calib_mode = false;
-		FOC.calib_adv_angle = false;
-		pwm_output_low_sides();
-
-		/* 拖动没跟上时 λ 一定是错的: 用实测转速和指令转速对比 */
-		bool vel_ok = true;
-		if (Config.pole_pairs > 0) {
-			float exp1 = FLUX_SPEED1 /
-				     (M_2PI * (float)Config.pole_pairs);
-			float exp2 = FLUX_SPEED2 /
-				     (M_2PI * (float)Config.pole_pairs);
-			if ((fabsf(flux_vel1 - exp1) > 0.25f * exp1) ||
-			    (fabsf(flux_vel2 - exp2) > 0.25f * exp2)) {
-				vel_ok = false;
-				printf("flux: 拖动跟不上 (vel %.3f/期望 %.3f, "
-				       "%.3f/期望 %.3f rps), 拒绝 λ\n",
-				       (double)flux_vel1, (double)exp1,
-				       (double)flux_vel2, (double)exp2);
-			}
-		}
-		if (vel_ok && !flux_sat1 && !flux_sat2 && (flux_i1 > 0.05f) &&
-		    (flux_i2 > 0.05f)) {
-			/* y = R·i + ω·λ: 扣掉 ωLi 平方项, 两个转速解 R 和 λ */
-			float t1 =
-			    SQ(flux_v1) -
-			    SQ(FLUX_SPEED1 * Config.phase_inductance * flux_i1);
-			float t2 =
-			    SQ(flux_v2) -
-			    SQ(FLUX_SPEED2 * Config.phase_inductance * flux_i2);
-			float y1 = sqrtf((t1 > 0.0f) ? t1 : 0.0f);
-			float y2 = sqrtf((t2 > 0.0f) ? t2 : 0.0f);
-
-			float den =
-			    FLUX_SPEED2 * flux_i1 - FLUX_SPEED1 * flux_i2;
-			float lambda = (y2 * flux_i1 - y1 * flux_i2) / den;
-			float res = (y1 - FLUX_SPEED1 * lambda) / flux_i1;
-			float lambda_simple =
-			    (flux_v2 - flux_v1) / (FLUX_SPEED2 - FLUX_SPEED1);
-
-			/* 两个转速点的实测值 (vel = w_e/(2π·p)) */
-			printf("flux pts: V1=%.4f I1=%.3f vel1=%.3f | V2=%.4f "
-			       "I2=%.3f vel2=%.3f\n",
-			       flux_v1, flux_i1, flux_vel1, flux_v2, flux_i2,
-			       flux_vel2);
-			printf("flux cmd: we1=%.1f we2=%.1f rad/s (预期 "
-			       "vel1=%.3f vel2=%.3f rps)\n",
-			       FLUX_SPEED1, FLUX_SPEED2,
-			       FLUX_SPEED1 / (M_2PI * (float)Config.pole_pairs),
-			       FLUX_SPEED2 /
-				   (M_2PI * (float)Config.pole_pairs));
-			printf(
-			    "flux: R=%.3f Ohm lambda=%.6f Wb (simple %.6f)\n",
-			    res, lambda, lambda_simple);
-
-			/* 用 Vq 分量与 R_est 解 lambda, 两转速点互相校验 */
-			{
-				float rr = (flux_r_est > 0.001f)
-					       ? flux_r_est
-					       : Config.phase_resistance;
-				float lv1 =
-				    (flux_vq_a - rr * flux_i1) / FLUX_SPEED1;
-				float lv2 =
-				    (flux_vq_b - rr * flux_i2) / FLUX_SPEED2;
-				/* 两点法(仅 Vq): 消掉 R·Iq 与恒定电压偏置 */
-				float lvp = ((flux_vq_b - flux_vq_a) -
-					     rr * (flux_i2 - flux_i1)) /
-					    (FLUX_SPEED2 - FLUX_SPEED1);
-				/* 用 |ΔV| 而非 Δ|V|: 近似垂直时模差会低估 */
-				float dvd = flux_vd_b - flux_vd_a;
-				float dvq = flux_vq_b - flux_vq_a;
-				float dvm = sqrtf(SQ(dvd) + SQ(dvq));
-				float lam_vec =
-				    dvm / (FLUX_SPEED2 - FLUX_SPEED1);
-
-				printf("flux Vq: Vq1=%.4f Vq2=%.4f Vd1=%.4f "
-				       "Vd2=%.4f (R=%.4f)\n",
-				       flux_vq_a, flux_vq_b, flux_vd_a,
-				       flux_vd_b, rr);
-				printf("flux Vq: lam1=%.6f lam2=%.6f (单点, "
-				       "差%.0f%%)  两点法=%.6f\n",
-				       lv1, lv2,
-				       100.0f * (lv1 - lv2) /
-					   ((lv1 + lv2) * 0.5f + 1e-9f),
-				       lvp);
-				printf("flux vec: |dV|=%.4f (模差仅%.4f) -> "
-				       "lambda_vec=%.6f Wb\n",
-				       dvm, flux_v2 - flux_v1, lam_vec);
-
-				/* 矢量差分法作为最终磁链; 无效时回退到模差法 */
-				if ((lam_vec > 0.00005f) && (lam_vec < 1.0f))
-					Config.flux_linkage = lam_vec;
-				else if ((lambda > 0.00005f) && (lambda < 1.0f))
-					Config.flux_linkage = lambda;
-			}
-
-			/* 磁链标定的 R 只在接近电阻标定值时才采纳 */
-			if ((res > 0.01f) && (res < 50.0f) &&
-			    (fabsf(res - Config.phase_resistance) <
-			     0.2f * Config.phase_resistance)) {
-				Config.phase_resistance = res;
-			} else {
-				printf("flux: R rejected (%.4f vs %.4f), keep "
-				       "%.4f\n",
-				       res, Config.phase_resistance,
-				       Config.phase_resistance);
-			}
-			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
-		} else {
-			printf("flux measure invalid (saturated or current too "
-			       "small)\n");
-		}
-
-		phase_set = 0;
-		loop_count = 0;
-		mCalibStep = CS_MOTOR_J_START;
-	} break;
-
+/* 编码器零位/偏移表标定 (CS_ENCODER_* ) */
+static void cal_encoder_step(void)
+{
+	switch (mCalibStep) {
 	case CS_ENCODER_START:
 		phase_set = 0;
 		loop_count = 0;
@@ -727,11 +426,10 @@ void calibration_loop(void)
 		next_sample_time = 0;
 		mCalibStep = CS_ENCODER_CW_LOOP;
 		break;
+
 	case CS_ENCODER_CW_LOOP:
 		if (sample_count <
 		    (int32_t)(Config.pole_pairs * SAMPLES_PER_PPAIR)) {
-			/* I/f 用 Iq 拖动时, 电流矢量在 phase_set+90°, 转子 d 轴
-			 * 对齐 phase_set+90°; 编码器参考角要同样加 90° 才不自偏 */
 			float mech_phase = (phase_set + M_PI / 2.0f) /
 					   (float)Config.pole_pairs;
 			float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
@@ -761,10 +459,9 @@ void calibration_loop(void)
 			      (M_2PI / (float)SAMPLES_PER_PPAIR) *
 				  (float)CAL_LOOP_HZ);
 		break;
+
 	case CS_ENCODER_CCW_LOOP:
 		if (sample_count >= 0) {
-			/* I/f 用 Iq 拖动时, 电流矢量在 phase_set+90°, 转子 d 轴
-			 * 对齐 phase_set+90°; 编码器参考角要同样加 90° 才不自偏 */
 			float mech_phase = (phase_set + M_PI / 2.0f) /
 					   (float)Config.pole_pairs;
 			float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
@@ -797,20 +494,18 @@ void calibration_loop(void)
 			mCalibStep = CS_ENCODER_END;
 		}
 		break;
+
 	case CS_ENCODER_END: {
 		if ((Config.pole_pairs <= 0) ||
 		    (Config.pole_pairs > (int32_t)MAX_MOTOR_POLE_PAIRS)) {
-			/* 极对数异常则置无效并退出, 避免卡在 CALIBRATION */
 			Config.calib_valid = false;
 			mCalibStep = CS_NULL;
 			foc_request_stage(IDLE);
 			break;
 		}
-
 		uint32_t total_samples =
 		    (uint32_t)Config.pole_pairs * SAMPLES_PER_PPAIR;
 		int window = (int)LUT_WINDOW;
-
 		if (sample_count == 0) {
 			int64_t sum = 0;
 			for (uint32_t i = 0; i < total_samples; i++)
@@ -818,7 +513,6 @@ void calibration_loop(void)
 			Config.encoder_offset =
 			    (int32_t)(sum / (int64_t)total_samples);
 		}
-
 		if (sample_count < (int32_t)OFFSET_LUT_NUM) {
 			int64_t window_sum = 0;
 			for (int j = (-window) / 2; j < (window) / 2; j++) {
@@ -850,17 +544,247 @@ void calibration_loop(void)
 		}
 	} break;
 
+	default:
+		break;
+	}
+}
+
+/* 磁链标定 (CS_FLUX_* ) */
+static void cal_flux_step(float time)
+{
+	switch (mCalibStep) {
+	case CS_FLUX_START:
+		Config.flux_linkage = 0;
+		FOC.calib_adv_angle = true;
+		FOC.calib_id = 0;
+		FOC.calib_iq = Config.calib_current * Config.calib_flux_iq_gain;
+		FOC.calib_phase_vel = 0;
+		FOC.calib_angle = 0;
+		FOC.calib_mode = true;
+		loop_count = 0;
+		mCalibStep = CS_FLUX_RAMP1;
+		break;
+
+	case CS_FLUX_RAMP1:
+		FOC.calib_phase_vel +=
+		    FLUX_SPEED1 / (FLUX_SETTLE_TIME * (float)CAL_LOOP_HZ);
+		if (FOC.calib_phase_vel > FLUX_SPEED1)
+			FOC.calib_phase_vel = FLUX_SPEED1;
+		if (FOC.calib_angle >= M_2PI)
+			FOC.calib_angle -= M_2PI;
+		if (time > FLUX_SETTLE_TIME) {
+			flux_v_sum = 0;
+			flux_i_sum = 0;
+			flux_vel_sum = 0.0f;
+			flux_cnt = 0;
+			flux_sat = false;
+			loop_count = 0;
+			mCalibStep = CS_FLUX_MEAS1;
+		}
+		break;
+
+	case CS_FLUX_MEAS1:
+	case CS_FLUX_MEAS2: {
+		if (FOC.calib_angle >= M_2PI)
+			FOC.calib_angle -= M_2PI;
+		flux_v_sum += sqrtf(SQ(FOC.Vd_out) + SQ(FOC.Vq_out));
+		flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
+		flux_vq_sum += FOC.Vq_out;
+		flux_vd_sum += FOC.Vd_out;
+		flux_vel_sum += encoder.vel;
+		if (FOC.saturated)
+			flux_sat = true;
+		flux_cnt++;
+		if (flux_cnt >= FLUX_MEAS_SAMPLES) {
+			float v_avg = flux_v_sum / (float)flux_cnt;
+			float i_avg = flux_i_sum / (float)flux_cnt;
+			if (mCalibStep == CS_FLUX_MEAS1) {
+				flux_v1 = v_avg;
+				flux_i1 = i_avg;
+				flux_sat1 = flux_sat;
+				flux_vel1 = flux_vel_sum / (float)flux_cnt;
+				flux_vq_a = flux_vq_sum / (float)flux_cnt;
+				flux_vd_a = flux_vd_sum / (float)flux_cnt;
+				flux_i_a = i_avg;
+				loop_count = 0;
+				flux_vel_sum = 0.0f;
+				flux_vq_sum = 0.0f;
+				flux_vd_sum = 0.0f;
+				flux_v_sum = 0.0f;
+				flux_i_sum = 0.0f;
+				flux_cnt = 0;
+				FOC.calib_iq = Config.calib_current *
+					       Config.calib_flux_iq_gain *
+					       Config.calib_flux_rtest_ratio;
+				mCalibStep = CS_FLUX_RTEST;
+			} else {
+				flux_v2 = v_avg;
+				flux_i2 = i_avg;
+				flux_sat2 = flux_sat;
+				flux_vel2 = flux_vel_sum / (float)flux_cnt;
+				flux_vq_b = flux_vq_sum / (float)flux_cnt;
+				flux_vd_b = flux_vd_sum / (float)flux_cnt;
+				mCalibStep = CS_FLUX_END;
+			}
+		}
+	} break;
+
+	case CS_FLUX_RTEST: {
+		if (FOC.calib_angle >= M_2PI)
+			FOC.calib_angle -= M_2PI;
+		flux_vq_sum += FOC.Vq_out;
+		flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
+		flux_vel_sum += encoder.vel;
+		flux_cnt++;
+		if (flux_cnt >= FLUX_MEAS_SAMPLES) {
+			float vq_b = flux_vq_sum / (float)flux_cnt;
+			float i_b = flux_i_sum / (float)flux_cnt;
+			float di = flux_i_a - i_b;
+			if (fabsf(di) > 0.1f)
+				flux_r_est = (flux_vq_a - vq_b) / di;
+			printf("flux Rtest: I %.3f->%.3f A, Vq %.4f->%.4f V, "
+			       "vel %.3f rps, R_est=%.4f Ohm\n",
+			       flux_i_a, i_b, flux_vq_a, vq_b,
+			       flux_vel_sum / (float)flux_cnt, flux_r_est);
+			FOC.calib_iq =
+			    Config.calib_current * Config.calib_flux_iq_gain;
+			flux_v_sum = flux_i_sum = flux_vq_sum = flux_vel_sum =
+			    0.0f;
+			flux_cnt = 0;
+			loop_count = 0;
+			mCalibStep = CS_FLUX_RAMP2;
+		}
+	} break;
+
+	case CS_FLUX_RAMP2:
+		FOC.calib_phase_vel += (FLUX_SPEED2 - FLUX_SPEED1) /
+				       (FLUX_SETTLE_TIME * (float)CAL_LOOP_HZ);
+		if (FOC.calib_phase_vel > FLUX_SPEED2)
+			FOC.calib_phase_vel = FLUX_SPEED2;
+		if (FOC.calib_angle >= M_2PI)
+			FOC.calib_angle -= M_2PI;
+		if (time > FLUX_SETTLE_TIME) {
+			flux_v_sum = 0;
+			flux_i_sum = 0;
+			flux_vel_sum = 0.0f;
+			flux_cnt = 0;
+			flux_sat = false;
+			loop_count = 0;
+			mCalibStep = CS_FLUX_MEAS2;
+		}
+		break;
+
+	case CS_FLUX_END: {
+		FOC.calib_mode = false;
+		FOC.calib_adv_angle = false;
+		pwm_output_low_sides();
+		bool vel_ok = true;
+		if (Config.pole_pairs > 0) {
+			float exp1 = FLUX_SPEED1 /
+				     (M_2PI * (float)Config.pole_pairs);
+			float exp2 = FLUX_SPEED2 /
+				     (M_2PI * (float)Config.pole_pairs);
+			if ((fabsf(flux_vel1 - exp1) > 0.25f * exp1) ||
+			    (fabsf(flux_vel2 - exp2) > 0.25f * exp2)) {
+				vel_ok = false;
+				printf("flux: 拖动跟不上 (vel %.3f/期望 %.3f, "
+				       "%.3f/期望 %.3f rps), 拒绝 λ\n",
+				       (double)flux_vel1, (double)exp1,
+				       (double)flux_vel2, (double)exp2);
+			}
+		}
+		if (vel_ok && !flux_sat1 && !flux_sat2 && (flux_i1 > 0.05f) &&
+		    (flux_i2 > 0.05f)) {
+			float t1 = SQ(flux_v1) -
+				   SQ(FLUX_SPEED1 * Config.phase_inductance * flux_i1);
+			float t2 = SQ(flux_v2) -
+				   SQ(FLUX_SPEED2 * Config.phase_inductance * flux_i2);
+			float y1 = sqrtf((t1 > 0.0f) ? t1 : 0.0f);
+			float y2 = sqrtf((t2 > 0.0f) ? t2 : 0.0f);
+			float den = FLUX_SPEED2 * flux_i1 - FLUX_SPEED1 * flux_i2;
+			float lambda = (y2 * flux_i1 - y1 * flux_i2) / den;
+			float res = (y1 - FLUX_SPEED1 * lambda) / flux_i1;
+			float lambda_simple =
+			    (flux_v2 - flux_v1) / (FLUX_SPEED2 - FLUX_SPEED1);
+			printf("flux pts: V1=%.4f I1=%.3f vel1=%.3f | V2=%.4f "
+			       "I2=%.3f vel2=%.3f\n",
+			       flux_v1, flux_i1, flux_vel1, flux_v2, flux_i2,
+			       flux_vel2);
+			printf("flux cmd: we1=%.1f we2=%.1f rad/s (预期 "
+			       "vel1=%.3f vel2=%.3f rps)\n",
+			       FLUX_SPEED1, FLUX_SPEED2,
+			       FLUX_SPEED1 / (M_2PI * (float)Config.pole_pairs),
+			       FLUX_SPEED2 / (M_2PI * (float)Config.pole_pairs));
+			printf("flux: R=%.3f Ohm lambda=%.6f Wb (simple %.6f)\n",
+			       res, lambda, lambda_simple);
+			{
+				float rr = (flux_r_est > 0.001f)
+					       ? flux_r_est
+					       : Config.phase_resistance;
+				float lv1 = (flux_vq_a - rr * flux_i1) / FLUX_SPEED1;
+				float lv2 = (flux_vq_b - rr * flux_i2) / FLUX_SPEED2;
+				float lvp = ((flux_vq_b - flux_vq_a) -
+					     rr * (flux_i2 - flux_i1)) /
+					    (FLUX_SPEED2 - FLUX_SPEED1);
+				float dvd = flux_vd_b - flux_vd_a;
+				float dvq = flux_vq_b - flux_vq_a;
+				float dvm = sqrtf(SQ(dvd) + SQ(dvq));
+				float lam_vec = dvm / (FLUX_SPEED2 - FLUX_SPEED1);
+				printf("flux Vq: Vq1=%.4f Vq2=%.4f Vd1=%.4f "
+				       "Vd2=%.4f (R=%.4f)\n",
+				       flux_vq_a, flux_vq_b, flux_vd_a,
+				       flux_vd_b, rr);
+				printf("flux Vq: lam1=%.6f lam2=%.6f (单点, "
+				       "差%.0f%%)  两点法=%.6f\n",
+				       lv1, lv2,
+				       100.0f * (lv1 - lv2) /
+					   ((lv1 + lv2) * 0.5f + 1e-9f), lvp);
+				printf("flux vec: |dV|=%.4f (模差仅%.4f) -> "
+				       "lambda_vec=%.6f Wb\n",
+				       dvm, flux_v2 - flux_v1, lam_vec);
+				if ((lam_vec > 0.00005f) && (lam_vec < 1.0f))
+					Config.flux_linkage = lam_vec;
+				else if ((lambda > 0.00005f) && (lambda < 1.0f))
+					Config.flux_linkage = lambda;
+			}
+			if ((res > 0.01f) && (res < 50.0f) &&
+			    (fabsf(res - Config.phase_resistance) <
+			     0.2f * Config.phase_resistance)) {
+				Config.phase_resistance = res;
+			} else {
+				printf("flux: R rejected (%.4f vs %.4f), keep "
+				       "%.4f\n",
+				       res, Config.phase_resistance,
+				       Config.phase_resistance);
+			}
+			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
+		} else {
+			printf("flux measure invalid (saturated or current too "
+			       "small)\n");
+		}
+		phase_set = 0;
+		loop_count = 0;
+		mCalibStep = CS_MOTOR_J_START;
+	} break;
+
+	default:
+		break;
+	}
+}
+
+/* 转动惯量 J 标定 (CS_MOTOR_J_* ) */
+static void cal_inertia_step(float time)
+{
+	switch (mCalibStep) {
 	case CS_MOTOR_J_START:
 		Controller.ctrl_mode = CONTROL_MODE_CURRENT_RAMP;
-		/* CURRENT_RAMP 以 input_current 为目标 */
 		Controller.input_current = 0.0f;
 		Controller.cur_setpoint = 0.0f;
 		FOC.calib_mode = false;
 		FOC.calib_vinj_mode = false;
-		FOC.calib_id = 0.0f; /* 清掉磁链标定残留的 7A 拖动电流 */
+		FOC.calib_id = 0.0f;
 		FOC.calib_iq = 0.0f;
 		foc_arm();
-		/* 标定要 2A 加速电流, 临时放开速度限幅 */
 		j_vel_limit_save = Config.velocity_limit;
 		Config.velocity_limit = 10000.0f;
 		j_slope_acc = 0.0f;
@@ -872,12 +796,9 @@ void calibration_loop(void)
 	case CS_MOTOR_J_SPINUP:
 	case CS_MOTOR_J_ACC:
 	case CS_MOTOR_J_DEC: {
-		/* 直接驱动(绕开 Controller 指令路径), 角度/角速度用编码器实测 */
-		/* 减速段断电流自由滑行: 反制动 7ms 就过零, 1kHz 采样不够 */
 		float j_iq = Config.calib_current * Config.calib_j_iq_gain;
 		float iq = (mCalibStep == CS_MOTOR_J_DEC) ? 0.0f : j_iq;
-		
-		/* 转速上限保护: 小惯量电机 0.3s 加速会冲很高, 过流前先收手 */
+
 		if ((mCalibStep != CS_MOTOR_J_SPINUP) &&
 		    (fabsf(encoder.vel) > J_SPINUP_MAX_RPS)) {
 			FOC.calib_iq = 0.0f;
@@ -888,7 +809,6 @@ void calibration_loop(void)
 			mCalibStep = CS_MOTOR_J_END;
 			break;
 		}
-		/* 直接驱动: 角度/角速度用编码器实测, 转子才能自由加速 */
 		FOC.calib_mode = true;
 		FOC.calib_id = 0.0f;
 		FOC.calib_iq = iq;
@@ -917,7 +837,6 @@ void calibration_loop(void)
 		j_sum_tt += (float)j_cnt * (float)j_cnt;
 		j_cnt++;
 
-		/* |a-|/a+ 恒 >1(实测 2.35x), 接近零点提前收工, 至少 30 点 */
 		if ((mCalibStep == CS_MOTOR_J_DEC) && (j_cnt > 30U) &&
 		    (encoder.vel < 0.3f)) {
 			j_slope_dec = j_slope();
@@ -943,18 +862,15 @@ void calibration_loop(void)
 		Controller.cur_setpoint = 0.0f;
 		Config.velocity_limit = j_vel_limit_save;
 		pwm_output_low_sides();
-
 		float da = j_slope_acc - j_slope_dec;
-		float kt =
-		    1.5f * (float)Config.pole_pairs * Config.flux_linkage;
+		float kt = 1.5f * (float)Config.pole_pairs * Config.flux_linkage;
 		float J = 0.0f;
 		if (fabsf(da) > 1e-3f)
 			J = kt * (Config.calib_current * Config.calib_j_iq_gain) /
-		    (2.0f * 3.14159265f * da);
+			    (2.0f * 3.14159265f * da);
 		printf("J: a+=%.3f a-=%.3f rps/s  Kt=%.5f -> J=%.3e kg.m2\n",
 		       j_slope_acc, j_slope_dec, kt, J);
 		if ((J > 1e-7f) && (J < 1e-1f)) {
-			/* 由 J 反算速度环初值: Kp=4πζωbw·J/Kt, Ki=2πJωbw²/Kt */
 			const float wbw = 2.0f * 3.14159265f * 10.0f;
 			printf(
 			    "J: 建议速度环 Kp=%.2f Ki=%.1f (zeta=1, bw=10Hz)\n",
@@ -964,113 +880,179 @@ void calibration_loop(void)
 		mCalibStep = CS_REPORT_OFFSET_LUT;
 	} break;
 
-	/* 停留一会儿供上位机读回偏移表 */
-	case CS_REPORT_OFFSET_LUT:
-		if (sample_count < (int32_t)OFFSET_LUT_NUM) {
-			if (time > next_sample_time) {
-				next_sample_time += 0.001f;
-				sample_count++;
-			}
-		} else {
-			/* ===== 标定结果汇总 ===== */
-			float R = Config.phase_resistance;
-			float L = Config.phase_inductance;
-			float lm = Config.flux_linkage;
-			float wc =
-			    M_2PI *
-			    Config.current_ctrl_bw; /* 电流环设计带宽 rad/s */
+	default:
+		break;
+	}
+}
 
-			int32_t lut_min = 0, lut_max = 0;
-			int32_t cg_min = 0, cg_max = 0;
-			for (uint32_t i = 0; i < OFFSET_LUT_NUM; i++) {
-				int32_t v = Config.offset_lut[i];
-				if (i == 0U) {
-					lut_min = v;
-					lut_max = v;
-				}
-				if (v < lut_min)
-					lut_min = v;
-				if (v > lut_max)
-					lut_max = v;
-			}
-			for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-				int32_t v = (int32_t)Config.cogging_map[i];
-				if (i == 0U) {
-					cg_min = v;
-					cg_max = v;
-				}
-				if (v < cg_min)
-					cg_min = v;
-				if (v > cg_max)
-					cg_max = v;
-			}
-
-			/* 只有关键参数全部有效才置 calib_valid.
-			 * 原来无条件置 true: 方向检测失败/磁链无效也会通过.
-			 * 任意一项失败都会在前面的步骤里通过 foc_request_stage(IDLE)
-			 * 中止流程, 实际上不会走到这里, 但加显式检查更安全. */
-			bool calib_ok =
-			    (Config.pole_pairs > 0) &&
-			    (Config.pole_pairs <= (int32_t)MAX_MOTOR_POLE_PAIRS) &&
-			    (Config.flux_linkage > 0.00001f) &&
-			    (Config.phase_resistance > 0.0001f) &&
-			    (Config.phase_inductance > 1e-9f);
-
-			if (!calib_ok) {
-				printf("calib: REJECTED (pp=%ld lam=%.6f "
-				       "R=%.4f L=%.6f)\n",
-				       (long)Config.pole_pairs,
-				       (double)Config.flux_linkage,
-				       (double)Config.phase_resistance,
-				       (double)Config.phase_inductance);
-			}
-			Config.calib_valid = calib_ok;
-
-			printf("\n===== CALIB RESULT =====\n");
-			printf(" R      = %.5f Ohm\n", R);
-			printf(" L      = %.6f H\n", L);
-			printf(" lambda = %.6f Wb\n", lm);
-			printf(" Kt     = %.5f N.m/A\n",
-			       1.5f * (float)Config.pole_pairs * lm);
-			printf(" curKp  = %.4f (L*wc)  curKi = %.1f (R*wc)\n",
-			       L * wc, R * wc);
-			printf(" poles  = %d pairs\n", (int)Config.pole_pairs);
-			printf(" enc    = dir %d offset %d cnt (%.3f deg)\n",
-			       (int)Config.encoder_dir,
-			       (int)Config.encoder_offset,
-			       (float)Config.encoder_offset * 360.0f /
-				   ENCODER_CPR_F);
-			printf(" offset_lut : min %d max %d pkpk %d\n",
-			       (int)lut_min, (int)lut_max,
-			       (int)(lut_max - lut_min));
-			printf(" cogging_map: min %d max %d pkpk %d\n",
-			       (int)cg_min, (int)cg_max,
-			       (int)(cg_max - cg_min));
-			printf(" valid  = %d\n", (int)Config.calib_valid);
-			printf("========================\n");
-
-			loop_count = 0;
-			sample_count = 0;
-			next_sample_time = 0;
-			mCalibStep = CS_NULL;
-			/* 写 Flash 期间全局关中断几十 ms: 必须先停电流环并失能,
-			 * 否则 PWM 保持最后一拍占空比无人控制 */
-			FOC.calib_mode = false;
-			FOC.calib_adv_angle = false;
-			foc_disarm();
-			if (cal_saved) {
-				Config.velocity_limit = cal_vel_limit_save;
-				Controller.ctrl_mode = cal_ctrl_mode_save;
-				cal_saved = false;
-			}
-			CONFIG_save_to_flash();
-			foc_request_stage(IDLE);
+/* 收尾: 报告结果 + 写 Flash (CS_REPORT_OFFSET_LUT) */
+static void cal_report_step(float time)
+{
+	if (sample_count < (int32_t)OFFSET_LUT_NUM) {
+		if (time > next_sample_time) {
+			next_sample_time += 0.001f;
+			sample_count++;
 		}
+		return;
+	}
+
+	/* ===== 标定结果汇总 ===== */
+	float R = Config.phase_resistance;
+	float L = Config.phase_inductance;
+	float lm = Config.flux_linkage;
+	float wc = M_2PI * Config.current_ctrl_bw;
+
+	int32_t lut_min = 0, lut_max = 0;
+	int32_t cg_min = 0, cg_max = 0;
+	for (uint32_t i = 0; i < OFFSET_LUT_NUM; i++) {
+		int32_t v = Config.offset_lut[i];
+		if (i == 0U) { lut_min = v; lut_max = v; }
+		if (v < lut_min) lut_min = v;
+		if (v > lut_max) lut_max = v;
+	}
+	for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
+		int32_t v = (int32_t)Config.cogging_map[i];
+		if (i == 0U) { cg_min = v; cg_max = v; }
+		if (v < cg_min) cg_min = v;
+		if (v > cg_max) cg_max = v;
+	}
+
+	bool calib_ok =
+	    (Config.pole_pairs > 0) &&
+	    (Config.pole_pairs <= (int32_t)MAX_MOTOR_POLE_PAIRS) &&
+	    (Config.flux_linkage > 0.00001f) &&
+	    (Config.phase_resistance > 0.0001f) &&
+	    (Config.phase_inductance > 1e-9f);
+
+	if (!calib_ok) {
+		printf("calib: REJECTED (pp=%ld lam=%.6f R=%.4f L=%.6f)\n",
+		       (long)Config.pole_pairs,
+		       (double)Config.flux_linkage,
+		       (double)Config.phase_resistance,
+		       (double)Config.phase_inductance);
+	}
+	Config.calib_valid = calib_ok;
+
+	printf("\n===== CALIB RESULT =====\n");
+	printf(" R      = %.5f Ohm\n", R);
+	printf(" L      = %.6f H\n", L);
+	printf(" lambda = %.6f Wb\n", lm);
+	printf(" Kt     = %.5f N.m/A\n", 1.5f * (float)Config.pole_pairs * lm);
+	printf(" curKp  = %.4f (L*wc)  curKi = %.1f (R*wc)\n", L * wc, R * wc);
+	printf(" poles  = %d pairs\n", (int)Config.pole_pairs);
+	printf(" enc    = dir %d offset %d cnt (%.3f deg)\n",
+	       (int)Config.encoder_dir, (int)Config.encoder_offset,
+	       (float)Config.encoder_offset * 360.0f / ENCODER_CPR_F);
+	printf(" offset_lut : min %d max %d pkpk %d\n",
+	       (int)lut_min, (int)lut_max, (int)(lut_max - lut_min));
+	printf(" cogging_map: min %d max %d pkpk %d\n",
+	       (int)cg_min, (int)cg_max, (int)(cg_max - cg_min));
+	printf(" valid  = %d\n", (int)Config.calib_valid);
+	printf("========================\n");
+
+	loop_count = 0;
+	sample_count = 0;
+	next_sample_time = 0;
+	mCalibStep = CS_NULL;
+	FOC.calib_mode = false;
+	FOC.calib_adv_angle = false;
+	foc_disarm();
+	if (cal_saved) {
+		Config.velocity_limit = cal_vel_limit_save;
+		Controller.ctrl_mode = cal_ctrl_mode_save;
+		cal_saved = false;
+	}
+	CONFIG_save_to_flash();
+	foc_request_stage(IDLE);
+}
+
+/* ====== 标定主调度器 ====== */
+void calibration_loop(void)
+{
+	float time = (float)loop_count / (float)CAL_LOOP_HZ;
+	const float ia_meas = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+	float calib_phase_vel = 12.0f * M_PI;
+	float total_calib_cycles = 14.0f;
+
+	/* 拖动阶段每 300ms 打一次 */
+	if ((mCalibStep == CS_DIR_PP_LOOP) ||
+	    (mCalibStep == CS_ENCODER_CW_LOOP) ||
+	    (mCalibStep == CS_ENCODER_CCW_LOOP)) {
+		static uint32_t drag_dbg_cnt;
+		if (++drag_dbg_cnt >= 300U) {
+			drag_dbg_cnt = 0;
+			printf("drag(if): Iq=%.2fA I=%.2fA vel=%.3f rps "
+			       "elec=%.2f rad\n",
+			       (double)FOC.calib_iq, (double)ia_meas,
+			       (double)encoder.vel, (double)phase_set);
+		}
+	}
+
+	/* 丢步检测 */
+	if ((mCalibStep >= CS_FLUX_RAMP1) && (mCalibStep <= CS_FLUX_MEAS2) &&
+	    (Config.pole_pairs > 0) && (FOC.calib_phase_vel > 1.0f)) {
+		static uint32_t slip_dbg;
+		float exp_rps = FOC.calib_phase_vel /
+				(M_2PI * (float)Config.pole_pairs);
+		float dev = fabsf(encoder.vel - exp_rps) / exp_rps;
+		if (dev > 0.25f) {
+			if ((slip_dbg++ % 200U) == 0U)
+				printf("flux: SLIP vel=%.3f exp=%.3f rps "
+				       "(dev %.0f%%)\n",
+				       (double)encoder.vel, (double)exp_rps,
+				       (double)(dev * 100.0f));
+		}
+	}
+
+	/* 分派到各阶段 */
+	switch (mCalibStep) {
+	case CS_MOTOR_R_START:
+	case CS_MOTOR_R_LOOP:
+	case CS_MOTOR_R_END:
+	case CS_MOTOR_L_START:
+	case CS_MOTOR_L_LOOP:
+	case CS_MOTOR_L_END:
+		cal_rl_step(time, ia_meas);
+		break;
+
+	case CS_DIR_PP_START:
+	case CS_DIR_PP_LOOP:
+	case CS_DIR_PP_END:
+		cal_dir_pp_step(time, calib_phase_vel, total_calib_cycles);
+		break;
+
+	case CS_ENCODER_START:
+	case CS_ENCODER_CW_LOOP:
+	case CS_ENCODER_CCW_LOOP:
+	case CS_ENCODER_END:
+		cal_encoder_step();
+		break;
+
+	case CS_FLUX_START:
+	case CS_FLUX_RAMP1:
+	case CS_FLUX_MEAS1:
+	case CS_FLUX_MEAS2:
+	case CS_FLUX_RTEST:
+	case CS_FLUX_RAMP2:
+	case CS_FLUX_END:
+		cal_flux_step(time);
+		break;
+
+	case CS_MOTOR_J_START:
+	case CS_MOTOR_J_SPINUP:
+	case CS_MOTOR_J_ACC:
+	case CS_MOTOR_J_DEC:
+	case CS_MOTOR_J_END:
+		cal_inertia_step(time);
+		break;
+
+	case CS_REPORT_OFFSET_LUT:
+		cal_report_step(time);
 		break;
 
 	default:
 		break;
 	}
+
 	loop_count++;
 }
-
