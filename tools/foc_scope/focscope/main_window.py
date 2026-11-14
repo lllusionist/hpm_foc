@@ -563,6 +563,8 @@ class MainWindow(QWidget):
     def disable(self):
         self._set_enabled(False)
         self.send(CMD["disable"])
+        # 失能后自动清除故障锁存, 允许下一次使能
+        self.send(CMD["clear_fault"])
 
     def _set_enabled(self, on):
         self._enabled = on

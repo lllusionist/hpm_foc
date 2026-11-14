@@ -8,7 +8,7 @@ import struct
 
 # 命令字 (与固件 usb_driver.c / 旧上位机一致)
 CMD = {
-    "opmode": 0x20, "enable": 0x21, "disable": 0x22,
+    "opmode": 0x20, "enable": 0x21, "disable": 0x22, "clear_fault": 0x26,
     "torque": 0x23, "velocity": 0x24, "position": 0x25,
     "calib": 0x27, "anticog": 0x28, "set_anticog": 0x2A, "set_ff": 0x2B, "anticog_sweep": 0x2E,
            "dump_cog": 0x2C, "home": 0x2D, "save": 0x3F, "reset": 0x3B,
