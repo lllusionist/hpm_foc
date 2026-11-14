@@ -399,8 +399,33 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	FOC.Power_filt = 1.5f * (v_d * i_d + v_q * i_q);
 }
 
-void foc_adc_callback(void)
+void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 {
+	/* adc.c 传来原始码值, 在这里存入 FOC 结构体 (保持分层清洁) */
+	FOC.Ia = (float)ia_raw;
+	FOC.Ib = (float)ib_raw;
+	FOC.Ic = (float)ic_raw;
+
+	/* 更新帧计数 (adc.c 内部也维护, 这里保持 FOC 结构体对外可见) */
+	FOC.adc_current_frames = adc_current_frames();
+	FOC.adc_current_missed = adc_current_missed();
+
+	/* 由 Ia、Ib 重构 Ic；实测电流和仅用于诊断。 */
+	FOC.isum =
+	    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
+	     (FOC.Ic - FOC.Ic_midpoint)) *
+	    FOC_CURRENT_SCALE;
+	if (FOC.adc_ready) {
+		float ic_fix = FOC.Ic_midpoint -
+			       (FOC.Ia - FOC.Ia_midpoint) -
+			       (FOC.Ib - FOC.Ib_midpoint);
+		if (ic_fix < 0.0f)
+			ic_fix = 0.0f;
+		else if (ic_fix > 65535.0f)
+			ic_fix = 65535.0f;
+		FOC.Ic = ic_fix;
+	}
+
 	/* 阶跃测试只在使能的 RUN 状态下执行; 失能时立即作废, 防止绕过使能输出 PWM */
 	if ((step_state == 1U) &&
 	    (!FOC.is_armed || (foc_get_stage() != RUN))) {

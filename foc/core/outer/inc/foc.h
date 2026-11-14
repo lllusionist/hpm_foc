@@ -136,6 +136,8 @@ void pwm_output_low_sides(void);
 void foc_arm(void);
 void foc_disarm(void);
 void foc_init(void);
+/* ADC 中断回调: 由 adc.c 以原始码值调用, 不再直接写 FOC 结构体 */
+void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw);
 
 /* 电流阶跃测试 (临时调试): 40kHz 注入 Iq 阶跃并记录响应 */
 void FOC_step_set_base(float base); /* 偏置电流 (小信号阶跃用) */
