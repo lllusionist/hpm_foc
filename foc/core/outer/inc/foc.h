@@ -81,22 +81,18 @@ typedef struct {
 	volatile float current_ctrl_integral_d; /* 电流环 d 轴积分项 */
 	volatile float current_ctrl_integral_q; /* 电流环 q 轴积分项 */
 
-	volatile float dtc_a;
-	volatile float dtc_b;
-	volatile float dtc_c;
-
 	volatile float
 	    current_ctrl_p_gain; /* 电流环 P (上位机 USB 命令可在线改) */
 	volatile float current_ctrl_i_gain; /* 电流环 I */
-
-	volatile float Power_filt; /* 功率 (W) */
-	volatile float torque;	   /* 转矩估算 (N·m) */
 
 	volatile float Vd_out;	 /* 电流环输出电压 d 分量 (V) */
 	volatile float Vq_out;	 /* 电流环输出电压 q 分量 (V) */
 	volatile float Vmag;	 /* 指令电压幅值 |V| (V) */
 	volatile bool saturated; /* 电压饱和标志 */
 	volatile bool ff_enable; /* 反电势前馈/解耦使能 (调试用) */
+
+	volatile float Power_filt; /* 功率 (W) */
+	volatile float torque;	   /* 转矩估算 (N·m) */
 
 	volatile float isum;
 

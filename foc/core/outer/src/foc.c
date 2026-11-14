@@ -164,38 +164,9 @@ void foc_update_voltages(void)
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
-/* 按相电流方向补偿死区及驱动器约 100 ns 延迟。 */
+/* 死区补偿常量 (内联到 FOC_voltage / FOC_current, 不再用独立函数) */
 #define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U)
 #define DT_COMP_ITH (0.8f)
-
-static void foc_deadtime_comp(void)
-{
-	const float dt_comp =
-	    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
-	float ca =
-	    ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
-	float cb =
-	    ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
-	float cc =
-	    ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) / DT_COMP_ITH;
-
-	if (ca > 1.0f)
-		ca = 1.0f;
-	else if (ca < -1.0f)
-		ca = -1.0f;
-	if (cb > 1.0f)
-		cb = 1.0f;
-	else if (cb < -1.0f)
-		cb = -1.0f;
-	if (cc > 1.0f)
-		cc = 1.0f;
-	else if (cc < -1.0f)
-		cc = -1.0f;
-
-	FOC.dtc_a += dt_comp * ca;
-	FOC.dtc_b += dt_comp * cb;
-	FOC.dtc_c += dt_comp * cc;
-}
 
 void FOC_voltage(float Vd, float Vq, float phase)
 {
@@ -215,9 +186,23 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	float pwm_phase = phase;
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
 
-	if (0 == SVPWM(alpha, beta, &FOC.dtc_a, &FOC.dtc_b, &FOC.dtc_c)) {
-		foc_deadtime_comp();
-		pwm_set_duty(FOC.dtc_a, FOC.dtc_b, FOC.dtc_c);
+	float dtc_a, dtc_b, dtc_c;
+	if (0 == SVPWM(alpha, beta, &dtc_a, &dtc_b, &dtc_c)) {
+		const float dt_comp =
+		    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
+		float ca = ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) /
+			   DT_COMP_ITH;
+		float cb = ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) /
+			   DT_COMP_ITH;
+		float cc = ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) /
+			   DT_COMP_ITH;
+		if (ca > 1.0f) ca = 1.0f; else if (ca < -1.0f) ca = -1.0f;
+		if (cb > 1.0f) cb = 1.0f; else if (cb < -1.0f) cb = -1.0f;
+		if (cc > 1.0f) cc = 1.0f; else if (cc < -1.0f) cc = -1.0f;
+		dtc_a += dt_comp * ca;
+		dtc_b += dt_comp * cb;
+		dtc_c += dt_comp * cc;
+		pwm_set_duty(dtc_a, dtc_b, dtc_c);
 	}
 }
 
@@ -382,9 +367,25 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 	float pwm_phase = phase + phase_vel * CURRENT_MEASURE_PERIOD;
 	inverse_park(mod_vd, mod_vq, pwm_phase, &alpha, &beta);
 
-	if (0 == SVPWM(alpha, beta, &FOC.dtc_a, &FOC.dtc_b, &FOC.dtc_c)) {
-		foc_deadtime_comp();
-		pwm_set_duty(FOC.dtc_a, FOC.dtc_b, FOC.dtc_c);
+	/* 把 dtc 用局部变量代替 volatile 字段: 只在 ISR 里用, 无需跨上下文可见 */
+	float dtc_a, dtc_b, dtc_c;
+	if (0 == SVPWM(alpha, beta, &dtc_a, &dtc_b, &dtc_c)) {
+		/* 死区补偿 */
+		const float dt_comp =
+		    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
+		float ca = ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) /
+			   DT_COMP_ITH;
+		float cb = ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) /
+			   DT_COMP_ITH;
+		float cc = ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) /
+			   DT_COMP_ITH;
+		if (ca > 1.0f) ca = 1.0f; else if (ca < -1.0f) ca = -1.0f;
+		if (cb > 1.0f) cb = 1.0f; else if (cb < -1.0f) cb = -1.0f;
+		if (cc > 1.0f) cc = 1.0f; else if (cc < -1.0f) cc = -1.0f;
+		dtc_a += dt_comp * ca;
+		dtc_b += dt_comp * cb;
+		dtc_c += dt_comp * cc;
+		pwm_set_duty(dtc_a, dtc_b, dtc_c);
 	}
 
 	FOC.Iq = i_q;
