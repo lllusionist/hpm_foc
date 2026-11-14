@@ -29,7 +29,7 @@
 #define USB_CMD_SET_CUR_KP 0x40
 #define USB_CMD_SET_CUR_KI 0x41
 #define USB_CMD_SET_CUR_BW 0x58
-#define USB_CMD_SET_MOTOR_PROFILE 0x5F // float 0/1: 切换电机配置档 (4310/5210)
+#define USB_CMD_SET_MOTOR_PROFILE 0x5F // float 0/1/2: 切换电机配置档 (4310/5210/2312)
 
 #define USB_CMD_SET_VEL_KP 0x42
 #define USB_CMD_SET_VEL_KI 0x43

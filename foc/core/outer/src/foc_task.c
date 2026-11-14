@@ -3,6 +3,14 @@
 #include "encoder.h"
 #include <stdio.h>
 
+/* 时序一致性断言: 改 configTICK_RATE_HZ / ENCODER_TASK_HZ / PWM_FREQ_HZ
+ * 时这些宏必须同步更新, 否则 PLL 增益、校准频率、vTaskDelayUntil 周期
+ * 会静默出错. 加编译期检查让改错时直接报错. */
+_Static_assert(configTICK_RATE_HZ == 10000,
+	       "tick rate changed: check ENCODER_HALF_TICKS / Task_FOC delay");
+_Static_assert(ENCODER_HALF_TICKS == 1,
+	       "encoder half tick != 1: ENCODER_TASK_HZ or tick rate changed");
+
 static tFSM sFSM;
 
 /* 外部请求 */
