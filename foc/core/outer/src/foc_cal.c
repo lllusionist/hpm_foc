@@ -188,6 +188,7 @@ static void calib_drag_if(float iq, float elec_angle, float elec_vel)
 /* R/L 标定 (CS_MOTOR_R_* ~ CS_MOTOR_L_END) */
 static void cal_rl_step(float time, float ia_meas)
 {
+	(void)time; /* 本阶段不按时间切换, 仅 ia_meas 用到 */
 	switch (mCalibStep) {
 	case CS_MOTOR_R_START:
 		loop_count = 0;
