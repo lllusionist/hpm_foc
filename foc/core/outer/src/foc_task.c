@@ -309,9 +309,15 @@ static void Task_FOC(void *argument)
 					foc_fault_request(IDLE);
 				}
 			}
-			/* ADC 零点已就绪: 自动进 IDLE, 不等上位机命令 */
-			if (FOC.adc_ready && (foc_get_stage() == BOOT_UP))
+			/* ADC 零点已就绪: 清除上电时留下的 ADC 故障码, 自动进 IDLE.
+			 * foc_init() 在调度器启动前运行, 彼时全局中断关闭,
+			 * 第一次标定必然失败并留下 FOC_FAULT_ADC; 任务里重试后应清除. */
+			if (FOC.adc_ready && (foc_get_stage() == BOOT_UP)) {
+				if (FOC.fault_code == FOC_FAULT_ADC)
+					FOC.fault_code = FOC_FAULT_NONE;
+				foc_clear_fault_req();
 				foc_request_stage(IDLE);
+			}
 		} break;
 		case IDLE:
 			if (slow_tick)
