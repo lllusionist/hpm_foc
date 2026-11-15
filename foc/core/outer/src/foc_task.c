@@ -1,7 +1,11 @@
 #include "foc_task.h"
 #include "foc_ctrl.h"
 #include "encoder.h"
+#include "sys.h"
 #include <stdio.h>
+
+/* ADC 中断心跳计数 (定义在 foc.c) */
+extern volatile uint32_t g_wdg_adc_cnt;
 
 /* 时序一致性断言: 改 configTICK_RATE_HZ / ENCODER_TASK_HZ / PWM_FREQ_HZ
  * 时这些宏必须同步更新, 否则 PLL 增益、校准频率、vTaskDelayUntil 周期
@@ -274,6 +278,17 @@ static void Task_FOC(void *argument)
 		/* 5kHz 任务, 校准每 5 拍调一次 = 1kHz */
 		tick++;
 		bool slow_tick = ((tick % 5U) == 0U);
+
+		/* 跨层看门狗: 每 100ms (500 拍 @5kHz) 检查 ADC 中断是否还活着.
+		 * ADC 计数器在增 -> 喂狗; 否则不喂, 500ms 后硬件复位. */
+		if ((tick % 500U) == 0U) {
+			static uint32_t last_adc_cnt;
+			uint32_t now = g_wdg_adc_cnt;
+			if (now != last_adc_cnt) {
+				last_adc_cnt = now;
+				sys_wdg_feed();
+			}
+		}
 
 		if (s_req_valid) {
 			s_req_valid = 0;

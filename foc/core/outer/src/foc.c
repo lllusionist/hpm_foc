@@ -6,6 +6,9 @@
 
 volatile foc_data_t FOC;
 
+/* 看门狗用 ADC 心跳计数: ISR 每拍递增, FOC 任务检测是否停更 */
+volatile uint32_t g_wdg_adc_cnt;
+
 /* 40 kHz 电流阶跃采样，完成后由 VOFA 整包上传。 */
 #define FOC_STEP_N 800U
 #define FOC_STEP_PRE 400U
@@ -410,6 +413,9 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 	/* 更新帧计数 (adc.c 内部也维护, 这里保持 FOC 结构体对外可见) */
 	FOC.adc_current_frames = adc_current_frames();
 	FOC.adc_current_missed = adc_current_missed();
+
+	/* 看门狗心跳: 每拍递增, FOC 任务确认其在增才喂狗 */
+	g_wdg_adc_cnt++;
 
 	/* 由 Ia、Ib 重构 Ic；实测电流和仅用于诊断。 */
 	FOC.isum =

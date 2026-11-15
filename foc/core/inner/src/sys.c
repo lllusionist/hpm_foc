@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "cdc_acm.h"
 #include "log.h"
+#include "hpm_ewdg_drv.h"
 
 static void sys_init(void)
 {
@@ -129,4 +130,32 @@ void sys_delay_us(uint32_t us)
 void sys_delay_ms(uint32_t ms)
 {
 	clock_cpu_delay_ms(ms);
+}
+
+/* 硬件看门狗: 超时 ~500ms 复位 MCU.
+ * 由 FOC 任务喂狗, ADC 计数器用于验证中断仍在运行. */
+void sys_wdg_init(void)
+{
+	ewdg_config_t cfg;
+
+	clock_add_to_group(clock_watchdog0, 0);
+	ewdg_get_default_config(HPM_EWDG0, &cfg);
+
+	/* 超时 500ms: ADC 中断停更 500ms 触发硬件复位.
+	 * use_lowlevel_timeout=false 时用 µs 单位 */
+	cfg.ctrl_config.use_lowlevel_timeout = false;
+	cfg.ctrl_config.timeout_interrupt_us = 400000U; /* 400ms 触发中断 */
+	cfg.ctrl_config.timeout_reset_us     = 500000U; /* 500ms 触发复位 */
+	cfg.int_rst_config.enable_timeout_reset     = true;
+	cfg.int_rst_config.enable_timeout_interrupt = false;
+	cfg.enable_watchdog = true;
+
+	if (ewdg_init(HPM_EWDG0, &cfg) != status_success) {
+		printf("wdg: init fail\n");
+	}
+}
+
+void sys_wdg_feed(void)
+{
+	ewdg_refresh(HPM_EWDG0);
 }

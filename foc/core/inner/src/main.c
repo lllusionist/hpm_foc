@@ -40,6 +40,7 @@ int main(void)
 	config_init();
 	sys_board_init();
 	log_start();
+	sys_wdg_init();
 
 	flash_init();
 	if (CONFIG_load_from_flash() != 0)

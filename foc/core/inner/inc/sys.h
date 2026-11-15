@@ -24,6 +24,8 @@
 
 void sys_board_init(void);
 void sys_usb_init(void);
+void sys_wdg_init(void);
+void sys_wdg_feed(void);
 void sys_delay_us(uint32_t us);
 void sys_delay_ms(uint32_t ms);
 
