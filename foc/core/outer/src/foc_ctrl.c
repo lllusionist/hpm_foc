@@ -118,17 +118,23 @@ int CONTROLLER_set_home(void)
 		encoder.shadow_count = 0;
 		taskEXIT_CRITICAL();
 	} else if (foc_get_stage() == RUN) {
-		float pos_err = Controller.pos_setpoint - encoder.pos;
+		/* pos_setpoint 和位置误差都用 count_aligned 换算 (单圈弧度),
+		 * 不能用 encoder.pos (多圈圈数, 单位不同, L8 修复) */
+		float th_meas =
+		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
+		float pos_err = Controller.pos_setpoint - th_meas;
+		while (pos_err > M_PI)
+			pos_err -= M_2PI;
+		while (pos_err < -M_PI)
+			pos_err += M_2PI;
+
 		if ((ABS(encoder.vel) < 0.5f) && (ABS(pos_err) < 0.01f)) {
 			taskENTER_CRITICAL();
 
 			encoder.shadow_count = 0;
 			encoder.pos = 0;
-			encoder.pll_pos =
-			    (float)encoder
-				.count_aligned; // PLL 对齐当前单圈位置
+			encoder.pll_pos = (float)encoder.count_aligned;
 			encoder.pll_vel = 0;
-			// 防止产生错误 delta
 			encoder.count_in_cpr_prev = encoder.count_in_cpr;
 
 			Controller.input_position = 0;
