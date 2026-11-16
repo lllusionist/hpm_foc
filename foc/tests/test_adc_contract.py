@@ -7,6 +7,7 @@ ADC = (ROOT / "core/inner/src/adc.c").read_text(encoding="utf-8")
 FOC = (ROOT / "core/outer/src/foc.c").read_text(encoding="utf-8")
 TASK = (ROOT / "core/outer/src/foc_task.c").read_text(encoding="utf-8")
 CAL = (ROOT / "core/outer/src/foc_cal.c").read_text(encoding="utf-8")
+USB = (ROOT / "core/outer/src/usb_driver.c").read_text(encoding="utf-8")
 
 
 class AdcContractTests(unittest.TestCase):
@@ -80,6 +81,20 @@ class AdcContractTests(unittest.TestCase):
         self.assertNotRegex(CAL, r"\b(?:pwm_set_duty|FOC_voltage)\(")
         callback = FOC.split("void foc_adc_callback(", 1)[1]
         self.assertIn("float voltage = resistance_voltage;", callback)
+
+    def test_link_timeout_starts_with_run_and_only_heartbeat_refreshes_it(self):
+        self.assertRegex(
+            USB, r"case USB_CMD_HEARTBEAT:\s+foc_heartbeat_from_isr\(\);"
+        )
+        self.assertEqual(USB.count("foc_heartbeat_from_isr();"), 1)
+        run_entry = TASK.split("static void enter_state", 1)[1].split(
+            "case CALIBRATION:", 1
+        )[0]
+        self.assertIn("s_last_heartbeat_tick = xTaskGetTickCount();", run_entry)
+        self.assertRegex(
+            TASK, r"if \(FOC\.is_armed && heartbeat_timed_out\(\)\) \{\s+"
+            r"foc_disarm\(\);\s+foc_fault_request\(IDLE\);"
+        )
 
 
 if __name__ == "__main__":

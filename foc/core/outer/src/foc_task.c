@@ -18,6 +18,22 @@ _Static_assert(ENCODER_HALF_TICKS == 1,
 
 static tFSM sFSM;
 
+#define HEARTBEAT_TIMEOUT_MS (500U)
+static volatile TickType_t s_last_heartbeat_tick;
+
+void foc_heartbeat_from_isr(void)
+{
+	s_last_heartbeat_tick = xTaskGetTickCountFromISR();
+}
+
+static bool heartbeat_timed_out(void)
+{
+	TickType_t last = s_last_heartbeat_tick;
+
+	return (xTaskGetTickCount() - last) >=
+	       pdMS_TO_TICKS(HEARTBEAT_TIMEOUT_MS);
+}
+
 /* 外部请求 */
 static volatile tFSMState s_req = BOOT_UP;
 static volatile uint8_t s_req_valid = 0;
@@ -102,6 +118,10 @@ static void enter_state(tFSMState state)
 		break;
 	case RUN:
 		CONTROLLER_reset();
+		/* 每次进入 RUN 都开始计时，包括从未收到心跳的情况。 */
+		taskENTER_CRITICAL();
+		s_last_heartbeat_tick = xTaskGetTickCount();
+		taskEXIT_CRITICAL();
 		foc_arm();
 		if (!FOC.is_armed)
 			foc_request_stage(IDLE);
@@ -340,12 +360,10 @@ static void Task_FOC(void *argument)
 			break;
 		case RUN:
 			foc_check_and_trip();
-			/* 指令超时: 上位机断连后主动失能, 防止电机按
-			 * 最后命令无限运行 */
-			if (CONTROLLER_cmd_timed_out()) {
-				printf("cmd timeout: auto disable\n");
+			if (FOC.is_armed && heartbeat_timed_out()) {
 				foc_disarm();
 				foc_fault_request(IDLE);
+				printf("heartbeat timeout: auto disable\n");
 			}
 			break;
 		case CALIBRATION:

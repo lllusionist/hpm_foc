@@ -17,7 +17,7 @@ from . import theme
 from .channels import ChannelModel, FAULT_TEXT, NCH, CHANNELS, index_of, STATUS_ITEMS
 from .fwconfig import load as _load_fw
 from .buffers import DataStore
-from .protocol import CMD, MODES
+from .protocol import CMD, HEARTBEAT_INTERVAL_MS, MODES
 from .serial_io import SerialIO, HAVE_SERIAL
 from .plot import PlotWidget, OverviewWidget
 from .panels import TitleBar, LeftPanel, RightDataPanel, StatusBarWidget, ChannelDialog, num, TargetSlider
@@ -90,6 +90,10 @@ class MainWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(33)
+
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.timeout.connect(self._send_heartbeat)
+        self._heartbeat_timer.start(HEARTBEAT_INTERVAL_MS)
 
         self._last_ports_key = None
         self.refresh_ports()
@@ -397,6 +401,10 @@ class MainWindow(QWidget):
     def disconnect(self):
         self.io.close()
         self._set_conn_ui(False)
+
+    def _send_heartbeat(self):
+        if self.io.is_open() and not self.io.link_lost:
+            self.io.send(CMD["heartbeat"])
 
     def _set_conn_ui(self, on):
         self.left.btn_connect.setEnabled(not on)

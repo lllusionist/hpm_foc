@@ -24,6 +24,10 @@ void USB_parse_frame(UsbFrame *frame)
 		return;
 
 	switch (id) {
+	case USB_CMD_HEARTBEAT:
+		foc_heartbeat_from_isr();
+		break;
+
 	// 配置持久化 (延迟到任务里执行: 擦写要关中断几十 ms)
 	case USB_CMD_SAVE_CONFIG:
 		Controller.config_cmd_pending = 1;
@@ -70,7 +74,6 @@ void USB_parse_frame(UsbFrame *frame)
 		else
 			Controller.input_current_buffer = current;
 		CONTROLLER_sync_callback();
-		CONTROLLER_cmd_heartbeat();
 		break;
 	}
 
@@ -87,7 +90,6 @@ void USB_parse_frame(UsbFrame *frame)
 		else
 			Controller.input_velocity_buffer = velocity;
 		CONTROLLER_sync_callback();
-		CONTROLLER_cmd_heartbeat();
 		break;
 	}
 
@@ -105,7 +107,6 @@ void USB_parse_frame(UsbFrame *frame)
 		else
 			Controller.input_position_buffer = position;
 		CONTROLLER_sync_callback();
-		CONTROLLER_cmd_heartbeat();
 		break;
 	}
 

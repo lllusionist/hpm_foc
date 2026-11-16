@@ -19,6 +19,8 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+from focscope.protocol import CMD, HEARTBEAT_INTERVAL_MS, pack_cmd
+
 try:
     import serial
     from serial.tools import list_ports
@@ -41,6 +43,7 @@ class StepApp:
     def __init__(self, root):
         self.root = root
         self.ser = None
+        self._write_lock = threading.Lock()
         self.busy = False
         root.title("FOC 电流阶跃测试 (临时)")
         root.geometry("900x560")
@@ -96,6 +99,7 @@ class StepApp:
 
         self.last = None
         self.refresh_ports()
+        root.after(HEARTBEAT_INTERVAL_MS, self._send_heartbeat)
 
     # ---------- 串口 ----------
     def refresh_ports(self):
@@ -118,7 +122,8 @@ class StepApp:
             messagebox.showwarning("提示", "请选择串口")
             return
         try:
-            self.ser = serial.Serial(port, 115200, timeout=0.05)
+            self.ser = serial.Serial(port, 115200, timeout=0.05,
+                                     write_timeout=0.05)
             self.ser.reset_input_buffer()
         except Exception as e:
             self.ser = None
@@ -137,17 +142,27 @@ class StepApp:
         self.conn_btn.configure(text="连接")
         self.state_lbl.configure(text="未连接")
 
+    def _send_heartbeat(self):
+        if self.ser is not None:
+            try:
+                self._write_cmd(self.ser, CMD["heartbeat"])
+            except OSError:
+                self.close()
+        self.root.after(HEARTBEAT_INTERVAL_MS, self._send_heartbeat)
+
     # ---------- 使能/禁用 ----------
+    def _write_cmd(self, ser, cid, value=None):
+        payload = pack_cmd(cid, value)
+        with self._write_lock:
+            if self.ser is not ser:
+                return False
+            return ser.write(payload) == len(payload)
+
     def send_cmd(self, cid, value=None):
         if self.ser is None:
             messagebox.showwarning("提示", "请先连接串口")
             return False
-        # 固件按 5 字节一帧切分 (1B id + 4B float), 无参命令也必须补齐 5 字节,
-        # 否则整包被丢弃
-        payload = bytes([cid]) + struct.pack(
-            "<f", 0.0 if value is None else float(value))
-        self.ser.write(payload)
-        return True
+        return self._write_cmd(self.ser, cid, value)
 
     def on_enable(self):
         if self.ser is None:
@@ -205,32 +220,35 @@ class StepApp:
         self.busy = True
         self.step_btn.configure(state="disabled")
         self.state_lbl.configure(text="采集中…")
-        t = threading.Thread(target=self.worker, args=(amp, base), daemon=True)
+        t = threading.Thread(target=self.worker, args=(self.ser, amp, base),
+                             daemon=True)
         t.start()
 
-    def worker(self, amp, base):
+    def worker(self, ser, amp, base):
         try:
-            self.ser.write(bytes([CMD_STEP_BASE]) + struct.pack("<f", base))
+            if not self._write_cmd(ser, CMD_STEP_BASE, base):
+                raise OSError("发送阶跃基值失败")
             time.sleep(0.02)
-            self.ser.reset_input_buffer()
-            self.ser.write(bytes([CMD_STEP]) + struct.pack("<f", amp))
-            result = self.read_reply()
+            ser.reset_input_buffer()
+            if not self._write_cmd(ser, CMD_STEP, amp):
+                raise OSError("发送阶跃命令失败")
+            result = self.read_reply(ser)
         except Exception as e:
             result = ("error", str(e))
         self.root.after(0, self.done, result)
 
-    def read_reply(self):
+    def read_reply(self, ser):
         deadline = time.time() + 3.0
         buf = b""
         while time.time() < deadline:
-            chunk = self.ser.read(512)
+            chunk = ser.read(512)
             if chunk:
                 buf += chunk
                 i = buf.find(b"$STEP,")
                 if i >= 0:
                     j = buf.find(b"\n", i)
                     while j < 0 and time.time() < deadline:
-                        buf += self.ser.read(512)
+                        buf += ser.read(512)
                         j = buf.find(b"\n", i)
                     if j < 0:
                         return ("error", "等不到头行结束")
@@ -239,7 +257,7 @@ class StepApp:
                     need = n * ch * 4
                     data = buf[j + 1:]
                     while len(data) < need and time.time() < deadline:
-                        data += self.ser.read(min(2048, need - len(data)))
+                        data += ser.read(min(2048, need - len(data)))
                     if len(data) < need:
                         return ("error", "数据不完整 (%d/%d)" % (len(data), need))
                     vals = struct.unpack("<%df" % (n * ch), data[:need])

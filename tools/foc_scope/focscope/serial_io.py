@@ -72,7 +72,8 @@ class SerialIO:
         last = None
         for _ in range(4):
             try:
-                self.ser = serial.Serial(dev, self.baud, timeout=0.05)
+                self.ser = serial.Serial(dev, self.baud, timeout=0.05,
+                                         write_timeout=0.05)
                 break
             except Exception as e:
                 last = e

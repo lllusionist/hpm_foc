@@ -10,7 +10,8 @@ import struct
 CMD = {
     "opmode": 0x20, "enable": 0x21, "disable": 0x22, "clear_fault": 0x26,
     "torque": 0x23, "velocity": 0x24, "position": 0x25,
-    "calib": 0x27, "anticog": 0x28, "set_anticog": 0x2A, "set_ff": 0x2B, "anticog_sweep": 0x2E,
+    "calib": 0x27, "anticog": 0x28, "heartbeat": 0x29,
+    "set_anticog": 0x2A, "set_ff": 0x2B, "anticog_sweep": 0x2E,
            "dump_cog": 0x2C, "home": 0x2D, "save": 0x3F, "reset": 0x3B,
     "getcfg": 0x3E,
     "curkp": 0x40, "curki": 0x41, "velkp": 0x42, "velki": 0x43, "poskp": 0x44,
@@ -21,6 +22,7 @@ CMD = {
 TAIL = b"\x00\x00\x80\x7f"
 CFG_MAGIC = b"$FOCFG,"
 NCH = 22
+HEARTBEAT_INTERVAL_MS = 100
 
 # 运行模式
 MODES = ["电流", "速度", "位置", "轨迹"]

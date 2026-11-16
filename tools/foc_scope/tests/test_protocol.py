@@ -16,6 +16,9 @@ class TestPackCmd(unittest.TestCase):
         b = pack_cmd(CMD["torque"], 1.5)
         self.assertEqual(struct.unpack("<f", b[1:5])[0], 1.5)
 
+    def test_heartbeat_frame(self):
+        self.assertEqual(pack_cmd(CMD["heartbeat"]), b"\x29\x00\x00\x00\x00")
+
 
 class TestJustfloatParser(unittest.TestCase):
     def _frame(self, *vals):

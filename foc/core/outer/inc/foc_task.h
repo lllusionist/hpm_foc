@@ -19,6 +19,7 @@ typedef struct sFSM {
 } tFSM;
 
 void foc_request_stage(tFSMState state);
+void foc_heartbeat_from_isr(void);
 void foc_request_fault_clear(void);
 /* 故障专用请求: 锁住请求槽防止 USB 覆盖 */
 void foc_fault_request(tFSMState state);
