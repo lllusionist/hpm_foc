@@ -23,6 +23,18 @@
 #define FOC_VBUS_DIVIDER (16.0f)
 #define FOC_VPHASE_DIVIDER (16.0f)
 
+/* 开环电压通道 (FOC_voltage: R/L 标定 + 电感注入) 里的死区补偿开关.
+ *
+ * 实验结论 (2026-11-17, 5210, 已定论): 补偿的方向原来是**反的**, 它在叠加畸变
+ * 而不是抵消. 用 0x27 的 R 段打印的 Voff = ures - I*R 做 A/B:
+ *   补偿开: Voff = 0.244V,  L 标定 24.8µH, Kp = 0.047
+ *   补偿关: Voff = 0.133V,  L 标定 11.9µH, Kp = 0.0225
+ * 差值 0.111V ≈ 补偿量 0.096V -> 符号反了. 现在两处补偿 (FOC_voltage 与
+ * FOC_current 的给定前馈) 都已改成减号, 且 DT_DEAD_NS 按实测 0.133V 调到 +140ns.
+ * 预期下一次 0x27: Voff ≈ 0, L ≈ 12µH, Kp ≈ 0.0225.
+ * 这个开关留着做回归: 改成 0 就能再测一遍 Voff, 平时必须是 1. */
+#define DT_COMP_IN_VOLTAGE 1
+
 /* 故障码 */
 #define FOC_FAULT_NONE 0
 #define FOC_FAULT_PHASE_OC 1	    /* 相过流 (5kHz 任务检测) */

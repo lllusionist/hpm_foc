@@ -187,8 +187,10 @@ void foc_update_voltages(void)
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
-/* PWM 外设死区与栅极驱动器延迟叠加。 */
-#define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U)
+/* PWM 外设死区与栅极驱动器延迟叠加.
+ * 实测 (5210, 24V): ures=0.3V/4.15A 时 Voff=0.133V -> 等效死区 ≈138ns,
+ * 所以取 140ns (原来按数据手册的 100ns 会少补 0.037V ≈ 0.9A). */
+#define DT_DEAD_NS (PWM_DEAD_TIME_NS + 140U)
 #define DT_COMP_ITH (0.8f)
 
 static void foc_voltage(float Vd, float Vq, float phase)
@@ -211,6 +213,8 @@ static void foc_voltage(float Vd, float Vq, float phase)
 
 	float dtc_a, dtc_b, dtc_c;
 	if (0 == SVPWM(alpha, beta, &dtc_a, &dtc_b, &dtc_c)) {
+#if DT_COMP_IN_VOLTAGE
+		/* 标定实验开关, 判读方法见 foc.h 里 DT_COMP_IN_VOLTAGE 注释 */
 		const float dt_comp =
 		    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
 		float ca = ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) /
@@ -222,9 +226,11 @@ static void foc_voltage(float Vd, float Vq, float phase)
 		if (ca > 1.0f) ca = 1.0f; else if (ca < -1.0f) ca = -1.0f;
 		if (cb > 1.0f) cb = 1.0f; else if (cb < -1.0f) cb = -1.0f;
 		if (cc > 1.0f) cc = 1.0f; else if (cc < -1.0f) cc = -1.0f;
-		dtc_a += dt_comp * ca;
-		dtc_b += dt_comp * cb;
-		dtc_c += dt_comp * cc;
+		/* 减号: 实测加号是在叠加畸变 (Voff 0.244 -> 0.133), 见 foc.h */
+		dtc_a -= dt_comp * ca;
+		dtc_b -= dt_comp * cb;
+		dtc_c -= dt_comp * cc;
+#endif
 		pwm_set_duty(dtc_a, dtc_b, dtc_c);
 	}
 }
@@ -408,11 +414,12 @@ static void foc_current(float Id_set, float Iq_set, float phase,
 		/* 死区补偿: 用"给定 dq 电流"反算三相电流方向来定补偿极性.
 		 * 绝不能用实测相电流: 那是一条正反馈支路, 增量增益
 		 *     Vbus·(DT_DEAD_NS/T_pwm)/DT_COMP_ITH
-		 *     = 24V×0.4%/0.8A = 0.12 V/A
-		 * 5210 相电阻只有 0.042Ω, 等效电阻变成 -0.078Ω -> 小电流段
-		 * 自激 (一拍打到电压轨, 25µs 冲 12A), 一进闭环就撞 12A 硬限幅.
+		 *     = 24V×0.56%/0.8A = 0.17 V/A
+		 * 5210 相电阻只有 0.04Ω, 等效电阻变成负的 -> 小电流段自激
+		 * (一拍打到电压轨, 25µs 冲 12A), 一进闭环就撞 12A 硬限幅.
 		 * 用给定值则是纯前馈: 只算电压, 不构成环路, 不会自激.
-		 * 由 ia+ib+ic=0 可以从 (id,iq,θ) 直接得到三相电流方向. */
+		 * 由 ia+ib+ic=0 可以从 (id,iq,θ) 直接得到三相电流方向.
+		 * 极性符号由 0x27 的 Voff 实测确定 (见 foc.h DT_COMP_IN_VOLTAGE). */
 		const float dt_comp =
 		    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
 		float i_alpha_cmd, i_beta_cmd;
@@ -431,9 +438,10 @@ static void foc_current(float Id_set, float Iq_set, float phase,
 		else if (cb < -1.0f) cb = -1.0f;
 		if (cc > 1.0f) cc = 1.0f;
 		else if (cc < -1.0f) cc = -1.0f;
-		dtc_a += dt_comp * ca;
-		dtc_b += dt_comp * cb;
-		dtc_c += dt_comp * cc;
+		/* 减号: 与 FOC_voltage 一致 (实测加号是在叠加畸变, 见 foc.h) */
+		dtc_a -= dt_comp * ca;
+		dtc_b -= dt_comp * cb;
+		dtc_c -= dt_comp * cc;
 		pwm_set_duty(dtc_a, dtc_b, dtc_c);
 	}
 

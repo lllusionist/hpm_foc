@@ -136,11 +136,13 @@ void calibration_start(void)
 
 	/* 回显实际生效参数, 便于确认配置已下发 */
 	printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm "
-	       "drag_min=%.2fV flux_iq=%.2fA j_iq=%.2fA\n",
+	       "drag_min=%.2fV flux_iq=%.2fA j_iq=%.2fA "
+	       "dtcomp_in_voltage=%d\n",
 	       Config.calib_current, Config.calib_voltage, CALIB_R_STEP_V,
 	       Config.phase_resistance, (double)Config.calib_drag_v_min,
 	       (double)(Config.calib_current * Config.calib_flux_iq_gain),
-	       (double)(Config.calib_current * Config.calib_j_iq_gain));
+	       (double)(Config.calib_current * Config.calib_j_iq_gain),
+	       (int)DT_COMP_IN_VOLTAGE);
 
 	mCalibStep = CS_MOTOR_R_START;
 }
@@ -251,11 +253,12 @@ static void cal_rl_step(float time, float ia_meas)
 				}
 				printf("res: %.4f Ohm (ures=%.3f I1=%.4f "
 				       "I2=%.4f steps=%u di_avg=%.5f "
-				       "Voff=%.3fV)\n",
+				       "Voff=%.3fV dtcomp=%d)\n",
 				       Config.phase_resistance, r_volt, r_i1,
 				       Is, (unsigned)r_s1, (double)di_avg,
 				       (double)(r_volt - Is *
-							      Config.phase_resistance));
+							      Config.phase_resistance),
+				       (int)DT_COMP_IN_VOLTAGE);
 				mCalibStep = CS_MOTOR_R_END;
 			}
 		}
