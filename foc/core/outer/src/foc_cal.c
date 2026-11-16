@@ -24,9 +24,26 @@
 /* 电阻: 两点伏安法(相减抵消死区); 电感: 1kHz 正弦注入, Z²=R²+(ωL)² */
 #define L_CAL_CYCLES (CAL_LOOP_HZ / 2U) /* 电感: 每轮正弦注入时长 0.5s */
 /* 步长按量程 10% 派生, 不写死绝对值 */
-#define CALIB_R_STEP_V (Config.calib_voltage * 0.10f)
+/* R 标定步长: 按"每步约 calib_current/3 的电流增量"折算, 上限取量程的 10%.
+ * 固定 10% 量程 (=0.1V) 对低阻电机太大: 5210 (R≈0.027Ω) 0.1V 就已经 3.7A,
+ * 超过 calib_current=3A, 于是第一步就停 -> steps=0, 差分法退化成单点,
+ * R 和 Voff 全废 (Voff 会变成恒等式 0.000).
+ *   5210: 0.027V -> 1A/2A/3A 三点;  4310/2312 仍由 10% 上限决定 (行为不变) */
+static float r_step; /* 本次 R 标定实际使用的步长 (V) */
+
+static float r_calib_step(void)
+{
+	return fminf(Config.calib_voltage * 0.10f,
+		     fmaxf(Config.calib_current * Config.phase_resistance /
+			       3.0f,
+			   Config.calib_voltage * 0.01f));
+}
 #define R_CAL_WINDOW (CAL_LOOP_HZ / 5U)		     /* 每个工作点停留 200ms */
-#define CALIB_L_MIN_V (Config.calib_voltage * 0.20f) /* 电感注入幅值下限 (V) */
+#define CALIB_L_MIN_V (Config.calib_voltage * 0.15f) /* 电感注入幅值下限 (V)
+						      * 原为 0.20: 5210 补偿修对后
+						      * Z 只有 0.047Ω, 0.2V 就是
+						      * 4.2A, 加上 3A 直流偏置峰值
+						      * 到 7.2A, 离 9A 软限流太近 */
 #define CALIB_L_MAX_PROBE_GAIN (1.5f)
 #define CALIB_L_RAMP_TICKS (CAL_LOOP_HZ / 40U)
 #define CALIB_L_SETTLE_TICKS (CAL_LOOP_HZ / 10U)
@@ -113,6 +130,8 @@ void calibration_start(void)
 		return;
 	}
 
+	r_step = r_calib_step();
+
 	cal_vel_limit_save = Config.velocity_limit;
 	cal_ctrl_mode_save = Controller.ctrl_mode;
 	cal_saved = true;
@@ -138,7 +157,7 @@ void calibration_start(void)
 	printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm "
 	       "drag_min=%.2fV flux_iq=%.2fA j_iq=%.2fA "
 	       "dtcomp_in_voltage=%d\n",
-	       Config.calib_current, Config.calib_voltage, CALIB_R_STEP_V,
+	       Config.calib_current, Config.calib_voltage, (double)r_step,
 	       Config.phase_resistance, (double)Config.calib_drag_v_min,
 	       (double)(Config.calib_current * Config.calib_flux_iq_gain),
 	       (double)(Config.calib_current * Config.calib_j_iq_gain),
@@ -206,7 +225,7 @@ static void cal_rl_step(float time, float ia_meas)
 	switch (mCalibStep) {
 	case CS_MOTOR_R_START:
 		loop_count = 0;
-		r_volt = CALIB_R_STEP_V;
+		r_volt = r_step;
 		r_i1 = 0.0f;
 		r_isum = 0.0f;
 		r_icnt = 0;
@@ -228,28 +247,34 @@ static void cal_rl_step(float time, float ia_meas)
 			r_isum = 0.0f;
 			r_icnt = 0;
 			loop_count = 0;
+			/* 0.9A 以上才计入差分: 死区补偿在 DT_COMP_ITH(0.8A)
+			 * 之后已饱和, 偏置恒定才能相减消掉 */
+			if ((r_s1 > 0U) && (Is > 0.9f) && (r_i1 > 0.9f)) {
+				r_di_sum += (Is - r_i1);
+				r_di_cnt++;
+			}
 			if ((Is < Config.calib_current) &&
-			    ((r_volt + CALIB_R_STEP_V) <=
+			    ((r_volt + r_step) <=
 			     (Config.calib_voltage * 0.9f))) {
-				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
-					r_di_sum += (Is - r_i1);
-					r_di_cnt++;
-				}
 				r_i1 = Is;
-				r_volt += CALIB_R_STEP_V;
+				r_volt += r_step;
 				foc_set_resistance_voltage(r_volt);
 				r_s1++;
 			} else {
-				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
-					r_di_sum += (Is - r_i1);
-					r_di_cnt++;
-				}
-				float di_avg = (r_di_cnt > 0U)
-						   ? (r_di_sum / (float)r_di_cnt)
-						   : (Is - r_i1);
-				if (fabsf(di_avg) > 1e-4f) {
+				float di_avg;
+				if (r_di_cnt > 0U) {
+					di_avg = r_di_sum / (float)r_di_cnt;
 					Config.phase_resistance =
-					    CALIB_R_STEP_V / di_avg;
+					    r_step / di_avg;
+				} else {
+					/* 只有一个工作点: 差分无意义. 补偿修对后
+					 * Voff 接近 0, V/I 才近似等于 R, 仅作兜底 */
+					di_avg = Is - r_i1;
+					if (Is > 0.5f)
+						Config.phase_resistance =
+						    r_volt / Is;
+					printf("res: WARN single point only, "
+					       "R is a rough V/I guess\n");
 				}
 				printf("res: %.4f Ohm (ures=%.3f I1=%.4f "
 				       "I2=%.4f steps=%u di_avg=%.5f "
