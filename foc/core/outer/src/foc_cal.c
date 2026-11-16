@@ -27,6 +27,15 @@
 #define CALIB_R_STEP_V (Config.calib_voltage * 0.10f)
 #define R_CAL_WINDOW (CAL_LOOP_HZ / 5U)		     /* 每个工作点停留 200ms */
 #define CALIB_L_MIN_V (Config.calib_voltage * 0.20f) /* 电感注入幅值下限 (V) */
+#define CALIB_L_MAX_PROBE_GAIN (1.5f)
+#define CALIB_L_RAMP_TICKS (CAL_LOOP_HZ / 40U)
+#define CALIB_L_SETTLE_TICKS (CAL_LOOP_HZ / 10U)
+#define CALIB_L_MIN_RESPONSE_A (0.005f)
+/* L 注入频率: 固定值, 不再跟 current_ctrl_bw 走.
+ * 原来 vinj_omega = 2π·bw, 于是"降带宽保稳定"会连注入频率一起降,
+ * Z/R 掉到 1 附近, L 就测不准了. 现在解耦: 环带宽可以按电机阻抗随便定,
+ * 注入始终在 1kHz (5210: ωL=0.063Ω vs R=0.042Ω, Z/R≈1.8, 够用). */
+#define CALIB_L_INJ_HZ (1000.0f)
 
 static int encoder_error_arr[MAX_MOTOR_POLE_PAIRS * SAMPLES_PER_PPAIR];
 
@@ -37,6 +46,7 @@ static int16_t sample_count;	 /* 采样点下标 */
 static float next_sample_time;	 /* 下一个采样时刻 (秒) */
 static int64_t start_count_long; /* 极对数标定起点计数 */
 static bool dir_pp_runin;	 /* 极对数标定: 预跑阶段是否已完成 */
+static uint32_t calib_oc_cnt;	 /* 标定软限流的连续越限拍数 */
 
 static float flux_v_sum, flux_i_sum; /* 电压/电流模长累加 */
 static float flux_v1, flux_i1, flux_v2, flux_i2;
@@ -85,6 +95,7 @@ static uint32_t r_di_cnt;
 
 /* 电感: 幅值自适应 */
 static float l_v_dc, l_v_amp; /* 注入的直流偏置 / 正弦幅值 */
+static float l_v_amp_start;
 static uint8_t l_pass;	      /* 0 = 探测轮, 1 = 测量轮 */
 
 /* 标定期间临时改动的运行参数, calibration_end 无论成功与否都要恢复,
@@ -115,6 +126,7 @@ void calibration_start(void)
 	phase_set = 0;
 	sample_count = 0;
 	next_sample_time = 0;
+	calib_oc_cnt = 0;
 	memset(encoder_error_arr, 0, sizeof(encoder_error_arr));
 
 	/* 跨标定残留会混入 Vq1(实测 0.2985→0.6011), 每次必须清零 */
@@ -238,9 +250,12 @@ static void cal_rl_step(float time, float ia_meas)
 					    CALIB_R_STEP_V / di_avg;
 				}
 				printf("res: %.4f Ohm (ures=%.3f I1=%.4f "
-				       "I2=%.4f steps=%u di_avg=%.5f)\n",
+				       "I2=%.4f steps=%u di_avg=%.5f "
+				       "Voff=%.3fV)\n",
 				       Config.phase_resistance, r_volt, r_i1,
-				       Is, (unsigned)r_s1, (double)di_avg);
+				       Is, (unsigned)r_s1, (double)di_avg,
+				       (double)(r_volt - Is *
+							      Config.phase_resistance));
 				mCalibStep = CS_MOTOR_R_END;
 			}
 		}
@@ -254,17 +269,15 @@ static void cal_rl_step(float time, float ia_meas)
 	} break;
 
 	case CS_MOTOR_L_START: {
-		l_v_dc = Config.calib_current * Config.phase_resistance;
+		float voltage_limit = Config.calib_voltage * 0.9f;
+		float bias = Config.calib_current * Config.phase_resistance;
+
+		l_v_dc = fminf(bias, voltage_limit - CALIB_L_MIN_V);
 		l_pass = 0;
-		l_v_amp = Config.calib_current * Config.phase_resistance;
-		if (l_v_amp < CALIB_L_MIN_V)
-			l_v_amp = CALIB_L_MIN_V;
-		if ((l_v_dc + l_v_amp) > Config.calib_voltage * 0.9f) {
-			l_v_amp = (Config.calib_voltage * 0.9f) - l_v_dc;
-			if (l_v_amp < CALIB_L_MIN_V)
-				l_v_amp = CALIB_L_MIN_V;
-		}
-		FOC.vinj_omega = 2.0f * M_PI * Config.current_ctrl_bw;
+		l_v_amp = fminf(fmaxf(bias, CALIB_L_MIN_V),
+			       voltage_limit - l_v_dc);
+		l_v_amp_start = l_v_amp;
+		FOC.vinj_omega = 2.0f * M_PI * CALIB_L_INJ_HZ;
 		FOC.vinj_amp = l_v_amp;
 		FOC.vinj_dc = l_v_dc;
 		FOC.inj_phase = 0;
@@ -280,7 +293,14 @@ static void cal_rl_step(float time, float ia_meas)
 	} break;
 
 	case CS_MOTOR_L_LOOP:
-		if (!FOC.vinj_acc && (loop_count >= 100U))
+		/* 先升幅再等稳态，解调只累加恒幅段。 */
+		if (loop_count <= CALIB_L_RAMP_TICKS) {
+			float fraction = (float)loop_count / CALIB_L_RAMP_TICKS;
+			float delta = l_v_amp - l_v_amp_start;
+
+			FOC.vinj_amp = l_v_amp_start + delta * fraction;
+		}
+		if (!FOC.vinj_acc && loop_count >= CALIB_L_SETTLE_TICKS)
 			FOC.vinj_acc = true;
 		if (loop_count >= L_CAL_CYCLES) {
 			FOC.vinj_acc = false;
@@ -289,31 +309,37 @@ static void cal_rl_step(float time, float ia_meas)
 		break;
 
 	case CS_MOTOR_L_END: {
-		float omega = 2.0f * M_PI * Config.current_ctrl_bw;
+		float omega = 2.0f * M_PI * CALIB_L_INJ_HZ;
 		int valid_samples = (int)FOC.vinj_samples;
 		float I_amp =
 		    (valid_samples > 0)
 			? (2.0f / (float)valid_samples) *
 			      sqrtf(SQ(FOC.vinj_sum_sin) + SQ(FOC.vinj_sum_cos))
 			: 0.0f;
-		float Z = (I_amp > 0.005f) ? (l_v_amp / I_amp) : 9999.0f;
+		float Z;
+
+		if (!isfinite(I_amp) || I_amp <= CALIB_L_MIN_RESPONSE_A) {
+			foc_disarm();
+			printf("ind: no usable current response\n");
+			foc_request_stage(IDLE);
+			break;
+		}
+		Z = l_v_amp / I_amp;
 
 		if (l_pass == 0) {
 			float new_amp = Config.calib_current * Z;
-			if (new_amp < CALIB_L_MIN_V)
-				new_amp = CALIB_L_MIN_V;
-			if ((l_v_dc + new_amp) > Config.calib_voltage * 0.9f) {
-				new_amp =
-				    (Config.calib_voltage * 0.9f) - l_v_dc;
-				if (new_amp < CALIB_L_MIN_V)
-					new_amp = CALIB_L_MIN_V;
-			}
+			float voltage_headroom =
+			    Config.calib_voltage * 0.9f - l_v_dc;
+			float max_amp = fminf(voltage_headroom,
+					      l_v_amp * CALIB_L_MAX_PROBE_GAIN);
+
+			/* 小信号受死区影响，避免按探测阻抗一次放大数倍。 */
+			new_amp = fminf(fmaxf(new_amp, CALIB_L_MIN_V), max_amp);
 			printf(
 			    "ind-probe: Iamp=%.3f Z=%.3f Vamp %.3f -> %.3f\n",
 			    I_amp, Z, l_v_amp, new_amp);
+			l_v_amp_start = l_v_amp;
 			l_v_amp = new_amp;
-			FOC.vinj_amp = new_amp;
-			FOC.inj_phase = 0;
 			FOC.vinj_sum_sin = 0;
 			FOC.vinj_sum_cos = 0;
 			FOC.vinj_samples = 0;
@@ -352,8 +378,10 @@ static void cal_dir_pp_step(float time, float calib_phase_vel,
 {
 	switch (mCalibStep) {
 	case CS_DIR_PP_START:
-		if (loop_count == 0)
+		if (!FOC.is_armed)
 			foc_arm();
+		/* 2s 内把拖动电流从 0 拉满, 角度固定 0 先让转子对齐
+		 * (与 5ed4143 已验证可用的版本一致, 不要改成别的轴向) */
 		calib_drag_if(Config.calib_current * (time / 2.0f), 0.0f, 0.0f);
 		if (time >= 2.0f) {
 			taskENTER_CRITICAL();
@@ -369,7 +397,8 @@ static void cal_dir_pp_step(float time, float calib_phase_vel,
 
 	case CS_DIR_PP_LOOP:
 		phase_set += calib_phase_vel / (float)CAL_LOOP_HZ;
-		calib_drag_if(Config.calib_current, phase_set, calib_phase_vel);
+		calib_drag_if(Config.calib_current, phase_set,
+			      calib_phase_vel);
 		if (!dir_pp_runin) {
 			if (phase_set >= total_calib_cycles * M_2PI) {
 				taskENTER_CRITICAL();
@@ -972,6 +1001,57 @@ void calibration_loop(void)
 	const float ia_meas = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 	float calib_phase_vel = 12.0f * M_PI;
 	float total_calib_cycles = 14.0f;
+
+	/* 标定专用软限流: 12A 硬限幅是给功率级兜底的, 标定本身不该走到那一步.
+	 * 超过 3×calib_current 就收尾, 留下一句可读原因, 而不是撞硬限幅后
+	 * 只剩 FAULT 6 + 一堆 abc 电流. 连续 5 拍才算, 躲开纹波/噪声. */
+	{
+		float ib_meas =
+		    (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
+		float ic_meas =
+		    (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
+		float ilim = 3.0f * Config.calib_current;
+		float imax = fabsf(ia_meas);
+
+		if (fabsf(ib_meas) > imax)
+			imax = fabsf(ib_meas);
+		if (fabsf(ic_meas) > imax)
+			imax = fabsf(ic_meas);
+		if (FOC.is_armed && (imax > ilim)) {
+			if (++calib_oc_cnt >= 5U) {
+				printf("calib: OVER-CURRENT %.2fA > %.2fA "
+				       "at step %d (id=%.2f iq=%.2f "
+				       "cmd=%.2f vq=%.2f ang=%.2f rad)\n",
+				       (double)imax, (double)ilim,
+				       (int)mCalibStep, (double)FOC.Id,
+				       (double)FOC.Iq, (double)FOC.calib_iq,
+				       (double)FOC.Vq_out,
+				       (double)FOC.calib_angle);
+				calib_oc_cnt = 0;
+				FOC.calib_mode = false;
+				FOC.calib_vinj_mode = false;
+				if (mCalibStep >= CS_MOTOR_J_START) {
+					/* J 标定只打印、不参与 calib_valid;
+					 * R/L/Pn/零位/LUT/λ 都在它之前测完了,
+					 * 不能为一个可选的测量作废整次标定. */
+					printf("calib: skip J (optional), "
+					       "go to report\n");
+					foc_disarm();
+					Controller.input_current = 0.0f;
+					Controller.cur_setpoint = 0.0f;
+					loop_count = 0;
+					mCalibStep = CS_REPORT_OFFSET_LUT;
+					return;
+				}
+				Config.calib_valid = false;
+				foc_disarm();
+				foc_request_stage(IDLE);
+				return;
+			}
+		} else {
+			calib_oc_cnt = 0;
+		}
+	}
 
 	/* 拖动阶段每 300ms 打一次 */
 	if ((mCalibStep == CS_DIR_PP_LOOP) ||

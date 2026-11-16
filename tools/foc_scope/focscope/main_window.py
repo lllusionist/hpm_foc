@@ -33,6 +33,7 @@ _FW = _load_fw()
 _CUR_LIM = _FW.get_float("current_limit", 8.0)
 _VEL_LIM = _FW.get_float("velocity_limit", 30.0)
 DEFAULT_FS = _FW.fs or 5000.0
+PHASE_OC_ISR = _FW.fault_code("PHASE_OC_ISR", 6)
 
 TARGET_DEFS = {
     # (标签, 命令键, 最小, 最大, 步长) —— 量程取自固件 current_limit / velocity_limit
@@ -193,6 +194,8 @@ class MainWindow(QWidget):
         h.addWidget(QLabel("电机"))
         self.cb_motor = QComboBox()
         self.cb_motor.addItems(["4310 云台", "5210 航模", "2312 航模"])
+        self.cb_motor.setPlaceholderText("档位待确认")
+        self.cb_motor.setCurrentIndex(-1)
         self.cb_motor.setToolTip(
             "电机配置档 (0x5F):\n"
             "  4310 云台: 8.29Ω / 3.4mH / 14 对极 / 0.9A / 带宽 300Hz\n"
@@ -201,7 +204,7 @@ class MainWindow(QWidget):
             "⚠ 切换会作废标定 (编码器零位/极对数都变了), 必须重新跑 0x27")
         self.cb_motor.setFixedWidth(96)
         h.addWidget(self.cb_motor)
-        self._motor_profile = self.cb_motor.currentIndex()
+        self._motor_profile = None
         self._motor_req = None
         # 用 activated(用户操作才触发): 重复选同一项也能重新下发,
         # 程序里 setCurrentIndex 同步状态时不会误发
@@ -337,7 +340,7 @@ class MainWindow(QWidget):
         self.btn_enable.clicked.connect(self.enable)
         self.btn_disable.clicked.connect(self.disable)
         self.btn_clear_fault.clicked.connect(self.clear_fault)
-        self.btn_calib.clicked.connect(lambda: self.send(CMD["calib"]))
+        self.btn_calib.clicked.connect(self._start_calibration)
         self.btn_anticog.clicked.connect(lambda: self.send(CMD["anticog"]))
         self.btn_anticog_sweep.clicked.connect(lambda: self.send(CMD["anticog_sweep"]))
         self.btn_zero.clicked.connect(lambda: self.send(CMD["home"]))
@@ -419,14 +422,16 @@ class MainWindow(QWidget):
         self.left.btn_disconnect.setEnabled(on)
         self.title.set_connected(on, "已连接" if on else "未连接")
         self.statusbar.set_connected(on)
-        for button in (self.btn_disable, self.btn_calib, self.btn_anticog,
+        for button in (self.btn_disable, self.btn_anticog,
                        self.btn_anticog_sweep, self.btn_zero):
             button.setEnabled(on)
         self._last_fault = None
+        self.lbl_fault.setToolTip("")
+        self._motor_profile = None
+        self._motor_req = None
+        self.cb_motor.setCurrentIndex(-1)
         if not on:
             self._cfg_wait_until = 0.0
-            self._motor_req = None
-            self.cb_motor.setCurrentIndex(self._motor_profile)
             self._clear_enable()
             self._clear_mode()
         self._show_fault()
@@ -468,6 +473,10 @@ class MainWindow(QWidget):
             "将恢复固件出厂默认参数并清除校准 (需重新校准), 继续?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if r == QMessageBox.Yes and self.send(CMD["reset"]):
+            self._motor_profile = None
+            self._motor_req = None
+            self.cb_motor.setCurrentIndex(-1)
+            self._update_calibration_button()
             # 固件恢复默认后是 4310 档, 读回让界面同步
             QTimer.singleShot(500, self.request_config)
 
@@ -499,7 +508,7 @@ class MainWindow(QWidget):
             self._apply_target(self._mode)
 
     def _on_motor_profile(self, idx):
-        prev = self._motor_profile
+        prev = self._motor_profile if self._motor_profile is not None else -1
         # 切换会覆盖参数并作废标定, 必须二次确认
         ret = QMessageBox.question(
             self, "切换电机配置档",
@@ -514,6 +523,7 @@ class MainWindow(QWidget):
             self.cb_motor.setCurrentIndex(prev)
             return
         self._motor_req = idx
+        self._update_calibration_button()
         self.statusbar.flash(
             "已请求切换电机配置档 → %s，等待读回"
             % self.cb_motor.currentText())
@@ -535,7 +545,8 @@ class MainWindow(QWidget):
                     kv[k.strip().upper()] = value
         if not kv:
             return
-        self._cfg_wait_until = 0.0
+        if self._motor_req is None or "PROF" in kv:
+            self._cfg_wait_until = 0.0
         mapping = {"CURKP": "curkp", "CURKI": "curki", "CURBW": "curbw",
                    "VELKP": "velkp", "VELKI": "velki", "POSKP": "poskp",
                    "UV": "uv", "OV": "ov"}
@@ -566,17 +577,23 @@ class MainWindow(QWidget):
         if "CAL" in kv:
             extra.append("标定%s" % ("有效" if kv["CAL"] > 0.5 else "无效"))
         if "PROF" in kv:
-            # 固件回传的是档位编号 (0/1/2), 直接当索引; 越界按 0 处理
-            prof = int(round(kv["PROF"]))
-            if not 0 <= prof < self.cb_motor.count():
-                prof = 0
-            self._motor_profile = prof
-            self.cb_motor.setCurrentIndex(prof)
-            if self._motor_req is not None:
-                if prof != self._motor_req:
-                    extra.append("切换未生效，当前为 %s"
-                                 % self.cb_motor.currentText())
-                self._motor_req = None
+            profile = kv["PROF"]
+            if profile.is_integer() and 0 <= profile < self.cb_motor.count():
+                prof = int(profile)
+                name = self.cb_motor.itemText(prof)
+                if self._motor_req is not None and prof != self._motor_req:
+                    extra.append(f"切换未确认，固件仍为 {name}")
+                    self._motor_profile = None
+                else:
+                    extra.append(f"固件档位 {name}")
+                    self._motor_profile = prof
+            else:
+                self._motor_profile = None
+            self._motor_req = None
+            self.cb_motor.setCurrentIndex(
+                self._motor_profile if self._motor_profile is not None else -1
+            )
+            self._update_calibration_button()
         if "COG" in kv:
             extra.append("齿槽表%s" % ("有效" if kv["COG"] > 0.5 else "无效"))
         kvk = kv.get("CURKI")
@@ -586,6 +603,42 @@ class MainWindow(QWidget):
         if extra:
             msg += " | " + " ".join(extra)
         self.statusbar.flash(msg)
+        if self._last_fault == PHASE_OC_ISR:
+            self._show_phase_trip(kv)
+
+    def _show_phase_trip(self, kv):
+        keys = ("OCIA", "OCIB", "OCIC", "OCLIM", "OCPROF", "OCFR", "OCVR")
+        if not all(key in kv for key in keys):
+            return
+        ia, ib, ic, limit, profile, frame, voltage = (kv[key] for key in keys)
+        name = self.cb_motor.itemText(int(profile)) or str(int(profile))
+        hint = (
+            f"跳闸当拍三相 {ia:.2f} / {ib:.2f} / {ic:.2f} A"
+            f"（阈值 {limit:.2f} A）\n"
+            f"档位 {name}，使能后第 {int(frame)} 个有效 ADC 样本\n"
+            f"电阻标定电压请求 {voltage:.3f} V"
+        )
+        if "OCVL" in kv:
+            hint += f"，电感交流幅值 {kv['OCVL']:.3f} V"
+        self.lbl_fault.setToolTip(hint)
+
+    def _update_calibration_button(self):
+        confirmed = self._motor_profile is not None and self._motor_req is None
+        ready = (self.io.is_open() and not self.io.link_lost and confirmed
+                 and self._last_fault in (None, 0))
+        self.btn_calib.setEnabled(ready)
+        if not confirmed:
+            tip = "等待读回固件的电机档位"
+        elif self._last_fault not in (None, 0):
+            tip = "清除设备故障后可开始校准"
+        else:
+            name = self.cb_motor.itemText(self._motor_profile)
+            tip = f"开始校准 {name}，电机需可自由转动"
+        self.btn_calib.setToolTip(tip)
+
+    def _start_calibration(self):
+        if self.btn_calib.isEnabled() and self.send(CMD["calib"]):
+            self.statusbar.flash("已按固件读回档位发送校准请求")
 
     def enable(self):
         if self.send(CMD["enable"]):
@@ -920,7 +973,9 @@ class MainWindow(QWidget):
             self._cfg_wait_until = 0.0
             if self._motor_req is not None:
                 self._motor_req = None
-                self.cb_motor.setCurrentIndex(self._motor_profile)
+                self._motor_profile = None
+                self.cb_motor.setCurrentIndex(-1)
+                self._update_calibration_button()
             self.statusbar.flash("未收到设备参数回应 (固件可能未烧录带读取命令的版本)")
         frames = self._collect()
         # 录制独立于“曲线冻结”: 冻结只停绘图, 不影响记录
@@ -1002,9 +1057,12 @@ class MainWindow(QWidget):
             return
         cleared = code == 0 and self._last_fault not in (None, 0)
         self._last_fault = code
+        self.lbl_fault.setToolTip("")
         if code:
             self._clear_enable()
         self._show_fault()
+        if code == PHASE_OC_ISR and self.io.is_open():
+            self.request_config()
         if cleared:
             self.statusbar.flash("设备已清除故障")
 
@@ -1014,6 +1072,7 @@ class MainWindow(QWidget):
         connected = self.io.is_open()
         self.btn_enable.setEnabled(connected and not active)
         self.btn_clear_fault.setEnabled(connected and active)
+        self._update_calibration_button()
         self.lbl_fault.setText("—" if code is None else
                                FAULT_TEXT.get(code, f"代码 {code}"))
         color = theme.RED if active else theme.GREEN if code == 0 else theme.FG_DIM

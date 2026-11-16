@@ -19,6 +19,21 @@ static volatile float step_base; /* 偏置电流, 小信号阶跃时先用 */
 static volatile uint8_t step_state; /* 0 idle, 1 running, 2 done */
 
 static volatile float resistance_voltage;
+static volatile uint32_t arm_adc_frame;
+static volatile foc_phase_trip_t phase_trip;
+
+/* 在任务上下文读取锁存快照，避免下一拍覆盖原始越限值。 */
+bool foc_read_phase_trip(foc_phase_trip_t *trip)
+{
+	bool valid;
+
+	taskENTER_CRITICAL();
+	valid = FOC.fault_code == FOC_FAULT_PHASE_OC_ISR;
+	if (valid)
+		*trip = phase_trip;
+	taskEXIT_CRITICAL();
+	return valid;
+}
 
 void FOC_step_set_base(float base)
 {
@@ -303,6 +318,7 @@ void foc_arm(void)
 		return;
 	}
 
+	arm_adc_frame = FOC.adc_current_frames;
 	enable_bldc_pwm_output();
 	FOC.is_armed = true;
 
@@ -317,6 +333,14 @@ void FOC_update_current_ctrl_gain(float bw)
 
 	Config.current_kp = FOC.current_ctrl_p_gain;
 	Config.current_ki = FOC.current_ctrl_i_gain;
+
+	printf("cur loop: Kp=%.4f Ki=%.1f (L=%.1fuH R=%.4fOhm bw=%.0fHz) "
+	       "deadtime_comp=ff(前馈, dt=%.0fns)\n",
+	       (double)FOC.current_ctrl_p_gain,
+	       (double)FOC.current_ctrl_i_gain,
+	       (double)(Config.phase_inductance * 1e6f),
+	       (double)Config.phase_resistance, (double)bw,
+	       (double)DT_DEAD_NS);
 }
 
 static void foc_current(float Id_set, float Iq_set, float phase,
@@ -381,18 +405,32 @@ static void foc_current(float Id_set, float Iq_set, float phase,
 	/* 把 dtc 用局部变量代替 volatile 字段: 只在 ISR 里用, 无需跨上下文可见 */
 	float dtc_a, dtc_b, dtc_c;
 	if (0 == SVPWM(alpha, beta, &dtc_a, &dtc_b, &dtc_c)) {
-		/* 死区补偿 */
+		/* 死区补偿: 用"给定 dq 电流"反算三相电流方向来定补偿极性.
+		 * 绝不能用实测相电流: 那是一条正反馈支路, 增量增益
+		 *     Vbus·(DT_DEAD_NS/T_pwm)/DT_COMP_ITH
+		 *     = 24V×0.4%/0.8A = 0.12 V/A
+		 * 5210 相电阻只有 0.042Ω, 等效电阻变成 -0.078Ω -> 小电流段
+		 * 自激 (一拍打到电压轨, 25µs 冲 12A), 一进闭环就撞 12A 硬限幅.
+		 * 用给定值则是纯前馈: 只算电压, 不构成环路, 不会自激.
+		 * 由 ia+ib+ic=0 可以从 (id,iq,θ) 直接得到三相电流方向. */
 		const float dt_comp =
 		    (float)DT_DEAD_NS * 1e-9f / CURRENT_MEASURE_PERIOD;
-		float ca = ((FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE) /
-			   DT_COMP_ITH;
-		float cb = ((FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE) /
-			   DT_COMP_ITH;
-		float cc = ((FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE) /
-			   DT_COMP_ITH;
-		if (ca > 1.0f) ca = 1.0f; else if (ca < -1.0f) ca = -1.0f;
-		if (cb > 1.0f) cb = 1.0f; else if (cb < -1.0f) cb = -1.0f;
-		if (cc > 1.0f) cc = 1.0f; else if (cc < -1.0f) cc = -1.0f;
+		float i_alpha_cmd, i_beta_cmd;
+		float ca, cb, cc;
+
+		inverse_park(Id_set, Iq_set, phase, &i_alpha_cmd,
+			     &i_beta_cmd);
+		ca = i_alpha_cmd / DT_COMP_ITH;
+		cb = (-0.5f * i_alpha_cmd + SQRT3_BY_2 * i_beta_cmd) /
+		     DT_COMP_ITH;
+		cc = (-0.5f * i_alpha_cmd - SQRT3_BY_2 * i_beta_cmd) /
+		     DT_COMP_ITH;
+		if (ca > 1.0f) ca = 1.0f;
+		else if (ca < -1.0f) ca = -1.0f;
+		if (cb > 1.0f) cb = 1.0f;
+		else if (cb < -1.0f) cb = -1.0f;
+		if (cc > 1.0f) cc = 1.0f;
+		else if (cc < -1.0f) cc = -1.0f;
 		dtc_a += dt_comp * ca;
 		dtc_b += dt_comp * cb;
 		dtc_c += dt_comp * cc;
@@ -438,6 +476,28 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 	if (FOC.is_armed && (fabsf(ia) > limit || fabsf(ib) > limit ||
 			     fabsf(ic) > limit)) {
 		disable_bldc_pwm_output();
+		phase_trip.ia = ia;
+		phase_trip.ib = ib;
+		phase_trip.ic = ic;
+		phase_trip.limit = limit;
+		phase_trip.resistance_voltage = resistance_voltage;
+		phase_trip.inductance_amplitude =
+		    FOC.calib_vinj_mode ? FOC.vinj_amp : 0.0f;
+		phase_trip.motor_profile = Config.motor_profile;
+		phase_trip.frames_since_arm =
+		    FOC.adc_current_frames - arm_adc_frame;
+		phase_trip.id = FOC.Id;
+		phase_trip.iq = FOC.Iq;
+		phase_trip.iq_cmd =
+		    FOC.calib_mode ? FOC.calib_iq : FOC.Iq_set;
+		phase_trip.vd = FOC.Vd_out;
+		phase_trip.vq = FOC.Vq_out;
+		phase_trip.int_d = FOC.current_ctrl_integral_d;
+		phase_trip.int_q = FOC.current_ctrl_integral_q;
+		phase_trip.angle = FOC.calib_mode ? FOC.calib_angle
+						  : encoder.phase;
+		phase_trip.kp = FOC.current_ctrl_p_gain;
+		phase_trip.ki = FOC.current_ctrl_i_gain;
 		FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;
 		FOC.is_armed = false;
 		if (step_state == 1U)

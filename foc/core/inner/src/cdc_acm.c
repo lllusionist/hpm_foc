@@ -207,11 +207,11 @@ void usbd_cdc_acm_set_dtr(uint8_t busid, uint8_t intf, bool dtr)
     }
 }
 
-void cdc_acm_transmit(uint8_t *buf, uint16_t len)
+bool cdc_acm_transmit(const uint8_t *buf, uint16_t len)
 {
     /* 上一包还没发完就直接丢掉这一包 —— 这里是任务/中断调的, 绝不能在这里等 */
     if (ep_tx_busy_flag) {
-        return;
+        return false;
     }
 
     if (len > sizeof(write_buffer)) {
@@ -222,5 +222,7 @@ void cdc_acm_transmit(uint8_t *buf, uint16_t len)
 
     if (usbd_ep_start_write(cdc_busid, CDC_IN_EP, write_buffer, len) < 0) {
         ep_tx_busy_flag = false;    /* 没发出去(USB 没连/未配置), 放开标志, 别把后面全堵死 */
+        return false;
     }
+    return true;
 }

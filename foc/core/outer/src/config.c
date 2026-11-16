@@ -36,8 +36,13 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 死区 48mV, 需 2 级以上差分
 		Config.calib_current = 3.0f;
 		Config.calib_voltage = 1.0f;
-		// 2000Hz 毛刺明显
-		Config.current_ctrl_bw = 1000.0f;
+		// 5210 的电气极点 R/(2πL) ≈ 0.042/(2π·10µH) = 670Hz, 1000Hz 交叉
+		// 已经越过极点; 实测 0x27 强托时电流环在 ~2.5kHz 自激 (Id±0.85/
+		// Iq 3±1.4A, 幅值只受死区非线性限制, 峰值撞 12A 过流).
+		// 注意 L 标定值会偏大 (注入电压被死区吃掉), Kp = L_meas·ωc,
+		// 实际交叉频率 = ωc·L_meas/L_real, 偏大 2~3 倍; 所以这里取 300Hz,
+		// 落到实际 ~800Hz. 等 L 标定修准后再往上调.
+		Config.current_ctrl_bw = 300.0f;
 		Config.current_ramp_rate = 200.0f;
 		Config.velocity_ramp_rate = 50.0f;
 		// Kt 为 4310 的 1/8.6, 增益按 J≈1.5e-4
@@ -47,7 +52,9 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 同速校验时不被齿槽卡停
 		Config.calib_flux_iq_gain = 1.5f;
 		// 4.5A 起转, 0.15s 窗防冲过 12rps
-		Config.calib_j_iq_gain = 1.50f;
+		// 实测 Pn=14 (dir_pp), 4.5A 起转会 2 倍过冲到 9A 撞软限流;
+		// J 只打印不参与 calib_valid, 降流把加速段做温和一点 (1.8A)
+		Config.calib_j_iq_gain = 0.60f;
 		Config.calib_flux_rtest_ratio = 0.7f;
 		// 0.1rps 会粘滑
 		Config.cog_sweep_rps = 0.30f;

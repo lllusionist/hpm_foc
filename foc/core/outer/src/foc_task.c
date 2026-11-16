@@ -277,6 +277,28 @@ static void foc_check_and_trip(void)
 			printf(" calib_step=%d", calibration_step());
 		if (foc_get_stage() == ANTICOGGING)
 			printf(" anticog_step=%d", anticogging_step());
+		if (fault == FOC_FAULT_PHASE_OC_ISR) {
+			foc_phase_trip_t trip;
+
+			if (foc_read_phase_trip(&trip)) {
+				printf(" abc=%.2f/%.2f/%.2fA limit=%.2fA"
+				       " profile=%ld frame=%lu Rreq=%.3fV"
+				       " Lac=%.3fV",
+				       trip.ia, trip.ib, trip.ic, trip.limit,
+				       (long)trip.motor_profile,
+				       (unsigned long)trip.frames_since_arm,
+				       trip.resistance_voltage,
+				       trip.inductance_amplitude);
+				printf("\n loop: id=%.2f iq=%.2f iq_cmd=%.2f"
+				       " vd=%.3f vq=%.3f intd=%.3f intq=%.3f"
+				       " ang=%.3f kp=%.4f ki=%.1f",
+				       (double)trip.id, (double)trip.iq,
+				       (double)trip.iq_cmd, (double)trip.vd,
+				       (double)trip.vq, (double)trip.int_d,
+				       (double)trip.int_q, (double)trip.angle,
+				       (double)trip.kp, (double)trip.ki);
+			}
+		}
 		printf("\n");
 	}
 }

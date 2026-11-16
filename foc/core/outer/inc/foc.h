@@ -34,6 +34,28 @@
 #define FOC_FAULT_ENCODER 7         /* 编码器停更或错误率过高 */
 
 typedef struct {
+	float ia;
+	float ib;
+	float ic;
+	float limit;
+	float resistance_voltage;
+	float inductance_amplitude;
+	int32_t motor_profile;
+	uint32_t frames_since_arm;
+	/* 电流环内部状态快照: 区分"环输出打满(自激)"还是"反馈丢了" */
+	float id;     /* 上一拍实测 d 轴电流 (A) */
+	float iq;     /* 上一拍实测 q 轴电流 (A) */
+	float iq_cmd; /* 上一拍 iq 给定 (A) */
+	float vd;     /* 上一拍输出电压 d (V) */
+	float vq;     /* 上一拍输出电压 q (V) */
+	float int_d;  /* 上一拍 d 轴积分项 (V) */
+	float int_q;  /* 上一拍 q 轴积分项 (V) */
+	float angle;  /* 上一拍电角度 (rad) */
+	float kp;
+	float ki;
+} foc_phase_trip_t;
+
+typedef struct {
 
 	volatile bool is_armed;
 	volatile uint32_t fault_code; /* 0=正常, 见 FOC_FAULT_* */
@@ -123,6 +145,7 @@ typedef struct {
 extern volatile foc_data_t FOC;
 
 bool foc_adc_midpoint(void);
+bool foc_read_phase_trip(foc_phase_trip_t *trip);
 void foc_update_voltages(void);
 void FOC_update_current_ctrl_gain(float bw);
 void foc_set_resistance_voltage(float voltage);

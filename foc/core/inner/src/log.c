@@ -67,16 +67,19 @@ uint32_t log_dropped(void)
 	return log_drop_cnt;
 }
 
-/* 把缓冲里的字节尽量塞进 UART TX FIFO, 不等待 */
+/* TFIFO_NUM 只有 5 位，无法表示 32 字节满。每次等空后发送一批。 */
 static void log_drain(void)
 {
-	while (log_tail != log_head) {
-		if (uart_get_data_count_in_tx_fifo(SYS_CONSOLE_UART) >=
-		    UART_SOC_FIFO_SIZE)
-			break;
+	uint32_t slots = UART_SOC_FIFO_SIZE;
+
+	if (!(uart_get_status(SYS_CONSOLE_UART) & uart_stat_tx_slot_avail))
+		return;
+
+	while (log_tail != log_head && slots > 0U) {
 		uart_write_byte(SYS_CONSOLE_UART,
 				(uint8_t)log_buf[log_tail & (LOG_BUF_SIZE - 1U)]);
 		log_tail++;
+		slots--;
 	}
 }
 

@@ -244,26 +244,33 @@ void ENCODER_loop(void)
 		delta -= (int32_t)ENCODER_CPR;
 	else if (delta < -(int32_t)ENCODER_CPR_HALF)
 		delta += (int32_t)ENCODER_CPR;
-	/* 坏帧阈值按配置最高转速留出余量，以过滤 SPI 位错误。 */
-	float max_track_rps = Config.velocity_limit * 3.0f;
-	if (max_track_rps < 30.0f)
-		max_track_rps = 30.0f;
-	/* 标定提高速度上限时仍限制阈值，避免关闭坏帧过滤。 */
-	if (max_track_rps > 150.0f)
-		max_track_rps = 150.0f;
-	int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
-				      (float)ENCODER_UPDATE_FREQ);
-	if (abs(delta) > max_delta) {
-		encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
+	/* 坏帧门限: 按"当前速度×2 + 4rps"折算成每拍计数.
+	 * 原来是固定 velocity_limit×3 (=120rps -> 40 万计数 = 8.6° 机械角),
+	 * 静止时也放行 8.6° 的跳变; 现在静止只有 0.29°, 速度越高门限越宽.
+	 * 注意: 不要再加"增量突变/斜率"一级 —— 实测 0x27 强托时转子是粘滑抖动,
+	 * 真实加减速同样会让 |delta - delta_prev| 很大, 那样会把真位移判成坏帧,
+	 * 连坏 5 拍触发重同步, 每次重同步丢一段位移 (实测丢了 4.7% 计数,
+	 * 极对数从 13.99 错算成 14.69 -> 15). */
+	{
+		float max_track_rps = fabsf(encoder.vel) * 2.0f + 4.0f;
+		int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
+					      (float)ENCODER_UPDATE_FREQ);
 
-		/* 连续坏帧后重新同步，恢复位置跟踪。 */
-		if (++encoder.bad_run >= 5U) {
-			encoder.bad_run = 0;
-			encoder.count_in_cpr_prev = corrected;
-			encoder.pll_pos = (float)encoder_align(corrected);
+		if (max_delta < 16)
+			max_delta = 16;
+		if (abs(delta) > max_delta) {
+			encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
+
+			/* 连续坏帧后重新同步，恢复位置跟踪。 */
+			if (++encoder.bad_run >= 5U) {
+				encoder.bad_run = 0;
+				encoder.count_in_cpr_prev = corrected;
+				encoder.pll_pos =
+				    (float)encoder_align(corrected);
+			}
+
+			return; /* 保留上一拍角度, 不累加、不喂 PLL */
 		}
-
-		return; /* 保留上一拍角度, 不累加、不喂 PLL */
 	}
 	encoder.bad_run = 0;
 
