@@ -1,4 +1,5 @@
 #include "flash.h"
+#include "util.h"
 #include "hpm_romapi.h"
 #include "hpm_interrupt.h"
 #include <string.h>
@@ -17,7 +18,7 @@ static uint32_t s_page_size;
 /* 两个扇区的起始地址: 倒数第 2 和倒数第 1 */
 static uint32_t s_cfg_addr_a;
 static uint32_t s_cfg_addr_b;
-/* 当前应该写哪个扇区 (0=A, 1=B); flash_read_config 更新它 */
+/* 最新有效配置所在扇区 (0=A, 1=B); 下次写目标为 s_active_sector^1 */
 static uint8_t s_active_sector;
 
 uint8_t flash_init(void)
@@ -54,7 +55,7 @@ uint8_t flash_init(void)
 	return 0;
 }
 
-/* 在扇区内查找有效配置头: magic 匹配且 generation > prev_gen */
+/* 在扇区内查找有效配置: magic 匹配 且 载荷 CRC 通过 */
 static bool check_sector(uint32_t base_addr, uint32_t *out_gen,
 			  void *out_data, uint32_t size)
 {
@@ -73,6 +74,10 @@ static bool check_sector(uint32_t base_addr, uint32_t *out_gen,
 	if (st != status_success)
 		return false;
 
+	/* 载荷 CRC: 剔除"头有效但载荷撕裂"的半写扇区, 才能回退到另一份好扇区 */
+	if (hdr.crc32 != util_crc32((const uint8_t *)out_data, size))
+		return false;
+
 	*out_gen = hdr.generation;
 	return true;
 }
@@ -83,7 +88,7 @@ static uint8_t write_sector(uint32_t base_addr, uint32_t generation,
 {
 	uint32_t level;
 	hpm_stat_t st;
-	static uint32_t buf[FLASH_CFG_BUF_SIZE / 4U + 2U]; /* +2 for header */
+	static uint32_t buf[FLASH_CFG_BUF_SIZE / 4U + 3U]; /* +3 for header (12B) */
 	uint32_t total = size + sizeof(flash_cfg_header_t);
 
 	/* 按页对齐 */
@@ -92,9 +97,12 @@ static uint8_t write_sector(uint32_t base_addr, uint32_t generation,
 	if (prog_size > sizeof(buf))
 		prog_size = sizeof(buf);
 
-	/* 组装: header + data */
-	flash_cfg_header_t hdr = { .magic = FLASH_DUAL_SECTOR_MAGIC,
-				   .generation = generation };
+	/* 组装: header + data; header 里存载荷 CRC */
+	flash_cfg_header_t hdr = {
+		.magic = FLASH_DUAL_SECTOR_MAGIC,
+		.generation = generation,
+		.crc32 = util_crc32((const uint8_t *)data, size),
+	};
 	memcpy(buf, &hdr, sizeof(hdr));
 	memcpy((uint8_t *)buf + sizeof(hdr), data, size);
 	/* 补 0xFF */
@@ -116,47 +124,43 @@ static uint8_t write_sector(uint32_t base_addr, uint32_t generation,
 
 uint8_t flash_write_config(const void *data, uint32_t size)
 {
-	if (!s_inited || (size + sizeof(flash_cfg_header_t) > s_sector_size))
+	if (!s_inited || (size > FLASH_CFG_BUF_SIZE) ||
+	    (size + sizeof(flash_cfg_header_t) > s_sector_size))
 		return 1;
 
-	/* 交替写: 上次写 A, 这次写 B, 反之亦然.
-	 * generation 每次递增; 读时取大者 */
-	uint32_t target_addr;
-	uint32_t gen = 0;
-	uint32_t old_gen;
+	/* 写到与最新扇区相对的另一扇区, 保留最新那份 (掉电也不丢) */
+	uint8_t target = s_active_sector ^ 1U;
+	uint32_t target_addr = target ? s_cfg_addr_b : s_cfg_addr_a;
 
-	/* 读另一份的 generation 作为递增基数 */
-	uint8_t other = s_active_sector ^ 1U;
-	uint32_t other_addr = other ? s_cfg_addr_b : s_cfg_addr_a;
-	flash_cfg_header_t other_hdr;
+	/* generation 从最新扇区读 +1, 保证单调递增 (大者新) */
+	uint32_t gen = 1U;
+	uint32_t active_addr = s_active_sector ? s_cfg_addr_b : s_cfg_addr_a;
+	flash_cfg_header_t active_hdr;
 	hpm_stat_t st = rom_xpi_nor_read(FLASH_XPI_BASE, xpi_xfer_channel_auto,
-					 &s_nor_config, (uint32_t *)&other_hdr,
-					 other_addr, sizeof(other_hdr));
-	if (st == status_success && other_hdr.magic == FLASH_DUAL_SECTOR_MAGIC)
-		gen = other_hdr.generation + 1U;
-	else
-		gen = 1U;
+					 &s_nor_config,
+					 (uint32_t *)&active_hdr,
+					 active_addr, sizeof(active_hdr));
+	if (st == status_success && active_hdr.magic == FLASH_DUAL_SECTOR_MAGIC)
+		gen = active_hdr.generation + 1U;
 
-	/* 写到对面的扇区 */
-	target_addr = other ? s_cfg_addr_b : s_cfg_addr_a;
 	uint8_t ret = write_sector(target_addr, gen, data, size);
-	if (ret == 0) {
-		s_active_sector = other;
-		(void)old_gen; /* unused */
-	}
+	if (ret == 0)
+		s_active_sector = target;
 	return ret;
 }
 
 uint8_t flash_read_config(void *data, uint32_t size)
 {
-	if (!s_inited || (size + sizeof(flash_cfg_header_t) > s_sector_size) ||
+	if (!s_inited || (size > FLASH_CFG_BUF_SIZE) ||
+	    (size + sizeof(flash_cfg_header_t) > s_sector_size) ||
 	    (((uint32_t)data & 0x3U) != 0U))
 		return 1;
 
-	/* 两个扇区都读, 取 generation 大且 CRC 有效的那份 */
+	/* 两个扇区都读, 取 generation 大且载荷 CRC 有效的那份.
+	 * 缓冲用 static: 单线程启动期调用, 避免在 main 栈上占用 2×4KB */
 	uint32_t gen_a = 0, gen_b = 0;
-	uint8_t buf_a[FLASH_CFG_BUF_SIZE];
-	uint8_t buf_b[FLASH_CFG_BUF_SIZE];
+	static uint32_t buf_a[FLASH_CFG_BUF_SIZE / 4U];
+	static uint32_t buf_b[FLASH_CFG_BUF_SIZE / 4U];
 	bool ok_a, ok_b;
 
 	ok_a = check_sector(s_cfg_addr_a, &gen_a, buf_a, size);
@@ -165,19 +169,19 @@ uint8_t flash_read_config(void *data, uint32_t size)
 	if (ok_a && ok_b) {
 		if (gen_a >= gen_b) {
 			memcpy(data, buf_a, size);
-			s_active_sector = 1; /* 下次写 B */
+			s_active_sector = 0; /* A 最新, 下次写 B */
 		} else {
 			memcpy(data, buf_b, size);
-			s_active_sector = 0; /* 下次写 A */
+			s_active_sector = 1; /* B 最新, 下次写 A */
 		}
 		return 0;
 	} else if (ok_a) {
 		memcpy(data, buf_a, size);
-		s_active_sector = 1;
+		s_active_sector = 0;
 		return 0;
 	} else if (ok_b) {
 		memcpy(data, buf_b, size);
-		s_active_sector = 0;
+		s_active_sector = 1;
 		return 0;
 	}
 

@@ -5,7 +5,6 @@
 #include "hpm_trgm_drv.h"
 #include "hpm_clock_drv.h"
 #include "hpm_iomux.h"
-#include "SEGGER_RTT.h"
 #include <stdio.h>
 
 #define PWM HPM_PWM0

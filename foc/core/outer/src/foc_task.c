@@ -2,6 +2,7 @@
 #include "foc_ctrl.h"
 #include "encoder.h"
 #include "sys.h"
+#include "adc.h"
 #include <stdio.h>
 
 /* ADC 中断心跳计数 (定义在 foc.c) */
@@ -155,18 +156,17 @@ static bool foc_over_current(void)
  *         电压 1kHz 更新, 任务 5kHz 执行, 原"3次"实为同一采样重复比较. */
 static uint8_t foc_protection_check(void)
 {
-	/* 电压去抖: 只在 adc_voltage_missed 没有增加时才认为是新采样 */
+	/* 电压去抖: 只在有新的 1kHz 电压采样 (adc_voltage_frames 自增) 时才计数 */
 	static uint32_t last_volt_frames = 0;
 	static uint32_t ov_new_cnt = 0;
 	static uint32_t uv_new_cnt = 0;
 	static uint32_t ibus_new_cnt = 0;
 
 	float vbus = FOC.Vbus;
-	bool new_volt_sample = (FOC.adc_voltage_missed == 0U) &&
-			       (FOC.adc_current_frames != last_volt_frames);
+	bool new_volt_sample = (FOC.adc_voltage_frames != last_volt_frames);
 
 	if (new_volt_sample)
-		last_volt_frames = FOC.adc_current_frames;
+		last_volt_frames = FOC.adc_voltage_frames;
 
 	if (foc_over_current())
 		return FOC_FAULT_PHASE_OC;
@@ -213,6 +213,9 @@ static void foc_check_and_trip(void)
 	if ((vbus <= 2.0f) || (vbus >= 70.0f))
 		fault = FOC_FAULT_ADC;
 
+	/* 连续丢帧: adc.c 的计数在有效帧清零、无效帧自增, 必须任务直接读,
+	 * 不能依赖回调镜像 (回调只在有效帧被调用, 镜像恒为 0) */
+	FOC.adc_current_missed = adc_current_missed();
 	if (FOC.adc_current_missed >= 3U)
 		fault = FOC_FAULT_ADC;
 

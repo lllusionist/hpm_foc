@@ -10,10 +10,10 @@ set(RV_ARCH "rv32imafc")
 # 产物名，缺省为 demo（SDK application.cmake: if(NOT APP_NAME) set(APP_NAME demo)）
 set(APP_NAME foc)
 
-# SEGGER RTT: 编译进去但当前 SES 工程通过 hpm_debug_console.c (UART) 输出.
-# log.c 实现了非阻塞环形缓冲日志; 若改走 RTT 只需在 SES 工程里
-# 重新启用 SEGGER_RTT_Syscalls_SES.c 并设 CONFIG_NDEBUG_CONSOLE=1.
-set(CONFIG_SEGGER_RTT 1)
+# SEGGER RTT 关闭: 其 SEGGER_RTT_Syscalls_GCC.c 强定义 _write, 会与 log.c
+# 的 _write 重复定义导致 GCC/newlib 构建链接失败. 输出统一走 log.c 环形缓冲
+# (UART). 若日后启用 RTT, 需同时排除该 syscall 文件并移除 tim.h 对它的依赖.
+set(CONFIG_SEGGER_RTT 0)
 
 
 # the following lines before "### END ###" are added during project localization
@@ -33,7 +33,7 @@ find_package(hpm-sdk REQUIRED HINTS $ENV{HPM_SDK_BASE})
 
 project(foc)
 
-# 关闭 UART console：否则它的 _write 与 RTT_Syscalls_GCC.c 的 _write 重定义冲突。
+# 关闭 SDK 的 hpm_debug_console.c：否则它的 _write 与 log.c 的 _write 重定义冲突。
 # 副作用：board.h 不再提供 BOARD_CONSOLE_UART_* 宏，sys.c 里对应的初始化已移除。
 sdk_compile_definitions(-DCONFIG_NDEBUG_CONSOLE=1)
 

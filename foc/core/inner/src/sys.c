@@ -141,6 +141,11 @@ void sys_wdg_init(void)
 	clock_add_to_group(clock_watchdog0, 0);
 	ewdg_get_default_config(HPM_EWDG0, &cfg);
 
+	/* 计数时钟源: 默认 cnt_clk_sel=ext_osc(24MHz 外部晶振).
+	 * 必须设置 cnt_src_freq, 否则 ewdg_init 因 cnt_src_freq==0 返回
+	 * invalid_argument, WDT_EN 永远写不进去 (看门狗形同虚设)。 */
+	cfg.cnt_src_freq = clock_get_frequency(clk_osc0clk0);
+
 	/* 超时 500ms: ADC 中断停更 500ms 触发硬件复位.
 	 * use_lowlevel_timeout=false 时用 µs 单位 */
 	cfg.ctrl_config.use_lowlevel_timeout = false;

@@ -40,7 +40,6 @@ int main(void)
 	config_init();
 	sys_board_init();
 	log_start();
-	sys_wdg_init();
 
 	flash_init();
 	if (CONFIG_load_from_flash() != 0)
@@ -56,6 +55,10 @@ int main(void)
 	foc_init();
 	CONTROLLER_init();
 	foc_app_start();
+
+	/* 看门狗最后再开: 此时 ADC 中断已在跑 (foc_init 已设好回调),
+	 * FOC 任务首个喂狗点约在 100ms 后, 启动序列不会被 500ms 超时误复位。 */
+	sys_wdg_init();
 
 	vTaskStartScheduler();
 

@@ -40,6 +40,7 @@ typedef struct {
 	volatile bool adc_ready;
 	volatile uint32_t adc_current_frames;
 	volatile uint32_t adc_current_missed;
+	volatile uint32_t adc_voltage_frames;
 	volatile uint32_t adc_voltage_missed;
 	volatile uint32_t adc_ibus_missed;
 

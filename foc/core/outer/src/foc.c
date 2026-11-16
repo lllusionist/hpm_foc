@@ -157,6 +157,7 @@ void foc_update_voltages(void)
 		return;
 	}
 	FOC.adc_voltage_missed = 0;
+	FOC.adc_voltage_frames++; /* 成功读到一次 1kHz 电压采样 (去抖用) */
 
 	FOC.Va = ((float)va - FOC.Va_midpoint) * k;
 	FOC.Vb = ((float)vb - FOC.Vb_midpoint) * k;
@@ -288,15 +289,14 @@ void foc_arm(void)
 	FOC.current_ctrl_integral_d = 0;
 	FOC.current_ctrl_integral_q = 0;
 
-	enable_bldc_pwm_output();
-
-	/* 不在 arm 时清故障码: 故障锁存, 需上位机显式发 0x22 禁用后再 0x21 使能 */
+	/* 故障未清除则拒绝使能 (故障锁存, 需上位机 0x22 禁用 + 0x26 清故障)。
+	 * 先查故障再开输出, 避免在故障态短暂使能 PWM。 */
 	if (FOC.fault_code != FOC_FAULT_NONE) {
 		taskEXIT_CRITICAL();
-		/* 故障未清除, 立即重新失能 */
-		disable_bldc_pwm_output();
 		return;
 	}
+
+	enable_bldc_pwm_output();
 	FOC.is_armed = true;
 
 	taskEXIT_CRITICAL();
@@ -410,9 +410,10 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 	FOC.Ib = (float)ib_raw;
 	FOC.Ic = (float)ic_raw;
 
-	/* 更新帧计数 (adc.c 内部也维护, 这里保持 FOC 结构体对外可见) */
+	/* 更新帧计数 (adc.c 内部也维护, 这里保持 FOC 结构体对外可见).
+	 * 注意: adc_current_missed 不能在此镜像 —— 本回调只在有效帧被调用,
+	 * 且调用前 adc.c 刚把它清零, 镜像恒为 0; 改由 FOC 任务直接读。 */
 	FOC.adc_current_frames = adc_current_frames();
-	FOC.adc_current_missed = adc_current_missed();
 
 	/* 看门狗心跳: 每拍递增, FOC 任务确认其在增才喂狗 */
 	g_wdg_adc_cnt++;
@@ -606,6 +607,7 @@ void foc_init(void)
 	FOC.adc_ready = false;
 	FOC.adc_current_frames = 0U;
 	FOC.adc_current_missed = 0U;
+	FOC.adc_voltage_frames = 0U;
 	FOC.adc_voltage_missed = 0U;
 	FOC.adc_ibus_missed = 0U;
 	adc1_init();
