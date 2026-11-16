@@ -126,9 +126,7 @@ void USB_parse_frame(UsbFrame *frame)
 
 	/* 故障锁存后必须先禁用再发 0x26 清除, 才能重新使能 */
 	case USB_CMD_CLEAR_FAULT:
-		if (!FOC.is_armed) {
-			FOC.fault_code = FOC_FAULT_NONE;
-		}
+		foc_request_fault_clear();
 		break;
 
 	case USB_CMD_SET_HOME:

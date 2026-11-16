@@ -6,6 +6,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 ADC = (ROOT / "core/inner/src/adc.c").read_text(encoding="utf-8")
 FOC = (ROOT / "core/outer/src/foc.c").read_text(encoding="utf-8")
 TASK = (ROOT / "core/outer/src/foc_task.c").read_text(encoding="utf-8")
+CAL = (ROOT / "core/outer/src/foc_cal.c").read_text(encoding="utf-8")
 
 
 class AdcContractTests(unittest.TestCase):
@@ -62,6 +63,23 @@ class AdcContractTests(unittest.TestCase):
         self.assertIn("adc1_read_ibus", midpoint)
         self.assertRegex(midpoint, r"times\s*<\s*16U")
         self.assertRegex(FOC, r"if\s*\(!FOC\.adc_ready\)\s*\{[^}]*return;" )
+
+    def test_raw_phase_overcurrent_precedes_all_active_pwm_paths(self):
+        callback = FOC.split("void foc_adc_callback(", 1)[1]
+        trip = callback.index("FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;")
+        for raw, phase in (("ia_raw", "ia"), ("ib_raw", "ib"), ("ic_raw", "ic")):
+            self.assertRegex(callback[:trip], rf"float {phase} = .*{raw}")
+            self.assertIn(f"fabsf({phase}) > limit", callback[:trip])
+        self.assertLess(trip, callback.index("FOC.Ic = ic_fix;"))
+        self.assertLess(trip, callback.index("foc_current(0.0f, ref"))
+        self.assertLess(trip, callback.index("foc_voltage("))
+        self.assertIn("disable_bldc_pwm_output();", callback[:trip])
+
+    def test_resistance_calibration_leaves_pwm_writes_to_adc_callback(self):
+        self.assertIn("foc_set_resistance_voltage(r_volt);", CAL)
+        self.assertNotRegex(CAL, r"\b(?:pwm_set_duty|FOC_voltage)\(")
+        callback = FOC.split("void foc_adc_callback(", 1)[1]
+        self.assertIn("float voltage = resistance_voltage;", callback)
 
 
 if __name__ == "__main__":

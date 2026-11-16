@@ -18,11 +18,13 @@ static volatile float step_amp;
 static volatile float step_base; /* 偏置电流, 小信号阶跃时先用 */
 static volatile uint8_t step_state; /* 0 idle, 1 running, 2 done */
 
+static volatile float resistance_voltage;
+
 void FOC_step_set_base(float base)
 {
 	float lim = Config.current_limit;
 
-	if (!isfinite(base))
+	if (step_state == 1U || !isfinite(base))
 		return;
 	if (base > lim)
 		base = lim;
@@ -43,10 +45,12 @@ void FOC_step_start(float amp)
 		return;
 	if (!isfinite(amp) || !isfinite(b))
 		return;
+	b = CLAMP(b, -lim, lim);
 	if (b + amp > lim)
 		amp = lim - b;
 	if (b + amp < -lim)
 		amp = -lim - b;
+	step_base = b;
 	step_amp = amp;
 	step_n = 0;
 	step_state = 1;
@@ -168,11 +172,11 @@ void foc_update_voltages(void)
 	UTILS_LP_FAST(FOC.Vbus_filt, vbus, 0.1f);
 }
 
-/* 死区补偿常量 (内联到 FOC_voltage / FOC_current, 不再用独立函数) */
+/* PWM 外设死区与栅极驱动器延迟叠加。 */
 #define DT_DEAD_NS (PWM_DEAD_TIME_NS + 100U)
 #define DT_COMP_ITH (0.8f)
 
-void FOC_voltage(float Vd, float Vq, float phase)
+static void foc_voltage(float Vd, float Vq, float phase)
 {
 	float v_to_mod = 1.5f / FOC.Vbus_filt;
 	float mod_vd = Vd * v_to_mod;
@@ -210,21 +214,21 @@ void FOC_voltage(float Vd, float Vq, float phase)
 	}
 }
 
-/* 三相下桥导通，上桥关闭。 */
-void pwm_output_low_sides(void)
+/* 电阻测量的电压由任务给定，在 ADC 中断完成过流检查后施加。 */
+void foc_set_resistance_voltage(float voltage)
 {
-	pwm_set_duty(0, 0, 0);
+	resistance_voltage = voltage;
 }
 
 /* 解除软件强制输出，恢复正常 PWM。 */
-void enable_bldc_pwm_output(void)
+static void enable_bldc_pwm_output(void)
 {
 	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++)
 		pwmv2_disable_software_force(PWM, ch);
 }
 
 /* 将 PWM 输出强制到无效电平，关闭功率输出。 */
-void disable_bldc_pwm_output(void)
+static void disable_bldc_pwm_output(void)
 {
 	for (pwm_channel_t ch = pwm_channel_0; ch <= pwm_channel_5; ch++) {
 		pwmv2_set_force_update_time(PWM, ch, pwm_force_immediately);
@@ -242,12 +246,17 @@ void disable_bldc_pwm_output(void)
 
 void foc_disarm(void)
 {
-	if (!FOC.is_armed)
-		return;
-
 	taskENTER_CRITICAL();
 
-	disable_bldc_pwm_output();
+	if (FOC.is_armed)
+		disable_bldc_pwm_output();
+	FOC.is_armed = false;
+	resistance_voltage = 0.0f;
+	if (step_state == 1U)
+		step_state = 0U;
+
+	/* 关断后预置零占空比，避免再次使能时带出旧的比较值。 */
+	pwm_set_duty(0.0f, 0.0f, 0.0f);
 
 	FOC.Iq = 0;
 	FOC.Iq_filt = 0;
@@ -261,8 +270,6 @@ void foc_disarm(void)
 	FOC.current_ctrl_integral_q = 0;
 
 	FOC.Iq_set = 0;
-
-	FOC.is_armed = false;
 
 	taskEXIT_CRITICAL();
 }
@@ -312,7 +319,8 @@ void FOC_update_current_ctrl_gain(float bw)
 	Config.current_ki = FOC.current_ctrl_i_gain;
 }
 
-void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
+static void foc_current(float Id_set, float Iq_set, float phase,
+			float phase_vel)
 {
 	float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 	float ib = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
@@ -405,6 +413,12 @@ void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel)
 
 void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 {
+	float ia = ((float)ia_raw - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
+	float ib = ((float)ib_raw - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
+	float ic = ((float)ic_raw - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
+	float limit = Config.protect_over_current;
+	tFSMState stage = foc_get_stage();
+
 	/* adc.c 传来原始码值, 在这里存入 FOC 结构体 (保持分层清洁) */
 	FOC.Ia = (float)ia_raw;
 	FOC.Ib = (float)ib_raw;
@@ -418,11 +432,19 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 	/* 看门狗心跳: 每拍递增, FOC 任务确认其在增才喂狗 */
 	g_wdg_adc_cnt++;
 
-	/* 由 Ia、Ib 重构 Ic；实测电流和仅用于诊断。 */
-	FOC.isum =
-	    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
-	     (FOC.Ic - FOC.Ic_midpoint)) *
-	    FOC_CURRENT_SCALE;
+	FOC.isum = ia + ib + ic;
+
+	/* 所有输出模式共用实测三相保护，Ic 重构只供控制环使用。 */
+	if (FOC.is_armed && (fabsf(ia) > limit || fabsf(ib) > limit ||
+			     fabsf(ic) > limit)) {
+		disable_bldc_pwm_output();
+		FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;
+		FOC.is_armed = false;
+		if (step_state == 1U)
+			step_state = 0U;
+		return;
+	}
+
 	if (FOC.adc_ready) {
 		float ic_fix = FOC.Ic_midpoint -
 			       (FOC.Ia - FOC.Ia_midpoint) -
@@ -434,11 +456,10 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 		FOC.Ic = ic_fix;
 	}
 
-	/* 阶跃测试只在使能的 RUN 状态下执行; 失能时立即作废, 防止绕过使能输出 PWM */
+	/* RUN 退出后，阶跃给定随之作废。 */
 	if ((step_state == 1U) &&
-	    (!FOC.is_armed || (foc_get_stage() != RUN))) {
+	    (!FOC.is_armed || (stage != RUN)))
 		step_state = 0U;
-	}
 
 	/* 锁定转子时记录 Iq 阶跃响应，用于分析电流环带宽。 */
 	if (step_state == 1U) {
@@ -446,7 +467,7 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 		float ref = (n < FOC_STEP_PRE) ? step_base
 					       : (step_base + step_amp);
 
-		FOC_current(0.0f, ref, encoder.phase, 0.0f);
+		foc_current(0.0f, ref, encoder.phase, 0.0f);
 		if (n < FOC_STEP_N) {
 			step_buf[n][0] = FOC.Iq;
 			step_buf[n][1] = ref;
@@ -471,27 +492,6 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 	if (!FOC.is_armed)
 		return;
 
-	/* ===== 中断级相电流硬限幅 (第 1 级保护) =====
-	 * 本板无硬件过流引脚, 必须在 ISR 里补一级软件快速关断.
-	 * 阈值取 protect_over_current (5kHz 任务的软保护值), 响应在下一拍
-	 * (25µs) 内生效, 远快于 5kHz 任务的 200µs. */
-	{
-		float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
-		float ib = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
-		float ic = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
-		float lim = Config.protect_over_current;
-
-		if ((fabsf(ia) > lim) || (fabsf(ib) > lim) ||
-		    (fabsf(ic) > lim)) {
-			disable_bldc_pwm_output(); /* 立即关断, 不等任务 */
-			FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;
-			FOC.is_armed = false;
-			/* ISR 里不能调 foc_disarm(含临界区), 只置标志;
-			 * FOC 任务在下一拍检测到 fault_code 后转 IDLE */
-			return;
-		}
-	}
-
 	/* 电感标定：在 α 轴注入正弦电压。 */
 	if (FOC.calib_vinj_mode) {
 		FOC.inj_phase += FOC.vinj_omega * CURRENT_MEASURE_PERIOD;
@@ -500,13 +500,11 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 
 		float s = sin_f32(FOC.inj_phase);
 		if (FOC.vinj_acc) {
-			float ia =
-			    (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 			FOC.vinj_sum_sin += ia * s;
 			FOC.vinj_sum_cos += ia * cos_f32(FOC.inj_phase);
 			FOC.vinj_samples++;
 		}
-		FOC_voltage(FOC.vinj_dc + FOC.vinj_amp * s, 0, 0);
+		foc_voltage(FOC.vinj_dc + FOC.vinj_amp * s, 0.0f, 0.0f);
 		return;
 	}
 
@@ -520,17 +518,27 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 			while (FOC.calib_angle < 0.0f)
 				FOC.calib_angle += M_2PI;
 		}
-		FOC_current(FOC.calib_id, FOC.calib_iq, FOC.calib_angle,
+		foc_current(FOC.calib_id, FOC.calib_iq, FOC.calib_angle,
 			    FOC.calib_phase_vel);
 		return;
 	}
 
-	if ((foc_get_stage() != RUN) && (foc_get_stage() != ANTICOGGING))
+	if (stage == CALIBRATION) {
+		float voltage = resistance_voltage;
+
+		if (voltage > 0.0f)
+			foc_voltage(voltage, 0.0f, 0.0f);
+		else
+			pwm_set_duty(0.0f, 0.0f, 0.0f);
+		return;
+	}
+
+	if ((stage != RUN) && (stage != ANTICOGGING))
 		return;
 
 	/* 调试: 开环固定矢量 (旁路电流环) */
 	if (FOC.openloop_voltage > 0.0f) {
-		FOC_voltage(FOC.openloop_voltage, 0, FOC.openloop_angle);
+		foc_voltage(FOC.openloop_voltage, 0, FOC.openloop_angle);
 		return;
 	}
 
@@ -557,7 +565,7 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 	float iq_set =
 	    CLAMP(FOC.Iq_set, -Config.current_limit, Config.current_limit);
 	float phase = phase_est + FOC.phase_offset;
-	FOC_current(FOC.Id_set, iq_set, phase, encoder.phase_vel);
+	foc_current(FOC.Id_set, iq_set, phase, encoder.phase_vel);
 }
 
 void foc_init(void)

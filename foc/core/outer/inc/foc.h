@@ -124,12 +124,8 @@ extern volatile foc_data_t FOC;
 
 bool foc_adc_midpoint(void);
 void foc_update_voltages(void);
-void FOC_voltage(float Vd, float Vq, float phase);
-void FOC_current(float Id_set, float Iq_set, float phase, float phase_vel);
 void FOC_update_current_ctrl_gain(float bw);
-void enable_bldc_pwm_output(void);
-void disable_bldc_pwm_output(void);
-void pwm_output_low_sides(void);
+void foc_set_resistance_voltage(float voltage);
 void foc_arm(void);
 void foc_disarm(void);
 void foc_init(void);

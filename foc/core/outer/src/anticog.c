@@ -644,7 +644,6 @@ void anticogging_end(void)
 	cg_running = false;
 
 	foc_disarm();
-	pwm_output_low_sides();
 
 	/* 恢复位置环增益, 免得 50.0 被存进 Flash */
 	Config.pos_p_gain = cg_pos_p_save;

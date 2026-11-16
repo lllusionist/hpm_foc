@@ -21,6 +21,7 @@ static tFSM sFSM;
 /* 外部请求 */
 static volatile tFSMState s_req = BOOT_UP;
 static volatile uint8_t s_req_valid = 0;
+static volatile bool s_clear_fault_pending;
 /* 故障请求优先: 置位后非故障请求被拒绝, 直到 foc_clear_fault_req() */
 static volatile uint8_t s_fault_req = 0;
 
@@ -46,6 +47,11 @@ void foc_fault_request(tFSMState state)
 void foc_clear_fault_req(void)
 {
 	s_fault_req = 0;
+}
+
+void foc_request_fault_clear(void)
+{
+	s_clear_fault_pending = true;
 }
 
 tFSMState foc_get_stage(void)
@@ -93,7 +99,6 @@ static void enter_state(tFSMState state)
 		break;
 	case IDLE:
 		foc_disarm();
-		pwm_output_low_sides();
 		break;
 	case RUN:
 		CONTROLLER_reset();
@@ -137,18 +142,7 @@ static void exit_state(tFSMState state)
 	}
 }
 
-static bool foc_over_current(void)
-{
-	float limit = Config.protect_over_current;
-	float ia = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
-	float ib = (FOC.Ib - FOC.Ib_midpoint) * FOC_CURRENT_SCALE;
-	float ic = (FOC.Ic - FOC.Ic_midpoint) * FOC_CURRENT_SCALE;
-
-	return (fabsf(ia) > limit) || (fabsf(ib) > limit) ||
-	       (fabsf(ic) > limit);
-}
-
-/* 保护: 相过流(立即) / 母线过压 / 母线欠压; 返回故障码, 0 = 正常
+/* 任务级母线保护，返回故障码，0 = 正常。
  *
  * L4 修正: 欠压阈值改为固定比较, 不再与滤波值挂钩, 否则缓慢下跌时
  *         保护会把自己关掉; 阈值 0 表示禁用.
@@ -167,9 +161,6 @@ static uint8_t foc_protection_check(void)
 
 	if (new_volt_sample)
 		last_volt_frames = FOC.adc_voltage_frames;
-
-	if (foc_over_current())
-		return FOC_FAULT_PHASE_OC;
 
 	/* 母线电流保护: 滤波值 + 新采样去抖 */
 	if (FOC.Ibus_filt > Config.protect_i_bus_max) {
@@ -310,6 +301,12 @@ static void Task_FOC(void *argument)
 				sFSM.state = sFSM.state_next;
 				enter_state(sFSM.state);
 			}
+		}
+
+		if (s_clear_fault_pending) {
+			s_clear_fault_pending = false;
+			if (sFSM.state == IDLE && !FOC.is_armed)
+				FOC.fault_code = FOC_FAULT_NONE;
 		}
 
 		if (slow_tick)

@@ -201,12 +201,12 @@ static void cal_rl_step(float time, float ia_meas)
 		r_di_cnt = 0U;
 		FOC.calib_mode = false;
 		FOC.calib_vinj_mode = false;
+		foc_set_resistance_voltage(r_volt);
 		foc_arm();
 		mCalibStep = CS_MOTOR_R_LOOP;
 		break;
 
 	case CS_MOTOR_R_LOOP: {
-		FOC_voltage(r_volt, 0, 0);
 		r_isum += ia_meas;
 		r_icnt++;
 		if (loop_count >= R_CAL_WINDOW) {
@@ -223,6 +223,7 @@ static void cal_rl_step(float time, float ia_meas)
 				}
 				r_i1 = Is;
 				r_volt += CALIB_R_STEP_V;
+				foc_set_resistance_voltage(r_volt);
 				r_s1++;
 			} else {
 				if ((r_s1 > 0U) && (Is > 1.0f) && (r_i1 > 1.0f)) {
@@ -273,6 +274,7 @@ static void cal_rl_step(float time, float ia_meas)
 		FOC.vinj_acc = false;
 		loop_count = 0;
 		FOC.calib_vinj_mode = true;
+		foc_set_resistance_voltage(0.0f);
 		foc_arm();
 		mCalibStep = CS_MOTOR_L_LOOP;
 	} break;
@@ -331,7 +333,6 @@ static void cal_rl_step(float time, float ia_meas)
 		float L_eq = X_L / omega;
 		Config.phase_inductance = L_eq * 1.0f;
 		FOC.calib_vinj_mode = false;
-		pwm_output_low_sides();
 		FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 		printf("ind: %.6f H (Iamp=%.3f Z=%.3f Vdc=%.3f Vamp=%.3f)\n",
 		       Config.phase_inductance, I_amp, Z, l_v_dc, l_v_amp);
@@ -379,7 +380,6 @@ static void cal_dir_pp_step(float time, float calib_phase_vel,
 			}
 		} else if (phase_set >= 2.0f * total_calib_cycles * M_2PI) {
 			FOC.calib_mode = false;
-			pwm_output_low_sides();
 			mCalibStep = CS_DIR_PP_END;
 		}
 		break;
@@ -489,7 +489,6 @@ static void cal_encoder_step(void)
 				(float)CAL_LOOP_HZ);
 		} else {
 			FOC.calib_mode = false;
-			pwm_output_low_sides();
 			sample_count = 0;
 			loop_count = 0;
 			mCalibStep = CS_ENCODER_END;
@@ -678,7 +677,6 @@ static void cal_flux_step(float time)
 	case CS_FLUX_END: {
 		FOC.calib_mode = false;
 		FOC.calib_adv_angle = false;
-		pwm_output_low_sides();
 		bool vel_ok = true;
 		if (Config.pole_pairs > 0) {
 			float exp1 = FLUX_SPEED1 /
@@ -862,7 +860,7 @@ static void cal_inertia_step(float time)
 		Controller.input_current = 0.0f;
 		Controller.cur_setpoint = 0.0f;
 		Config.velocity_limit = j_vel_limit_save;
-		pwm_output_low_sides();
+		FOC.calib_mode = false;
 		float da = j_slope_acc - j_slope_dec;
 		float kt = 1.5f * (float)Config.pole_pairs * Config.flux_linkage;
 		float J = 0.0f;
