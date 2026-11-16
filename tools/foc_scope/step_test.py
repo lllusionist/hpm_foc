@@ -6,20 +6,22 @@
   2. 运行本脚本, 选 COM 口 -> 连接;
   3. 点"使能(电流0)" (会先切电流模式、目标清零再使能), 一个连接内完成, 不用其他上位机;
   4. 输入阶跃电流(A), 点"阶跃一次";
-  5. 固件以 40kHz 注入 Iq 阶跃并采集 16ms, 回传后本脚本画 Iq 并估算带宽;
+  5. 固件以 40kHz 注入 Iq 阶跃并回传采样，本脚本画 Iq 并估算带宽;
   6. 测完点"禁用".
 
 协议: 发送 5 字节 [0x60][float32 amp(LE)];
       固件回 "$STEP,FS=..,N=..,CH=3,PRE=..\n" + N*CH 个 float32(LE).
 """
 
-import struct
+import math
+import queue
 import threading
-import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from focscope.protocol import CMD, HEARTBEAT_INTERVAL_MS, pack_cmd
+from focscope.protocol import (
+    CMD, FLOAT32_MAX, HEARTBEAT_INTERVAL_MS, pack_cmd, read_step_reply,
+)
 
 try:
     import serial
@@ -28,25 +30,19 @@ except Exception:  # pragma: no cover
     serial = None
     list_ports = None
 
-CMD_STEP = 0x60
-CMD_STEP_BASE = 0x61
-CMD_SET_OP_MODE = 0x20
-CMD_MOTOR_ENABLE = 0x21
-CMD_MOTOR_DISABLE = 0x22
-CMD_SET_TORQUE = 0x23
-CMD_SET_VELOCITY = 0x24
-CMD_SET_CUR_BW = 0x58
-CMD_SAVE_CONFIG = 0x3F
-
 
 class StepApp:
     def __init__(self, root):
         self.root = root
         self.ser = None
         self._write_lock = threading.Lock()
-        self.busy = False
+        self._results = queue.Queue()
+        self._capture = None
+        self._command_job = None
+        self._enable_requested = False
         root.title("FOC 电流阶跃测试 (临时)")
         root.geometry("900x560")
+        root.protocol("WM_DELETE_WINDOW", self._exit)
 
         top = ttk.Frame(root, padding=8)
         top.pack(fill="x")
@@ -64,6 +60,8 @@ class StepApp:
         self.en_btn.pack(side="left", padx=2)
         self.dis_btn = ttk.Button(top, text="禁用", command=self.on_disable)
         self.dis_btn.pack(side="left", padx=2)
+        self.clear_btn = ttk.Button(top, text="清除故障", command=self.on_clear)
+        self.clear_btn.pack(side="left", padx=2)
 
         ttk.Label(top, text="基值(A):").pack(side="left", padx=(16, 2))
         self.base_var = tk.StringVar(value="0.0")
@@ -73,19 +71,18 @@ class StepApp:
         ttk.Entry(top, textvariable=self.amp_var, width=8).pack(side="left")
         self.step_btn = ttk.Button(top, text="阶跃一次", command=self.on_step)
         self.step_btn.pack(side="left", padx=8)
-        self.state_lbl = ttk.Label(top, text="未连接")
-        self.state_lbl.pack(side="left", padx=8)
 
         row2 = ttk.Frame(root, padding=(8, 0, 8, 4))
         row2.pack(fill="x")
         ttk.Label(row2, text="电流环带宽(Hz):").pack(side="left")
         self.bw_var = tk.StringVar(value="1000")
         ttk.Entry(row2, textvariable=self.bw_var, width=8).pack(side="left", padx=4)
-        ttk.Button(row2, text="设带宽", command=self.on_set_bw).pack(side="left")
-        ttk.Button(row2, text="保存(先禁用)", command=self.on_save).pack(
-            side="left", padx=4)
-        ttk.Label(row2, text="(试 1500/1800 后重新阶跃; 满意后点保存)"
-                  ).pack(side="left", padx=8)
+        self.bw_btn = ttk.Button(row2, text="设带宽", command=self.on_set_bw)
+        self.bw_btn.pack(side="left")
+        self.save_btn = ttk.Button(row2, text="保存(先禁用)", command=self.on_save)
+        self.save_btn.pack(side="left", padx=4)
+        self.state_lbl = ttk.Label(row2, text="未连接")
+        self.state_lbl.pack(side="left", padx=8)
 
         self.canvas = tk.Canvas(root, bg="white", height=380,
                                 highlightthickness=1,
@@ -99,7 +96,8 @@ class StepApp:
 
         self.last = None
         self.refresh_ports()
-        root.after(HEARTBEAT_INTERVAL_MS, self._send_heartbeat)
+        self._sync_controls()
+        root.after(HEARTBEAT_INTERVAL_MS, self._poll_connection)
 
     # ---------- 串口 ----------
     def refresh_ports(self):
@@ -125,62 +123,127 @@ class StepApp:
             self.ser = serial.Serial(port, 115200, timeout=0.05,
                                      write_timeout=0.05)
             self.ser.reset_input_buffer()
-        except Exception as e:
-            self.ser = None
+        except OSError as e:
+            self.close(request_stop=False)
             messagebox.showerror("打开失败", str(e))
+            return
+        if not self.send_cmd(CMD["disable"]):
             return
         self.conn_btn.configure(text="断开")
         self.state_lbl.configure(text="已连接 %s" % port)
+        self._sync_controls()
 
-    def close(self):
-        if self.ser is not None:
+    def close(self, request_stop=True):
+        self._cancel_command()
+        self._cancel_capture()
+        if request_stop and self.ser is not None:
             try:
-                self.ser.close()
-            except Exception:
+                self._write_cmd(self.ser, CMD["disable"])
+            except OSError:
                 pass
-        self.ser = None
+        with self._write_lock:
+            port, self.ser = self.ser, None
+            if port is not None:
+                try:
+                    port.close()
+                except OSError:
+                    pass
+        self._enable_requested = False
         self.conn_btn.configure(text="连接")
         self.state_lbl.configure(text="未连接")
+        self._sync_controls()
 
-    def _send_heartbeat(self):
+    def _exit(self):
+        self.close()
+        self.root.destroy()
+
+    def _sync_controls(self):
+        connected = self.ser is not None
+        for button in (self.dis_btn, self.clear_btn):
+            button.configure(state="normal" if connected else "disabled")
+        ready = connected and self._capture is None and self._command_job is None
+        for button in (self.en_btn, self.bw_btn, self.save_btn):
+            button.configure(state="normal" if ready else "disabled")
+        self.step_btn.configure(
+            state="normal" if ready and self._enable_requested else "disabled"
+        )
+
+    def _poll_connection(self):
         if self.ser is not None:
             try:
                 self._write_cmd(self.ser, CMD["heartbeat"])
-            except OSError:
-                self.close()
-        self.root.after(HEARTBEAT_INTERVAL_MS, self._send_heartbeat)
+            except OSError as exc:
+                self._link_failed(exc)
+        try:
+            capture, result = self._results.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            self._capture = None
+            if not capture.is_set():
+                self.done(result)
+            self._sync_controls()
+        self.root.after(HEARTBEAT_INTERVAL_MS, self._poll_connection)
+
+    def _link_failed(self, exc):
+        self.close(request_stop=False)
+        self.state_lbl.configure(text="串口通信中断")
+        self.info.configure(text=str(exc))
 
     # ---------- 使能/禁用 ----------
-    def _write_cmd(self, ser, cid, value=None):
+    def _write_cmd(self, ser, cid, value=None, capture=None):
         payload = pack_cmd(cid, value)
         with self._write_lock:
-            if self.ser is not ser:
+            if self.ser is not ser or (capture is not None and capture.is_set()):
                 return False
-            return ser.write(payload) == len(payload)
+            if ser.write(payload) != len(payload):
+                raise OSError("串口命令帧发送不完整")
+            return True
 
     def send_cmd(self, cid, value=None):
         if self.ser is None:
             messagebox.showwarning("提示", "请先连接串口")
             return False
-        return self._write_cmd(self.ser, cid, value)
+        try:
+            return self._write_cmd(self.ser, cid, value)
+        except OSError as exc:
+            self._link_failed(exc)
+            return False
+
+    def _cancel_command(self):
+        if self._command_job is not None:
+            self.root.after_cancel(self._command_job)
+            self._command_job = None
+
+    def _cancel_capture(self):
+        if self._capture is not None:
+            self._capture.set()
 
     def on_enable(self):
-        if self.ser is None:
-            messagebox.showwarning("提示", "请先连接串口")
-            return
-        # 先切电流模式、目标清零, 再使能; 避免位置/速度模式跟锁轴较劲
-        self.send_cmd(CMD_SET_OP_MODE, 0.0)
-        time.sleep(0.05)
-        self.send_cmd(CMD_SET_TORQUE, 0.0)
-        time.sleep(0.05)
-        self.send_cmd(CMD_MOTOR_ENABLE)
-        time.sleep(0.02)
-        self.ser.reset_input_buffer()
-        self.state_lbl.configure(text="已使能(电流模式 0A)")
+        if self.send_cmd(CMD["opmode"], 0.0):
+            self._command_job = self.root.after(50, self._finish_enable)
+            self._sync_controls()
+
+    def _finish_enable(self):
+        self._command_job = None
+        if self.send_cmd(CMD["torque"], 0.0) and self.send_cmd(CMD["enable"]):
+            self._enable_requested = True
+            self.state_lbl.configure(text="已请求使能（电流模式 0 A）")
+        self._sync_controls()
 
     def on_disable(self):
-        if self.send_cmd(CMD_MOTOR_DISABLE):
-            self.state_lbl.configure(text="已禁用")
+        self._cancel_command()
+        self._cancel_capture()
+        self._enable_requested = False
+        self._sync_controls()
+        if self.send_cmd(CMD["disable"]):
+            self.state_lbl.configure(text="已发送失能请求")
+            return True
+        return False
+
+    def on_clear(self):
+        if self.on_disable() and self.send_cmd(CMD["clear_fault"]):
+            self.state_lbl.configure(text="已发送清除故障请求")
 
     def on_set_bw(self):
         if self.ser is None:
@@ -191,25 +254,29 @@ class StepApp:
         except ValueError:
             messagebox.showwarning("提示", "带宽必须是数字")
             return
-        self.send_cmd(CMD_SET_CUR_BW, bw)
-        self.state_lbl.configure(text="电流环带宽设为 %.0f Hz (未保存)" % bw)
+        if not math.isfinite(bw) or not 50 <= bw <= 2000:
+            messagebox.showwarning("提示", "电流环带宽范围为 50–2000 Hz")
+            return
+        if self.send_cmd(CMD["curbw"], bw):
+            self.state_lbl.configure(text="已发送带宽 %.0f Hz（未保存）" % bw)
 
     def on_save(self):
-        if self.ser is None:
-            messagebox.showwarning("提示", "请先连接串口")
-            return
-        # 保存要求电机未使能: 先禁用, 等任务切到 IDLE, 再存
-        self.send_cmd(CMD_MOTOR_DISABLE)
-        time.sleep(0.3)
-        self.send_cmd(CMD_SAVE_CONFIG)
-        self.state_lbl.configure(text="已发送保存 (确认串口打印 cfg save: ok)")
+        if self.on_disable():
+            self._command_job = self.root.after(300, self._finish_save)
+            self._sync_controls()
+
+    def _finish_save(self):
+        self._command_job = None
+        if self.send_cmd(CMD["save"]):
+            self.state_lbl.configure(text="已发送保存请求，结果见固件日志")
+        self._sync_controls()
 
     # ---------- 阶跃 ----------
     def on_step(self):
         if self.ser is None:
             messagebox.showwarning("提示", "请先连接串口")
             return
-        if self.busy:
+        if self._capture is not None or not self._enable_requested:
             return
         try:
             amp = float(self.amp_var.get())
@@ -217,81 +284,35 @@ class StepApp:
         except ValueError:
             messagebox.showwarning("提示", "基值/阶跃必须是数字")
             return
-        self.busy = True
-        self.step_btn.configure(state="disabled")
+        if not all(-FLOAT32_MAX <= v <= FLOAT32_MAX for v in (amp, base)):
+            messagebox.showwarning("提示", "请输入可传输的有限电流值")
+            return
+        self._capture = threading.Event()
+        self._sync_controls()
         self.state_lbl.configure(text="采集中…")
-        t = threading.Thread(target=self.worker, args=(self.ser, amp, base),
+        t = threading.Thread(target=self.worker,
+                             args=(self.ser, self._capture, amp, base),
                              daemon=True)
         t.start()
 
-    def worker(self, ser, amp, base):
+    def worker(self, ser, capture, amp, base):
         try:
-            if not self._write_cmd(ser, CMD_STEP_BASE, base):
+            if not self._write_cmd(ser, CMD["step_base"], base, capture=capture):
                 raise OSError("发送阶跃基值失败")
-            time.sleep(0.02)
+            if capture.wait(0.02):
+                raise InterruptedError("阶跃已取消")
             ser.reset_input_buffer()
-            if not self._write_cmd(ser, CMD_STEP, amp):
+            if not self._write_cmd(ser, CMD["step"], amp, capture=capture):
                 raise OSError("发送阶跃命令失败")
-            result = self.read_reply(ser)
-        except Exception as e:
-            result = ("error", str(e))
-        self.root.after(0, self.done, result)
-
-    def read_reply(self, ser):
-        deadline = time.time() + 3.0
-        buf = b""
-        while time.time() < deadline:
-            chunk = ser.read(512)
-            if chunk:
-                buf += chunk
-                i = buf.find(b"$STEP,")
-                if i >= 0:
-                    j = buf.find(b"\n", i)
-                    while j < 0 and time.time() < deadline:
-                        buf += ser.read(512)
-                        j = buf.find(b"\n", i)
-                    if j < 0:
-                        return ("error", "等不到头行结束")
-                    header = buf[i:j].decode("ascii", "replace")
-                    fs, n, ch, pre = self.parse_header(header)
-                    need = n * ch * 4
-                    data = buf[j + 1:]
-                    while len(data) < need and time.time() < deadline:
-                        data += ser.read(min(2048, need - len(data)))
-                    if len(data) < need:
-                        return ("error", "数据不完整 (%d/%d)" % (len(data), need))
-                    vals = struct.unpack("<%df" % (n * ch), data[:need])
-                    return ("ok", fs, n, ch, pre, vals)
-            else:
-                time.sleep(0.005)
-        return ("error", "超时: 没收到 $STEP 数据 (电机使能了吗?)")
-
-    @staticmethod
-    def parse_header(line):
-        fs, n, ch, pre = 40000.0, 640, 3, 40
-        for kv in line[len("$STEP,"):].split(","):
-            if "=" not in kv:
-                continue
-            k, v = kv.split("=", 1)
-            k = k.strip().upper()
-            try:
-                if k == "FS":
-                    fs = float(v)
-                elif k == "N":
-                    n = int(v)
-                elif k == "CH":
-                    ch = int(v)
-                elif k == "PRE":
-                    pre = int(v)
-            except ValueError:
-                pass
-        return fs, n, ch, pre
+            result = ("ok", *read_step_reply(ser, capture.is_set))
+        except (OSError, ValueError) as exc:
+            result = ("error", str(exc))
+        self._results.put((capture, result))
 
     def done(self, result):
-        self.busy = False
-        self.step_btn.configure(state="normal")
         if result[0] == "error":
-            self.state_lbl.configure(text="失败")
+            if self.on_disable():
+                self.state_lbl.configure(text="采集失败，已发送失能请求")
             self.info.configure(text="错误: " + result[1])
             return
         _, fs, n, ch, pre, vals = result
@@ -308,7 +329,7 @@ class StepApp:
         p0 = max(0, pre - max(20, pre // 4))
         seg = iq[p0:pre]
         base = sum(seg) / max(1, len(seg))
-        tail = max(1, n // 5)
+        tail = max(1, (n - pre) // 5)
         final = sum(iq[-tail:]) / tail
         ref_final = sum(ref[-tail:]) / tail
         delta = final - base
@@ -319,15 +340,15 @@ class StepApp:
         if abs(delta) > 1e-4:
             lo = base + 0.1 * delta
             hi = base + 0.9 * delta
-            i10 = self.first_cross(iq, lo, delta > 0)
-            i90 = self.first_cross(iq, hi, delta > 0)
+            i10 = self.first_cross(iq[pre:], lo, delta > 0)
+            i90 = self.first_cross(iq[pre:], hi, delta > 0)
             if i10 is not None and i90 is not None and i90 > i10:
                 tr = (i90 - i10) / fs
                 bw = 0.35 / tr if tr > 0 else 0.0
                 lines.append(
                     "上升时间 tr(10-90%%) = %.1f us   估算带宽 ≈ %.0f Hz"
                     % (tr * 1e6, bw))
-            peak = max(iq) if delta > 0 else min(iq)
+            peak = max(iq[pre:]) if delta > 0 else min(iq[pre:])
             over = (peak - final) / delta * 100.0
             lines.append("峰值 = %.3f A   超调 = %.1f%%" % (peak, over))
         else:

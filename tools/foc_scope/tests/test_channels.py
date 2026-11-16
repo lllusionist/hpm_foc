@@ -2,6 +2,7 @@
 import unittest
 
 from focscope.channels import ChannelModel, NCH, CHANNELS, FAULT_TEXT
+from focscope.fwconfig import _parse_faults
 
 
 class TestChannelModel(unittest.TestCase):
@@ -36,6 +37,16 @@ class TestChannelModel(unittest.TestCase):
         self.assertIn("母线电压", CHANNELS[9][1])
         self.assertIn("母线电流", CHANNELS[21][1])
         self.assertEqual(FAULT_TEXT[0], "无")
+
+    def test_reads_c_block_comment_on_fast_overcurrent_code(self):
+        labels, codes = _parse_faults(
+            "#define FOC_FAULT_NONE 0\n"
+            "#define FOC_FAULT_PHASE_OC_ISR 6 /* 相过流硬限幅 */\n"
+            "#define FOC_FAULT_ENCODER 7 // 编码器停更\n"
+        )
+        self.assertEqual(codes["PHASE_OC_ISR"], 6)
+        self.assertEqual(labels[6], "相过流硬限幅")
+        self.assertEqual(labels[7], "编码器停更")
 
 
 if __name__ == "__main__":

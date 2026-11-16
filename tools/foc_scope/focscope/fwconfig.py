@@ -86,10 +86,14 @@ def _parse_faults(text):
     if not text:
         return by_code, by_name
     for line in text.splitlines():
-        m = re.match(r"\s*#define\s+FOC_FAULT_(\w+)\s+(\d+)\s*(?://\s*(.*))?$", line)
+        m = re.fullmatch(
+            r"\s*#define\s+FOC_FAULT_(\w+)\s+(\d+)\s*"
+            r"(?://\s*(.*?)|/\*\s*(.*?)\s*\*/)?\s*", line
+        )
         if not m:
             continue
-        name, code, cmt = m.group(1), int(m.group(2)), (m.group(3) or "").strip()
+        name, code = m.group(1), int(m.group(2))
+        cmt = (m.group(3) or m.group(4) or "").strip()
         by_name[name] = code
         if code == 0:
             by_code[code] = "无"
