@@ -19,7 +19,6 @@ class SerialIO:
         self.baud = baud
         self.ser = None
         self.thread = None
-        self.running = False
         self.q = queue.Queue(maxsize=20000)
         self.cfg_q = queue.Queue()
         self._lock = threading.Lock()
@@ -72,31 +71,36 @@ class SerialIO:
         last = None
         for _ in range(4):
             try:
-                self.ser = serial.Serial(dev, self.baud, timeout=0.05)
+                self.ser = serial.Serial(dev, self.baud, timeout=0.05,
+                                         write_timeout=0.05)
                 break
             except Exception as e:
                 last = e
                 time.sleep(0.15)
         if self.ser is None:
             raise last if last else RuntimeError("打开串口失败")
-        self.running = True
-        self.thread = threading.Thread(target=self._reader, daemon=True)
+        self._parser.reset()
+        self.thread = threading.Thread(target=self._reader, args=(self.ser,),
+                                       daemon=True)
         self.thread.start()
 
     def close(self):
-        self.running = False
-        if self.ser:
-            try:
-                self.ser.close()
-            except Exception:
-                pass
-            self.ser = None
+        with self._lock:
+            port, self.ser = self.ser, None
+            if port is not None:
+                try:
+                    port.close()
+                except OSError:
+                    pass
         if self.thread:
-            try:
-                self.thread.join(timeout=0.3)
-            except Exception:
-                pass
+            self.thread.join(timeout=0.3)
             self.thread = None
+        self.poll_config()
+        while True:
+            try:
+                self.q.get_nowait()
+            except queue.Empty:
+                break
 
     def is_open(self):
         return self.ser is not None
@@ -107,15 +111,19 @@ class SerialIO:
         return self.write(frame)
 
     def write(self, data):
-        if not self.ser:
-            return False
-        try:
-            with self._lock:
-                self.ser.write(data)
-            self.tx_bytes += len(data)
+        with self._lock:
+            if self.ser is None or self.link_lost:
+                return False
+            try:
+                count = self.ser.write(data)
+            except OSError:
+                self.link_lost = True
+                return False
+            self.tx_bytes += count
+            if count != len(data):
+                self.link_lost = True
+                return False
             return True
-        except Exception:
-            return False
 
     # ---------- 接收 ----------
     def _feed(self, data):
@@ -157,19 +165,22 @@ class SerialIO:
             if line:
                 self.cfg_q.put(line)
 
-    def _reader(self):
-        self._parser.reset()
+    def _reader(self, port):
         buf = bytearray()
-        while self.running and self.ser:
+        while self.ser is port and not self.link_lost:
             try:
-                data = self.ser.read(4096)
-            except Exception:
-                self.link_lost = True
+                data = port.read(4096)
+            except OSError:
+                with self._lock:
+                    if self.ser is port:
+                        self.link_lost = True
                 break
-            if not data:
-                continue
-            self.rx_bytes += len(data)
-            self._ingest(buf, data)
+            with self._lock:
+                if self.ser is not port or self.link_lost:
+                    break
+                if data:
+                    self.rx_bytes += len(data)
+                    self._ingest(buf, data)
 
     def poll_config(self):
         out = []

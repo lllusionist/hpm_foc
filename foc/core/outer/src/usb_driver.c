@@ -4,11 +4,30 @@
 #include "foc_ctrl.h"
 #include "vofa.h"
 
+/* 把参数钳到 [lo, hi]; 调用前已保证 v 有限 */
+static float clampf(float v, float lo, float hi)
+{
+	if (v < lo)
+		return lo;
+	if (v > hi)
+		return hi;
+	return v;
+}
+
 void USB_parse_frame(UsbFrame *frame)
 {
 	uint8_t id = frame->id;
 
+	/* 所有命令的参数都是 float: NaN/Inf 一律丢弃整帧.
+	 * NaN 经 CLAMP(MIN/MAX) 会变成下限, 导致负向满幅输出 */
+	if (!isfinite(data_to_float(&frame->data[0])))
+		return;
+
 	switch (id) {
+	case USB_CMD_HEARTBEAT:
+		foc_heartbeat_from_isr();
+		break;
+
 	// 配置持久化 (延迟到任务里执行: 擦写要关中断几十 ms)
 	case USB_CMD_SAVE_CONFIG:
 		Controller.config_cmd_pending = 1;
@@ -93,14 +112,22 @@ void USB_parse_frame(UsbFrame *frame)
 
 	case USB_CMD_MOTOR_ENABLE:
 		if (!Config.calib_valid) {
-			printf("enable refused: not calibrated\n");
+			/* 本函数在 USB 中断里执行, 不能 printf (阻塞 UART + 中断不可嵌套),
+			 * 置标志由 FOC 任务打印 */
+			Controller.enable_refused_pending = true;
 			break;
 		}
 		foc_request_stage(RUN);
 		break;
 
 	case USB_CMD_MOTOR_DISABLE:
+		foc_clear_fault_req(); /* 允许下一次使能 */
 		foc_request_stage(IDLE);
+		break;
+
+	/* 故障锁存后必须先禁用再发 0x26 清除, 才能重新使能 */
+	case USB_CMD_CLEAR_FAULT:
+		foc_request_fault_clear();
 		break;
 
 	case USB_CMD_SET_HOME:
@@ -116,7 +143,6 @@ void USB_parse_frame(UsbFrame *frame)
 			Cur_Kp = 1.0e5f;
 		FOC.current_ctrl_p_gain = Cur_Kp;
 		Config.current_kp = Cur_Kp;
-		Config.current_gain_magic = CONFIG_MAGIC;
 		break;
 	}
 
@@ -128,7 +154,6 @@ void USB_parse_frame(UsbFrame *frame)
 			Cur_Ki = 1.0e7f;
 		FOC.current_ctrl_i_gain = Cur_Ki;
 		Config.current_ki = Cur_Ki;
-		Config.current_gain_magic = CONFIG_MAGIC;
 		break;
 	}
 
@@ -156,33 +181,42 @@ void USB_parse_frame(UsbFrame *frame)
 	}
 
 	case USB_CMD_SET_VEL_KP: {
-		Config.vel_p_gain = data_to_float(&frame->data[0]);
+		Config.vel_p_gain =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 100.0f);
 		break;
 	}
 
 	case USB_CMD_SET_VEL_KI: {
-		Config.vel_i_gain = data_to_float(&frame->data[0]);
+		Config.vel_i_gain =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 10000.0f);
 		break;
 	}
 
 	case USB_CMD_SET_POS_KP: {
-		Config.pos_p_gain = data_to_float(&frame->data[0]);
+		Config.pos_p_gain =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 1000.0f);
 		break;
 	}
 
-	// 保护阈值 (改完用 0x3F 存 Flash)
+	// 保护阈值 (改完用 0x3F 存 Flash); 量程按 16:1 分压 × 3.3V 约 52.8V
 	case USB_CMD_SET_UNDER_VOLTAGE: {
-		Config.protect_under_voltage = data_to_float(&frame->data[0]);
+		Config.protect_under_voltage =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 52.0f);
 		break;
 	}
 
 	case USB_CMD_SET_OVER_VOLTAGE: {
-		Config.protect_over_voltage = data_to_float(&frame->data[0]);
+		Config.protect_over_voltage =
+		    clampf(data_to_float(&frame->data[0]), 0.0f, 52.0f);
 		break;
 	}
 
 	case USB_CMD_GET_CONFIG:
 		vofa_request_config();
+		break;
+
+	case USB_CMD_GET_STATUSWORD:
+		vofa_request_statusword();
 		break;
 
 	// A/B 调试开关: 本函数在 USB 中断里跑, 不打 printf

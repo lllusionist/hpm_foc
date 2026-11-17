@@ -10,23 +10,51 @@ uint8_t send_buf[MAX_BUFFER_SIZE];
 
 /* 读取设备参数的请求标志 (由 USB 命令置位, 在 vofa 任务包边界发出, 避免拆包) */
 static volatile uint8_t cfg_dump_req = 0;
+/* 读取标准状态字的请求标志 (0x62) */
+static volatile uint8_t sw_dump_req = 0;
 
 void vofa_request_config(void)
 {
 	cfg_dump_req = 1;
 }
 
-/* 以一行 ASCII 回传当前参数: $FOCFG,KEY=VAL,...\n */
-static void vofa_send_config(void)
+void vofa_request_statusword(void)
 {
-	static char line[384];
+	sw_dump_req = 1;
+}
+
+/* 以一行 ASCII 回传标准状态字: $FOCSW,STATUS=0xXX,ERRORS=0xXX,ARM=%d,ON=%d,REACH=%d\n */
+static bool vofa_send_statusword(void)
+{
+	static char line[64];
+
+	/* target_reached 属 Controller 语义, 发送时动态同步 (不跨层维护) */
+	FOC.statusword.status.target_reached = Controller.target_reached ? 1 : 0;
+
+	int n = snprintf(
+	    line, sizeof(line),
+	    "$FOCSW,STATUS=0x%04X,ERRORS=0x%04X,ARM=%d,ON=%d,REACH=%d\n",
+	    FOC.statusword.status.status_code, FOC.statusword.errors.errors_code,
+	    (int)FOC.statusword.status.armed, (int)FOC.statusword.status.switched_on,
+	    (int)FOC.statusword.status.target_reached);
+	if (n <= 0 || n >= (int)sizeof(line) - 1)
+		return false;
+	return cdc_acm_transmit((const uint8_t *)line, (uint16_t)n);
+}
+
+/* 以一行 ASCII 回传当前参数: $FOCFG,KEY=VAL,...\n */
+static bool vofa_send_config(void)
+{
+	static char line[MAX_BUFFER_SIZE];
+	foc_phase_trip_t trip;
+	int appended;
 	int n = snprintf(
 	    line, sizeof(line),
 	    "$FOCFG,CLIM=%.5g,VLIM=%.5g,POSKP=%.5g,VELKP=%.5g,VELKI=%.5g,"
 	    "CURBW=%.5g,CURKP=%.5g,CURKI=%.5g,UV=%.5g,OV=%.5g,"
 	    "OP=%ld,INV=%ld,PP=%ld,TW=%.5g,PW=%.5g,VRR=%.5g,CRR=%.5g,"
 	    "PFBW=%.5g,CAL=%ld,R=%.5g,L=%.5g,LAM=%.5g,COG=%ld,"
-	    "PROF=%ld\n",
+	    "PROF=%ld",
 	    Config.current_limit, Config.velocity_limit, Config.pos_p_gain,
 	    Config.vel_p_gain, Config.vel_i_gain, Config.current_ctrl_bw,
 	    Config.current_kp, Config.current_ki, Config.protect_under_voltage,
@@ -38,11 +66,22 @@ static void vofa_send_config(void)
 	    Config.phase_resistance, Config.phase_inductance,
 	    Config.flux_linkage, (long)Config.cogging_map_valid,
 	    (long)Config.motor_profile);
-	if (n > 0) {
-		if (n > (int)sizeof(line) - 1)
-			n = (int)sizeof(line) - 1;
-		vofa_transmit((uint8_t *)line, (uint16_t)n);
+	if (n <= 0 || n >= (int)sizeof(line) - 1)
+		return false;
+	if (foc_read_phase_trip(&trip)) {
+		appended = snprintf(
+		    line + n, sizeof(line) - (size_t)n,
+		    ",OCIA=%.5g,OCIB=%.5g,OCIC=%.5g,OCLIM=%.5g,"
+		    "OCPROF=%ld,OCFR=%lu,OCVR=%.5g,OCVL=%.5g",
+		    trip.ia, trip.ib, trip.ic, trip.limit,
+		    (long)trip.motor_profile,
+		    (unsigned long)trip.frames_since_arm,
+		    trip.resistance_voltage, trip.inductance_amplitude);
+		if (appended > 0 && appended < (int)sizeof(line) - n - 1)
+			n += appended;
 	}
+	line[n++] = '\n';
+	return cdc_acm_transmit((const uint8_t *)line, (uint16_t)n);
 }
 
 /* 批量发送 */
@@ -86,7 +125,7 @@ static void vofa_snapshot(float *d)
 	d[17] = FOC.Va;			     /* A 相电压 (V) */
 	d[18] = FOC.Vb;			     /* B 相电压 (V) */
 	d[19] = FOC.Vc;			     /* C 相电压 (V) */
-	d[20] = (float)FOC.fault_code;	     /* 故障码 */
+	d[20] = (float)FOC.statusword.errors.errors_code; /* 故障位掩码 */
 	d[21] = FOC.Ibus_filt;		     /* 母线电流 (A) */
 }
 
@@ -95,8 +134,11 @@ void vofa_push_sample(void)
 {
 	uint16_t next = (uint16_t)((vofa_head + 1U) % VOFA_RING);
 
-	if (next == vofa_tail) /* 满: 丢最旧 */
-		vofa_tail = (uint16_t)((vofa_tail + 1U) % VOFA_RING);
+	if (next == vofa_tail) {
+		/* 缓冲满: 丢弃本次最新样本 (不动 tail), 保留 ISR 只操作 head.
+		 * 原来是丢最旧 (修改 tail), ISR 和任务两个写者会竞争 tail */
+		return;
+	}
 
 	vofa_snapshot(vofa_ring[vofa_head]);
 	vofa_head = next;
@@ -178,13 +220,21 @@ static void Vofa_task(void *argument)
 			last = xTaskGetTickCount(); /* 上传耗时不补跑 */
 			continue;
 		}
-		if (st == 0U)
-			vofa_send();
-		/* st == 1: 阶跃采集中, 不发任何数据 */
+		/* 波形和参数回读共用 IN 端点，回包成功前保留请求。 */
 		if (cfg_dump_req) {
 			cfg_dump_req = 0;
-			vofa_send_config();
+			if (!vofa_send_config())
+				cfg_dump_req = 1;
+			continue;
 		}
+		if (sw_dump_req) {
+			sw_dump_req = 0;
+			if (!vofa_send_statusword())
+				sw_dump_req = 1;
+			continue;
+		}
+		if (st == 0U)
+			vofa_send();
 	}
 }
 

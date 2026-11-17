@@ -1,5 +1,6 @@
 #include "adc.h"
-#include "foc.h"
+/* adc.c 是 inner 层硬件驱动, 不引用 foc.h (outer 应用层).
+ * 三相电流原始码值通过回调传给上层, 保持分层清洁. */
 
 #define ADC_IRQ IRQn_ADC0
 #define ADC_TRIG_CH ADC16_CONFIG_TRG0A
@@ -22,6 +23,8 @@ static const uint8_t adc_ch_tab[ADC_TRIG_LEN] = {ADC_CH_IA, ADC_CH_IB,
 static adc_callback_t adc_callback;
 static volatile uint32_t current_snapshot_seq;
 static volatile uint16_t current_snapshot[ADC_TRIG_LEN];
+static volatile uint32_t s_adc_current_frames;
+static volatile uint32_t s_adc_current_missed;
 
 ATTR_PLACE_AT_NONCACHEABLE_BSS_WITH_ALIGNMENT(ADC_SOC_DMA_ADDR_ALIGNMENT)
 static volatile adc16_pmt_dma_data_t
@@ -41,7 +44,7 @@ bool adc_current_snapshot(uint16_t *ia, uint16_t *ib, uint16_t *ic)
 		__asm volatile("fence r, rw" ::: "memory");
 		uint32_t after = current_snapshot_seq;
 		if (before == after && !(after & 1U))
-			return FOC.adc_current_frames != 0U;
+			return s_adc_current_frames != 0U;
 	}
 }
 
@@ -271,40 +274,31 @@ void isr_adc(void)
 		}
 		if (!valid) {
 			bad_current_frames++;
-			FOC.adc_current_missed++;
+			s_adc_current_missed++;
 			return;
 		}
-		FOC.Ia = adc_dma_buf[0].result;
-		FOC.Ib = adc_dma_buf[1].result;
-		FOC.Ic = adc_dma_buf[2].result;
 
-		/* 由 Ia、Ib 重构 Ic；实测电流和仅用于诊断。 */
-		FOC.isum =
-		    ((FOC.Ia - FOC.Ia_midpoint) + (FOC.Ib - FOC.Ib_midpoint) +
-		     (FOC.Ic - FOC.Ic_midpoint)) *
-		    FOC_CURRENT_SCALE;
-		if (FOC.adc_ready) {
-			float ic_fix = FOC.Ic_midpoint -
-				       (FOC.Ia - FOC.Ia_midpoint) -
-				       (FOC.Ib - FOC.Ib_midpoint);
-			if (ic_fix < 0.0f)
-				ic_fix = 0.0f;
-			else if (ic_fix > 65535.0f)
-				ic_fix = 65535.0f;
-			FOC.Ic = ic_fix;
-		}
+		uint16_t ia = adc_dma_buf[0].result;
+		uint16_t ib = adc_dma_buf[1].result;
+		uint16_t ic = adc_dma_buf[2].result;
 
+		/* 双缓冲快照供任务层安全读取 (seqlock) */
 		current_snapshot_seq++;
 		__asm volatile("fence rw, w" ::: "memory");
-		current_snapshot[0] = (uint16_t)FOC.Ia;
-		current_snapshot[1] = (uint16_t)FOC.Ib;
-		current_snapshot[2] = (uint16_t)FOC.Ic;
+		current_snapshot[0] = ia;
+		current_snapshot[1] = ib;
+		current_snapshot[2] = ic;
 		__asm volatile("fence rw, w" ::: "memory");
 		current_snapshot_seq++;
-		FOC.adc_current_frames++;
-		FOC.adc_current_missed = 0U;
 
+		s_adc_current_frames++;
+		s_adc_current_missed = 0U;
+
+		/* 把原始码值传给上层回调; adc.c 不再依赖 foc.h */
 		if (adc_callback)
-			adc_callback();
+			adc_callback(ia, ib, ic);
 	}
 }
+
+uint32_t adc_current_frames(void)  { return s_adc_current_frames; }
+uint32_t adc_current_missed(void)  { return s_adc_current_missed; }

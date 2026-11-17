@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
-from .channels import CHANNELS, NCH, STATUS_ITEMS, FAULT_TEXT
+from .channels import CHANNELS, NCH, STATUS_ITEMS, fault_texts
 from .vofa_source import source_info
 from .fwconfig import load as _load_fw
 
@@ -659,7 +659,8 @@ class RightDataPanel(QWidget):
             if v is None:
                 self.rows[i].setText("-")
             elif sname.startswith("fault"):
-                self.rows[i].setText(FAULT_TEXT.get(int(round(v)), "?"))
+                mask = int(round(v))
+                self.rows[i].setText("/".join(fault_texts(mask)) if mask else "无")
             elif sname.startswith("sat"):
                 self.rows[i].setText("1" if v > 0.5 else "0")
             else:

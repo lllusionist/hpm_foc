@@ -6,8 +6,11 @@
 #include "hpm_crc32.h"
 #include <stdio.h>
 
-// 布局变更 (齿槽表 256 -> 512 点): 旧 Flash 配置自动失效
-#define CONFIG_MAGIC 0x5A5A1235
+// 布局版本: magic+version 变更时旧 Flash 配置自动失效
+// v1 = 原始布局 (crc32 只覆盖部分字段)
+// v2 = crc32 移到最后, 覆盖全部字段 (本次变更)
+#define CONFIG_MAGIC   0x5A5A1236   /* magic 也变更, 确保与 v1 记录不兼容 */
+#define CONFIG_VERSION 2U
 
 #define OFFSET_LUT_NUM 512U
 #define COGGING_MAP_NUM 512U // 512点 × 2字节 = 1024字节
@@ -15,7 +18,8 @@
 #define COGGING_SCALE 5000.0f
 
 typedef struct {
-	uint32_t magic; // 配置区魔数(标识有效配置)
+	uint32_t magic;   // 配置区魔数
+	uint32_t version; // 布局版本号 (CONFIG_VERSION)
 
 	int32_t invert_motor_dir; // 电机方向反转(0/1)
 	int32_t pole_pairs;       // 极对数
@@ -28,11 +32,10 @@ typedef struct {
 	float velocity_limit;     // 速度限制(rps)
 	int32_t calib_valid;      // 校准数据有效标志
 
-	int32_t encoder_offset; // 编码器零位偏移
-	int32_t offset_lut
-	    [OFFSET_LUT_NUM];        // 编码器偏移查找表(512点)
+	int32_t encoder_offset;      // 编码器零位偏移
+	int32_t offset_lut[OFFSET_LUT_NUM]; // 编码器偏移查找表(512点)
 	int32_t encoder_dir;         // 编码器方向
-	float protect_under_voltage; // 欠压保护阈值(V)
+	float protect_under_voltage; // 欠压保护阈值(V), 0=禁用
 	float protect_over_voltage;  // 过压保护阈值(V)
 	float protect_over_current;  // 过流保护阈值(A)
 	float protect_i_bus_max;     // 母线电流最大限制(A)
@@ -59,29 +62,26 @@ typedef struct {
 	int32_t heartbeat_consumer_ms; // 心跳消费超时时间(ms)
 	int32_t heartbeat_producer_ms; // 心跳生产者周期(ms)
 
-	int16_t
-	    cogging_map[COGGING_MAP_NUM]; // 齿槽补偿表(int16, 按机械角512点)
-	uint32_t cogging_map_crc;         // 齿槽补偿表CRC校验
-	int32_t cogging_map_valid;        // 齿槽补偿表有效标志
+	int16_t cogging_map[COGGING_MAP_NUM]; // 齿槽补偿表(int16, 按机械角512点)
+	uint32_t cogging_map_crc;             // 齿槽补偿表CRC校验
+	int32_t cogging_map_valid;            // 齿槽补偿表有效标志
 
-	uint32_t crc32; // 结构体整体CRC32校验
-
-	// 以下字段在 crc32 之后, 不参与上面的 CRC: 旧 Flash 记录仍能通过校验
-	uint32_t current_gain_magic; // current_kp/ki 有效标志
 	float current_kp;            // 电流环 Kp(V/A)
 	float current_ki;            // 电流环 Ki(V/(A·s))
+	int32_t motor_profile;       // MOTOR_PROFILE_xxx
 
-	// 电机配置档 (同样在 crc32 之后, 由 motor_cfg_magic 校验)
-	uint32_t motor_cfg_magic;
-	int32_t motor_profile; // MOTOR_PROFILE_xxx
-
-	// 标定拖动参数 (同样在 crc32 之后): 不同电机 R 差 276 倍, 写死不行
-	uint32_t calib_cfg_magic;
 	float calib_drag_v_min;       // 开环拖动电压下限 (V)
 	float calib_flux_iq_gain;     // 磁链标定拖动电流 = calib_current × 该系数
 	float calib_j_iq_gain;        // J 标定加速电流 = calib_current × 该系数
 	float calib_flux_rtest_ratio; // 磁链同速校验的降流比例
 	float cog_sweep_rps;          // 齿槽扫描速度 (rps)
+
+	float vel_integrator_limit; // 速度积分器限幅 (A)
+	float friction_move_a;      // 动摩擦前馈电流 (A)
+	float friction_break_a;     // 静摩擦前馈电流 (A)
+
+	// crc32 必须是最后一个字段: CONFIG_calculate_crc 覆盖其之前的所有内容
+	uint32_t crc32; // 结构体整体CRC32校验 (覆盖除自身外的全部字段)
 } tConfig;
 
 // 电机配置档编号 (USB 0x5F 下发时直接传编号, $FOCFG 的 PROF 也是它)

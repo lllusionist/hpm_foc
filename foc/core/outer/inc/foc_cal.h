@@ -6,6 +6,7 @@
 #include "tim.h"
 #include "encoder.h"
 #include "foc_task.h"
+#include "anticog.h"  /* 齿槽标定接口已拆分到独立模块 */
 
 typedef enum eCalibStep {
 	CS_NULL = 0,
@@ -40,36 +41,21 @@ typedef enum eCalibStep {
 	CS_ENCODER_CCW_LOOP,
 	CS_ENCODER_END,
 
-	/* 转动惯量 J: 交替给 ±Iq, 用加速度斜率差消掉摩擦 */
-	/*   J·2π·a+ = Kt·I − Tf ;  J·2π·a− = −Kt·I − Tf */
-	/*   => J = Kt·I / (π·(a+ − a−)) */
+	/* 转动惯量 J */
 	CS_MOTOR_J_START,
 	CS_MOTOR_J_SPINUP,
 	CS_MOTOR_J_ACC,
 	CS_MOTOR_J_DEC,
 	CS_MOTOR_J_END,
 
-	/* 收尾: 停留一会让上位机读回偏移表 */
+	/* 收尾 */
 	CS_REPORT_OFFSET_LUT,
 
 } tCalibStep;
 
 void calibration_start(void);
-/* 当前标定步骤编号 (故障打印用) */
 int calibration_step(void);
-/* 齿槽标定阶段编号 (故障打印用), -1 = 未在跑 */
-int anticogging_step(void);
 void calibration_end(void);
 void calibration_loop(void);
-
-/* 齿槽转矩补偿标定: 速度环低速匀速拖动, 按电角度分桶采样 Iq_set 生成补偿表 */
-void anticogging_start(void);
-/* 0 = 位置保持(0x28), 1 = 恒速扫描(0x2D) */
-void anticogging_set_method(uint8_t m);
-bool anticogging_loop(void); /* 返回 true 表示标定结束 */
-/* 齿槽表 dump (0x2C): 请求后由 1kHz 任务分块打印, 每拍 8 点 */
-void cogging_dump_request(void);
-void cogging_dump_loop(void);
-void anticogging_end(void);
 
 #endif /* __FOC_CAL_H__ */

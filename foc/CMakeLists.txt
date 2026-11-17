@@ -10,8 +10,10 @@ set(RV_ARCH "rv32imafc")
 # 产物名，缺省为 demo（SDK application.cmake: if(NOT APP_NAME) set(APP_NAME demo)）
 set(APP_NAME foc)
 
-# SEGGER RTT：printf 走 J-Link，不占用 UART0 引脚
-set(CONFIG_SEGGER_RTT 1)
+# SEGGER RTT 关闭: 其 SEGGER_RTT_Syscalls_GCC.c 强定义 _write, 会与 log.c
+# 的 _write 重复定义导致 GCC/newlib 构建链接失败. 输出统一走 log.c 环形缓冲
+# (UART). 若日后启用 RTT, 需同时排除该 syscall 文件并移除 tim.h 对它的依赖.
+set(CONFIG_SEGGER_RTT 0)
 
 
 # the following lines before "### END ###" are added during project localization
@@ -31,7 +33,7 @@ find_package(hpm-sdk REQUIRED HINTS $ENV{HPM_SDK_BASE})
 
 project(foc)
 
-# 关闭 UART console：否则它的 _write 与 RTT_Syscalls_GCC.c 的 _write 重定义冲突。
+# 关闭 SDK 的 hpm_debug_console.c：否则它的 _write 与 log.c 的 _write 重定义冲突。
 # 副作用：board.h 不再提供 BOARD_CONSOLE_UART_* 宏，sys.c 里对应的初始化已移除。
 sdk_compile_definitions(-DCONFIG_NDEBUG_CONSOLE=1)
 
@@ -47,6 +49,7 @@ sdk_inc(core/inner/inc)
 sdk_inc(core/outer/inc)
 
 sdk_app_src(core/inner/src/main.c)
+sdk_app_src(core/inner/src/log.c)
 sdk_app_src(core/inner/src/sys.c)
 sdk_app_src(core/inner/src/adc.c)
 sdk_app_src(core/inner/src/tim.c)
@@ -56,6 +59,7 @@ sdk_app_src(core/inner/src/cdc_acm.c)
 sdk_app_src(core/outer/src/foc.c)
 sdk_app_src(core/outer/src/foc_task.c)
 sdk_app_src(core/outer/src/foc_cal.c)
+sdk_app_src(core/outer/src/anticog.c)
 sdk_app_src(core/outer/src/foc_ctrl.c)
 sdk_app_src(core/outer/src/encoder.c)
 sdk_app_src(core/outer/src/config.c)

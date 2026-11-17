@@ -147,8 +147,18 @@ void ENCODER_start_read(void)
 {
 	hpm_stat_t stat;
 
-	if (spi_busy)
-		return; /* 上一帧还没传完, 这一拍跳过 */
+	if (spi_busy) {
+		/* 上一帧 DMA 回调没来: 计数并看是否超时 */
+		encoder.error_cnt++;
+		if (encoder.error_cnt >= ENCODER_SPI_TIMEOUT_FRAMES) {
+			/* DMA 卡死: 强制释放, 下一拍重新开始 */
+			spi_busy = false;
+			encoder_cs(1);
+			encoder.bad_frame_cnt +=
+			    ENCODER_SPI_TIMEOUT_FRAMES;
+		}
+		return;
+	}
 
 	rxdma_done = false;
 	txdma_done = false;
@@ -165,6 +175,18 @@ void ENCODER_start_read(void)
 		spi_busy = false;
 		encoder.error_cnt++;
 	}
+}
+
+/* 方向修正后的单圈值 -> 扣除标定零偏和偏移表后的单圈值.
+ * PLL 跟踪的是对齐后的计数, 初始化/重同步必须用同一坐标域 */
+static uint32_t encoder_align(uint32_t corrected)
+{
+	uint32_t lut_index =
+	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
+	int32_t aligned = (int32_t)corrected - Config.encoder_offset -
+			  Config.offset_lut[lut_index];
+
+	return (uint32_t)aligned & ENCODER_MASK;
 }
 
 /* 解析最新帧并更新位置与速度。 */
@@ -194,7 +216,7 @@ void ENCODER_loop(void)
 	/* 前几拍只对齐, 不参与累加和 PLL */
 	if (encoder.need_init > 0U) {
 		encoder.count_in_cpr_prev = corrected;
-		encoder.pll_pos = (float)corrected;
+		encoder.pll_pos = (float)encoder_align(corrected);
 		encoder.pll_vel = 0;
 		encoder.need_init--;
 		return;
@@ -222,26 +244,33 @@ void ENCODER_loop(void)
 		delta -= (int32_t)ENCODER_CPR;
 	else if (delta < -(int32_t)ENCODER_CPR_HALF)
 		delta += (int32_t)ENCODER_CPR;
-	/* 坏帧阈值按配置最高转速留出余量，以过滤 SPI 位错误。 */
-	float max_track_rps = Config.velocity_limit * 3.0f;
-	if (max_track_rps < 30.0f)
-		max_track_rps = 30.0f;
-	/* 标定提高速度上限时仍限制阈值，避免关闭坏帧过滤。 */
-	if (max_track_rps > 150.0f)
-		max_track_rps = 150.0f;
-	int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
-				      (float)ENCODER_UPDATE_FREQ);
-	if (abs(delta) > max_delta) {
-		encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
+	/* 坏帧门限: 按"当前速度×2 + 4rps"折算成每拍计数.
+	 * 原来是固定 velocity_limit×3 (=120rps -> 40 万计数 = 8.6° 机械角),
+	 * 静止时也放行 8.6° 的跳变; 现在静止只有 0.29°, 速度越高门限越宽.
+	 * 注意: 不要再加"增量突变/斜率"一级 —— 实测 0x27 强托时转子是粘滑抖动,
+	 * 真实加减速同样会让 |delta - delta_prev| 很大, 那样会把真位移判成坏帧,
+	 * 连坏 5 拍触发重同步, 每次重同步丢一段位移 (实测丢了 4.7% 计数,
+	 * 极对数从 13.99 错算成 14.69 -> 15). */
+	{
+		float max_track_rps = fabsf(encoder.vel) * 2.0f + 4.0f;
+		int32_t max_delta = (int32_t)(ENCODER_CPR_F * max_track_rps /
+					      (float)ENCODER_UPDATE_FREQ);
 
-		/* 连续坏帧后重新同步，恢复位置跟踪。 */
-		if (++encoder.bad_run >= 5U) {
-			encoder.bad_run = 0;
-			encoder.count_in_cpr_prev = corrected;
-			encoder.pll_pos = (float)corrected;
+		if (max_delta < 16)
+			max_delta = 16;
+		if (abs(delta) > max_delta) {
+			encoder.bad_frame_cnt++; /* 总帧数已在上面累加 */
+
+			/* 连续坏帧后重新同步，恢复位置跟踪。 */
+			if (++encoder.bad_run >= 5U) {
+				encoder.bad_run = 0;
+				encoder.count_in_cpr_prev = corrected;
+				encoder.pll_pos =
+				    (float)encoder_align(corrected);
+			}
+
+			return; /* 保留上一拍角度, 不累加、不喂 PLL */
 		}
-
-		return; /* 保留上一拍角度, 不累加、不喂 PLL */
 	}
 	encoder.bad_run = 0;
 
@@ -249,11 +278,7 @@ void ENCODER_loop(void)
 	encoder.count_in_cpr_prev = corrected;
 
 	/* 应用标定零偏和角度修正表。 */
-	uint32_t lut_index =
-	    (uint32_t)(((uint64_t)corrected * OFFSET_LUT_NUM) / ENCODER_CPR);
-	int32_t aligned_count = (int32_t)corrected - Config.encoder_offset -
-				Config.offset_lut[lut_index];
-	encoder.count_aligned = (uint32_t)aligned_count & ENCODER_MASK;
+	encoder.count_aligned = encoder_align(corrected);
 	count = (float)encoder.count_aligned;
 	/* 多圈机械位置，单位为转。 */
 	encoder.pos = (float)encoder.shadow_count / ENCODER_CPR_F;

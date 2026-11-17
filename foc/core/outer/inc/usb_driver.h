@@ -11,6 +11,7 @@
 
 #define USB_CMD_CALIB_START 0x27
 #define USB_CMD_ANTICOGGING_START 0x28
+#define USB_CMD_HEARTBEAT 0x29
 #define USB_CMD_SET_ANTICOG 0x2A // float 0/1: 齿槽补偿在线开关 (A/B 用)
 #define USB_CMD_SET_FRICTION_FF 0x2B // float 0/1: 摩擦前馈在线开关
 #define USB_CMD_DUMP_COGGING 0x2C // 无参: 分块打印 512 点齿槽表
@@ -22,13 +23,14 @@
 
 #define USB_CMD_MOTOR_ENABLE 0x21
 #define USB_CMD_MOTOR_DISABLE 0x22
+#define USB_CMD_CLEAR_FAULT 0x26  /* 故障锁存后需显式清除再使能 */
 
 #define USB_CMD_SET_HOME 0x2D
 
 #define USB_CMD_SET_CUR_KP 0x40
 #define USB_CMD_SET_CUR_KI 0x41
 #define USB_CMD_SET_CUR_BW 0x58
-#define USB_CMD_SET_MOTOR_PROFILE 0x5F // float 0/1: 切换电机配置档 (4310/5210)
+#define USB_CMD_SET_MOTOR_PROFILE 0x5F // float 0/1/2: 切换电机配置档 (4310/5210/2312)
 
 #define USB_CMD_SET_VEL_KP 0x42
 #define USB_CMD_SET_VEL_KI 0x43
@@ -41,6 +43,8 @@
 
 // 读参数: 固件回一行 ASCII($FOCFG,...), 由 vofa 任务整包发出
 #define USB_CMD_GET_CONFIG 0x3E
+// 读状态字: 固件回一行 ASCII($FOCSW,...), 由 vofa 任务整包发出
+#define USB_CMD_GET_STATUSWORD 0x62
 
 // 电流阶跃测试: 40kHz 采 Iq 后整包回传 "$STEP,..." + 浮点数据
 #define USB_CMD_STEP_TEST 0x60

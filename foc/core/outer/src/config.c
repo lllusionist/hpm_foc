@@ -1,4 +1,4 @@
-#include <stddef.h>
+﻿#include <stddef.h>
 #include <string.h>
 #include "config.h"
 #include "util.h"
@@ -36,8 +36,13 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 死区 48mV, 需 2 级以上差分
 		Config.calib_current = 3.0f;
 		Config.calib_voltage = 1.0f;
-		// 2000Hz 毛刺明显
-		Config.current_ctrl_bw = 1000.0f;
+		// 5210 的电气极点 R/(2πL) ≈ 0.042/(2π·10µH) = 670Hz, 1000Hz 交叉
+		// 已经越过极点; 实测 0x27 强托时电流环在 ~2.5kHz 自激 (Id±0.85/
+		// Iq 3±1.4A, 幅值只受死区非线性限制, 峰值撞 12A 过流).
+		// 注意 L 标定值会偏大 (注入电压被死区吃掉), Kp = L_meas·ωc,
+		// 实际交叉频率 = ωc·L_meas/L_real, 偏大 2~3 倍; 所以这里取 300Hz,
+		// 落到实际 ~800Hz. 等 L 标定修准后再往上调.
+		Config.current_ctrl_bw = 300.0f;
 		Config.current_ramp_rate = 200.0f;
 		Config.velocity_ramp_rate = 50.0f;
 		// Kt 为 4310 的 1/8.6, 增益按 J≈1.5e-4
@@ -47,11 +52,17 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 同速校验时不被齿槽卡停
 		Config.calib_flux_iq_gain = 1.5f;
 		// 4.5A 起转, 0.15s 窗防冲过 12rps
-		Config.calib_j_iq_gain = 1.50f;
+		// 实测 Pn=14 (dir_pp), 4.5A 起转会 2 倍过冲到 9A 撞软限流;
+		// J 只打印不参与 calib_valid, 降流把加速段做温和一点 (1.8A)
+		Config.calib_j_iq_gain = 0.60f;
 		Config.calib_flux_rtest_ratio = 0.7f;
 		// 0.1rps 会粘滑
 		Config.cog_sweep_rps = 0.30f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
+		// 速度积分器 / 摩擦前馈随电机档位配置
+		Config.vel_integrator_limit = 4.0f; // 5210 限流 8A, 积分器半幅
+		Config.friction_move_a = 0.08f;
+		Config.friction_break_a = 0.12f;
 	} else if (profile == MOTOR_PROFILE_2312) {
 		// 2312: 12N14P, KV960(Kt 为 5210 的 1/3)
 		Config.phase_resistance = 0.144f;
@@ -85,6 +96,9 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 84 格/圈, 21Hz
 		Config.cog_sweep_rps = 0.25f;
 		Config.motor_profile = MOTOR_PROFILE_2312;
+		Config.vel_integrator_limit = 3.0f;
+		Config.friction_move_a = 0.05f;
+		Config.friction_break_a = 0.08f;
 	} else {
 		// 4310 云台, 0.9A
 		Config.phase_resistance = 8.29f;
@@ -110,14 +124,15 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.calib_flux_rtest_ratio = 0.5f;
 		Config.cog_sweep_rps = 0.10f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
+		Config.vel_integrator_limit = 0.5f; // 4310 限流 1.5A
+		Config.friction_move_a = 0.030f;
+		Config.friction_break_a = 0.050f;
 	}
 
 	// 切换电机配置档后，原电机的标定数据失效。
 	Config.calib_valid = 0;
 	Config.cogging_map_valid = 0;
 	Config.anticogging_enable = 0;
-	Config.motor_cfg_magic = CONFIG_MAGIC;
-	Config.calib_cfg_magic = CONFIG_MAGIC;
 }
 
 // CRC 覆盖 crc32 字段之前的数据，不包含 crc32 本身。
@@ -142,25 +157,16 @@ uint8_t CONFIG_load_from_flash(void)
 
 	if (flash_read_config(&tmp, sizeof(tConfig)) != 0)
 		return 1;
+	/* magic 和 version 双重检查: magic 变更确保 v1 记录失效 */
 	if (tmp.magic != CONFIG_MAGIC)
 		return 2;
+	if (tmp.version != CONFIG_VERSION)
+		return 4; /* 布局版本不符, 回退默认值 */
+	/* CRC 现在覆盖全部字段 (crc32 本身除外) */
 	if (tmp.crc32 != CONFIG_calculate_crc(&tmp))
 		return 3;
 
 	Config = tmp;
-	// 兼容旧记录：crc32 后新增字段可能未初始化，需设置默认值。
-	if (Config.motor_cfg_magic != CONFIG_MAGIC) {
-		Config.motor_cfg_magic = CONFIG_MAGIC;
-		Config.motor_profile = MOTOR_PROFILE_4310;
-	}
-	if (Config.calib_cfg_magic != CONFIG_MAGIC) {
-		Config.calib_cfg_magic = CONFIG_MAGIC;
-		Config.calib_drag_v_min = 0.20f;
-		Config.calib_flux_iq_gain = 0.8f;
-		Config.calib_j_iq_gain = 0.15f;
-		Config.calib_flux_rtest_ratio = 0.5f;
-		Config.cog_sweep_rps = 0.10f;
-	}
 	if (debug)
 		config_debug_overrides();
 	return 0;
@@ -171,60 +177,33 @@ void config_init(void)
 	memset(&Config, 0, sizeof(tConfig));
 
 	Config.magic = CONFIG_MAGIC;
-	Config.calib_valid = false;
+	Config.version = CONFIG_VERSION;
 
-	Config.invert_motor_dir = 0;
-	Config.pole_pairs = 0;
-	Config.phase_resistance = 8.29f;   // 实测(相间 16.86), 官方 13.84 不符
-	Config.phase_inductance = 0.0034f; // 标定 3.34~3.44mH
-	Config.velocity_limit = 30.0f;
-
-	// 额定 0.9A
-	Config.current_limit = 1.5f;  // 额定的 2.5 倍
-	Config.calib_current = 0.50f; // 额定的 85%
-	Config.calib_voltage = 10.0f; // R 步进/L 注入幅值由此派生
-
+	/* 通用参数 (与电机型号无关) */
 	Config.default_op_mode = CONTROL_MODE_POSITION_FILTER;
 	Config.pos_p_gain = 5.0f;
-	// PLL 300Hz 下整定
-	Config.vel_p_gain = 0.17f;
-	Config.vel_i_gain = 5.3f;
 	Config.current_ff_gain = 0.001f;
-	// L/R=432µs -> 极点 368Hz, 取 300
-	Config.current_ctrl_bw = 300;
 	Config.anticogging_enable = 1;
 	Config.target_velcity_window = 0.5f;
 	Config.target_position_window = 0.01f;
-	Config.current_ramp_rate = 25.0f;
-	Config.velocity_ramp_rate = 50.0f;
-	Config.position_filter_bw = 10;
-	Config.profile_velocity = 50;
-	Config.profile_accel = 50;
-	Config.profile_decel = 50;
-
+	Config.position_filter_bw = 10.0f;
+	Config.profile_velocity = 50.0f;
+	Config.profile_accel = 50.0f;
+	Config.profile_decel = 50.0f;
 	Config.protect_under_voltage = 18.0f;
 	Config.protect_over_voltage = 28.0f;
-	Config.protect_over_current = 2.0f; // 额定的 3.4 倍
-	Config.protect_i_bus_max = 1.5f;
-
 	Config.node_id = 1;
-
 	Config.cogging_map_crc = 0;
 	Config.cogging_map_valid = 0;
-
-	Config.current_gain_magic = 0;
 	Config.current_kp = 0.0f;
 	Config.current_ki = 0.0f;
 
-	Config.motor_cfg_magic = CONFIG_MAGIC;
-	Config.motor_profile = MOTOR_PROFILE_4310;
+	/* 电机相关参数由档位表统一填充, 避免 config_init 和
+	 * CONFIG_apply_motor_profile 重复维护两份 4310 参数 */
+	CONFIG_apply_motor_profile(MOTOR_PROFILE_4310);
 
-	Config.calib_cfg_magic = CONFIG_MAGIC;
-	Config.calib_drag_v_min = 0.20f;
-	Config.calib_flux_iq_gain = 0.8f;
-	Config.calib_j_iq_gain = 0.15f;
-	Config.calib_flux_rtest_ratio = 0.5f;
-	Config.cog_sweep_rps = 0.10f;
+	/* apply 会把 calib_valid 清零, 这里保持 false */
+	Config.calib_valid = false;
 
 	Config.crc32 = CONFIG_calculate_crc(&Config);
 

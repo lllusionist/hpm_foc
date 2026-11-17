@@ -8,9 +8,8 @@ tController Controller;
 
 #define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
 
-// 低速摩擦前馈与速度增益调度；MOVE/BREAK 设为 0 可关闭前馈。
-#define FRICTION_FF_MOVE_A 0.030f
-#define FRICTION_FF_BREAK_A 0.050f
+// 低速摩擦前馈与速度增益调度; 电流值来自 Config 随电机档位变化
+// ENGAGE/RELEASE 速度阈值保持固定 (与电机无关)
 #define FRICTION_FF_ENGAGE_VEL 0.010f
 #define FRICTION_FF_RELEASE_VEL 0.050f
 #define VEL_BOOST_GAIN 1.0f
@@ -99,17 +98,23 @@ int CONTROLLER_set_home(void)
 		encoder.shadow_count = 0;
 		taskEXIT_CRITICAL();
 	} else if (foc_get_stage() == RUN) {
-		float pos_err = Controller.pos_setpoint - encoder.pos;
+		/* pos_setpoint 和位置误差都用 count_aligned 换算 (单圈弧度),
+		 * 不能用 encoder.pos (多圈圈数, 单位不同, L8 修复) */
+		float th_meas =
+		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
+		float pos_err = Controller.pos_setpoint - th_meas;
+		while (pos_err > M_PI)
+			pos_err -= M_2PI;
+		while (pos_err < -M_PI)
+			pos_err += M_2PI;
+
 		if ((ABS(encoder.vel) < 0.5f) && (ABS(pos_err) < 0.01f)) {
 			taskENTER_CRITICAL();
 
 			encoder.shadow_count = 0;
 			encoder.pos = 0;
-			encoder.pll_pos =
-			    (float)encoder
-				.count_aligned; // PLL 对齐当前单圈位置
+			encoder.pll_pos = (float)encoder.count_aligned;
 			encoder.pll_vel = 0;
-			// 防止产生错误 delta
 			encoder.count_in_cpr_prev = encoder.count_in_cpr;
 
 			Controller.input_position = 0;
@@ -163,6 +168,11 @@ void CONTROLLER_loop(void)
 	float v_err = 0.0f;
 	tFSMState stage = foc_get_stage();
 
+	if (Controller.enable_refused_pending) {
+		Controller.enable_refused_pending = false;
+		printf("enable refused: not calibrated\n");
+	}
+
 	// 在任务上下文处理从中断延后的请求。
 	if ((stage == IDLE) || (stage == RUN)) {
 		if (Controller.op_mode_pending) {
@@ -178,7 +188,8 @@ void CONTROLLER_loop(void)
 	// 仅在失能时切换电机配置档。
 	if (Controller.motor_profile_pending >= 0) {
 		int32_t p = Controller.motor_profile_pending;
-		Controller.motor_profile_pending = -1;
+	Controller.motor_profile_pending = -1;
+	Controller.enable_refused_pending = false;
 		if (FOC.is_armed) {
 			printf("motor profile: armed, refused\n");
 		} else {
@@ -348,7 +359,8 @@ void CONTROLLER_loop(void)
 			friction_boost = false;
 
 		float ff =
-		    friction_boost ? FRICTION_FF_BREAK_A : FRICTION_FF_MOVE_A;
+		    friction_boost ? Config.friction_break_a
+				   : Config.friction_move_a;
 		if (vel_des > FRICTION_FF_ENGAGE_VEL)
 			iq_set += ff;
 		else if (vel_des < -FRICTION_FF_ENGAGE_VEL)
@@ -392,9 +404,10 @@ void CONTROLLER_loop(void)
 		Controller.vel_integrator *= 0.99f;
 	else
 		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
-	// 齿槽标定期间放宽速度积分限幅。
+	// 齿槽标定期间放宽速度积分限幅; 正常运行用配置值 (随电机档位变化)
 	float vint_lim =
-	    (foc_get_stage() == ANTICOGGING) ? 4.0f : 0.5f;
+	    (foc_get_stage() == ANTICOGGING) ? 4.0f
+					     : Config.vel_integrator_limit;
 	Controller.vel_integrator =
 	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
 }

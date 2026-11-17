@@ -39,6 +39,7 @@ typedef struct sController {
 	volatile bool home_pending;
 	volatile uint8_t config_cmd_pending; /* 1=保存 2=恢复默认 */
 	volatile int32_t motor_profile_pending; /* >=0: 待套用的配置档 */
+	volatile bool enable_refused_pending; /* 使能被拒 (未标定), 任务里打印 */
 } tController;
 
 extern tController Controller;

@@ -81,20 +81,44 @@ def _func_body(text, name):
 
 
 def _parse_faults(text):
+    """解析 FOC_FAULT_* 故障码.
+
+    兼容两种固件写法:
+      - 旧: 单值枚举   #define FOC_FAULT_OVER_VOLTAGE 2
+      - 新: 位掩码     #define FOC_FAULT_OVER_VOLTAGE (1u << 1)
+    返回 (by_code, by_name):
+      - by_name[name] = 掩码值 (位掩码语义, 可直接用 & 判断)
+      - by_code[bit]  = 文本  (旧枚举时 key 是枚举值; 新位掩码时 key 是 bit 序号)
+    """
     by_code, by_name = {}, {}
     fallback = {"ADC": "ADC故障"}
     if not text:
         return by_code, by_name
     for line in text.splitlines():
-        m = re.match(r"\s*#define\s+FOC_FAULT_(\w+)\s+(\d+)\s*(?://\s*(.*))?$", line)
+        # 值: 十进制整数 或 (1u << N) 位掩码表达式
+        m = re.fullmatch(
+            r"\s*#define\s+FOC_FAULT_(\w+)\s+"
+            r"(?:(\d+)|\(1u?\s*<<\s*(\d+)\))\s*"
+            r"(?://\s*(.*?)|/\*\s*(.*?)\s*\*/)?\s*", line
+        )
         if not m:
             continue
-        name, code, cmt = m.group(1), int(m.group(2)), (m.group(3) or "").strip()
-        by_name[name] = code
-        if code == 0:
-            by_code[code] = "无"
+        name = m.group(1)
+        cmt = (m.group(4) or m.group(5) or "").strip()
+        if m.group(2) is not None:
+            # 旧式单值枚举
+            code = int(m.group(2))
+            by_name[name] = code
+            if code == 0:
+                by_code[code] = "无"
+            else:
+                by_code[code] = cmt or fallback.get(name, name)
         else:
-            by_code[code] = cmt or fallback.get(name, name)
+            # 新式位掩码 (1u << N): 值 = 1<<N, key 用 bit 序号
+            bit = int(m.group(3))
+            code = 1 << bit
+            by_name[name] = code
+            by_code[bit] = cmt or fallback.get(name, name)
     return by_code, by_name
 
 

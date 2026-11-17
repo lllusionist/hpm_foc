@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
-from .channels import ChannelModel, FAULT_TEXT, NCH, CHANNELS, index_of, STATUS_ITEMS
+from .channels import ChannelModel, NCH, CHANNELS, index_of, STATUS_ITEMS, fault_texts
 from .fwconfig import load as _load_fw
 from .buffers import DataStore
-from .protocol import CMD, MODES
+from .protocol import CMD, HEARTBEAT_INTERVAL_MS, MODES
 from .serial_io import SerialIO, HAVE_SERIAL
 from .plot import PlotWidget, OverviewWidget
 from .panels import TitleBar, LeftPanel, RightDataPanel, StatusBarWidget, ChannelDialog, num, TargetSlider
@@ -33,6 +33,7 @@ _FW = _load_fw()
 _CUR_LIM = _FW.get_float("current_limit", 8.0)
 _VEL_LIM = _FW.get_float("velocity_limit", 30.0)
 DEFAULT_FS = _FW.fs or 5000.0
+PHASE_OC_ISR = _FW.fault_code("PHASE_OC_ISR", 1 << 5)
 
 TARGET_DEFS = {
     # (标签, 命令键, 最小, 最大, 步长) —— 量程取自固件 current_limit / velocity_limit
@@ -64,13 +65,13 @@ class MainWindow(QWidget):
         self.recorder = Recorder(self.fs)
         self.record_max_sec = float(self.cfg.get("record_max_sec", 120.0))
         self.io = SerialIO()
-        self._enabled = False
+        self._enable_requested = False
         self._mode = None
         self._cur_lim = float(self.cfg.get("cur_limit", _CUR_LIM))
         self._vel_lim = float(self.cfg.get("vel_limit", _VEL_LIM))
         self._frozen = False
         self._last_tx = 0.0
-        self._last_fault = 0
+        self._last_fault = None
         self._fault_idx = index_of("fault")
         self._cfg_wait_until = 0.0
         self._demo_t = 0.0
@@ -83,6 +84,7 @@ class MainWindow(QWidget):
 
         self._build()
         self._wire()
+        self._set_conn_ui(False)
         self.left.apply_stepper_cfg(self.cfg.get("steppers") or {})
         self._update_target_defs()
         self._apply_saved_view()
@@ -90,6 +92,10 @@ class MainWindow(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(33)
+
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.timeout.connect(self._send_heartbeat)
+        self._heartbeat_timer.start(HEARTBEAT_INTERVAL_MS)
 
         self._last_ports_key = None
         self.refresh_ports()
@@ -164,12 +170,11 @@ class MainWindow(QWidget):
         h.addStretch(1)
 
         h.addWidget(QLabel("错误"))
-        self.lbl_fault = QLabel("无")
-        self.lbl_fault.setStyleSheet("color:%s;background:transparent;font-weight:600;" % theme.GREEN)
+        self.lbl_fault = QLabel("—")
         h.addWidget(self.lbl_fault)
         self.btn_clear_fault = QPushButton("清除错误")
         self.btn_clear_fault.setEnabled(False)
-        self.btn_clear_fault.setToolTip("固件暂无清故障命令")
+        self.btn_clear_fault.setToolTip("先发送失能，再请求清除固件故障")
         h.addWidget(self.btn_clear_fault)
 
         self.btn_calib = QPushButton("校准")
@@ -189,6 +194,8 @@ class MainWindow(QWidget):
         h.addWidget(QLabel("电机"))
         self.cb_motor = QComboBox()
         self.cb_motor.addItems(["4310 云台", "5210 航模", "2312 航模"])
+        self.cb_motor.setPlaceholderText("档位待确认")
+        self.cb_motor.setCurrentIndex(-1)
         self.cb_motor.setToolTip(
             "电机配置档 (0x5F):\n"
             "  4310 云台: 8.29Ω / 3.4mH / 14 对极 / 0.9A / 带宽 300Hz\n"
@@ -197,6 +204,7 @@ class MainWindow(QWidget):
             "⚠ 切换会作废标定 (编码器零位/极对数都变了), 必须重新跑 0x27")
         self.cb_motor.setFixedWidth(96)
         h.addWidget(self.cb_motor)
+        self._motor_profile = None
         self._motor_req = None
         # 用 activated(用户操作才触发): 重复选同一项也能重新下发,
         # 程序里 setCurrentIndex 同步状态时不会误发
@@ -331,7 +339,8 @@ class MainWindow(QWidget):
 
         self.btn_enable.clicked.connect(self.enable)
         self.btn_disable.clicked.connect(self.disable)
-        self.btn_calib.clicked.connect(lambda: self.send(CMD["calib"]))
+        self.btn_clear_fault.clicked.connect(self.clear_fault)
+        self.btn_calib.clicked.connect(self._start_calibration)
         self.btn_anticog.clicked.connect(lambda: self.send(CMD["anticog"]))
         self.btn_anticog_sweep.clicked.connect(lambda: self.send(CMD["anticog_sweep"]))
         self.btn_zero.clicked.connect(lambda: self.send(CMD["home"]))
@@ -386,6 +395,10 @@ class MainWindow(QWidget):
             import traceback
             QMessageBox.critical(self, "打开失败", "%s\n\n%s" % (e, traceback.format_exc()))
             return
+        if not self.send(CMD["disable"]):
+            self.io.close()
+            self._set_conn_ui(False)
+            return
         self.demo = False
         self._set_conn_ui(True)
         # 连接后把当前选择的运行模式下发给固件 (未选择模式则不发送)
@@ -395,17 +408,33 @@ class MainWindow(QWidget):
         self.request_config()
 
     def disconnect(self):
+        if self.io.is_open() and not self.io.link_lost:
+            self.send(CMD["disable"])
         self.io.close()
         self._set_conn_ui(False)
+
+    def _send_heartbeat(self):
+        if self.io.is_open() and not self.io.link_lost:
+            self.io.send(CMD["heartbeat"])
 
     def _set_conn_ui(self, on):
         self.left.btn_connect.setEnabled(not on)
         self.left.btn_disconnect.setEnabled(on)
         self.title.set_connected(on, "已连接" if on else "未连接")
         self.statusbar.set_connected(on)
+        for button in (self.btn_disable, self.btn_anticog,
+                       self.btn_anticog_sweep, self.btn_zero):
+            button.setEnabled(on)
+        self._last_fault = None
+        self.lbl_fault.setToolTip("")
+        self._motor_profile = None
+        self._motor_req = None
+        self.cb_motor.setCurrentIndex(-1)
         if not on:
+            self._cfg_wait_until = 0.0
             self._clear_enable()
             self._clear_mode()
+        self._show_fault()
 
     def _clear_mode(self):
         self._mode = None
@@ -416,10 +445,11 @@ class MainWindow(QWidget):
         self._apply_target(None)
 
     def send(self, cid, val=None):
-        if not self.io.is_open():
-            return
-        self.io.send(cid, val)
+        if not self.io.send(cid, val):
+            self.statusbar.flash("命令发送失败，请检查串口连接")
+            return False
         self._record_event(cid, val)
+        return True
 
     def _record_event(self, cid, val):
         """录制中时, 把发出的命令记进时间线 (与波形写同一文件)."""
@@ -442,8 +472,11 @@ class MainWindow(QWidget):
             self, "恢复默认参数",
             "将恢复固件出厂默认参数并清除校准 (需重新校准), 继续?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if r == QMessageBox.Yes:
-            self.send(CMD["reset"])
+        if r == QMessageBox.Yes and self.send(CMD["reset"]):
+            self._motor_profile = None
+            self._motor_req = None
+            self.cb_motor.setCurrentIndex(-1)
+            self._update_calibration_button()
             # 固件恢复默认后是 4310 档, 读回让界面同步
             QTimer.singleShot(500, self.request_config)
 
@@ -456,16 +489,17 @@ class MainWindow(QWidget):
         keys = list(self.left.steppers.keys())
         order = (["curbw"] if "curbw" in keys else []) + [k for k in keys if k != "curbw"]
         for key in order:
-            self.send(CMD[key], self.left.steppers[key].value())
-        self.send(CMD["save"])
-        self.statusbar.flash("已下发当前参数并保存到 Flash")
+            if not self.send(CMD[key], self.left.steppers[key].value()):
+                return
+        if self.send(CMD["save"]):
+            self.statusbar.flash("保存请求已发送；写入结果见固件日志")
 
     def request_config(self):
         if not self.io.is_open():
             return
-        self.send(CMD["getcfg"])
-        self._cfg_wait_until = time.time() + 1.5
-        self.statusbar.flash("正在读取设备参数…")
+        if self.send(CMD["getcfg"]):
+            self._cfg_wait_until = time.monotonic() + 1.5
+            self.statusbar.flash("正在读取设备参数…")
 
     def _update_target_defs(self):
         TARGET_DEFS[0] = ("目标电流 (A)", "torque", -self._cur_lim, self._cur_lim, 0.001)
@@ -474,7 +508,7 @@ class MainWindow(QWidget):
             self._apply_target(self._mode)
 
     def _on_motor_profile(self, idx):
-        prev = 1 - idx
+        prev = self._motor_profile if self._motor_profile is not None else -1
         # 切换会覆盖参数并作废标定, 必须二次确认
         ret = QMessageBox.question(
             self, "切换电机配置档",
@@ -485,26 +519,34 @@ class MainWindow(QWidget):
         if ret != QMessageBox.Yes:
             self.cb_motor.setCurrentIndex(prev)  # 不触发 activated, 安全
             return
+        if not self.send(CMD["motor_profile"], float(idx)):
+            self.cb_motor.setCurrentIndex(prev)
+            return
         self._motor_req = idx
-        self.send(CMD["motor_profile"], float(idx))
+        self._update_calibration_button()
         self.statusbar.flash(
-            "已切换电机配置档 → %s；标定已作废，请重新跑「校准」"
+            "已请求切换电机配置档 → %s，等待读回"
             % self.cb_motor.currentText())
         QTimer.singleShot(600, self.request_config)
 
     def _apply_device_config(self, line):
         if not line.startswith("$FOCFG"):
             return
-        self._cfg_wait_until = 0.0
         body = line.split(",", 1)[1] if "," in line else ""
         kv = {}
         for part in body.split(","):
             if "=" in part:
                 k, v = part.split("=", 1)
                 try:
-                    kv[k.strip().upper()] = float(v)
+                    value = float(v)
                 except ValueError:
-                    pass
+                    continue
+                if math.isfinite(value):
+                    kv[k.strip().upper()] = value
+        if not kv:
+            return
+        if self._motor_req is None or "PROF" in kv:
+            self._cfg_wait_until = 0.0
         mapping = {"CURKP": "curkp", "CURKI": "curki", "CURBW": "curbw",
                    "VELKP": "velkp", "VELKI": "velki", "POSKP": "poskp",
                    "UV": "uv", "OV": "ov"}
@@ -535,17 +577,23 @@ class MainWindow(QWidget):
         if "CAL" in kv:
             extra.append("标定%s" % ("有效" if kv["CAL"] > 0.5 else "无效"))
         if "PROF" in kv:
-            # 固件回传的是档位编号 (0/1/2), 直接当索引; 越界按 0 处理
-            prof = int(round(kv["PROF"]))
-            if not 0 <= prof < self.cb_motor.count():
-                prof = 0
-            self.cb_motor.setCurrentIndex(prof)
-            if self._motor_req is not None:
-                if prof != self._motor_req:
-                    self.statusbar.flash(
-                        "切换被固件拒绝（电机需先失能），当前仍是 %s"
-                        % self.cb_motor.currentText())
-                self._motor_req = None
+            profile = kv["PROF"]
+            if profile.is_integer() and 0 <= profile < self.cb_motor.count():
+                prof = int(profile)
+                name = self.cb_motor.itemText(prof)
+                if self._motor_req is not None and prof != self._motor_req:
+                    extra.append(f"切换未确认，固件仍为 {name}")
+                    self._motor_profile = None
+                else:
+                    extra.append(f"固件档位 {name}")
+                    self._motor_profile = prof
+            else:
+                self._motor_profile = None
+            self._motor_req = None
+            self.cb_motor.setCurrentIndex(
+                self._motor_profile if self._motor_profile is not None else -1
+            )
+            self._update_calibration_button()
         if "COG" in kv:
             extra.append("齿槽表%s" % ("有效" if kv["COG"] > 0.5 else "无效"))
         kvk = kv.get("CURKI")
@@ -555,22 +603,72 @@ class MainWindow(QWidget):
         if extra:
             msg += " | " + " ".join(extra)
         self.statusbar.flash(msg)
+        if self._last_fault and (self._last_fault & PHASE_OC_ISR):
+            self._show_phase_trip(kv)
+
+    def _show_phase_trip(self, kv):
+        keys = ("OCIA", "OCIB", "OCIC", "OCLIM", "OCPROF", "OCFR", "OCVR")
+        if not all(key in kv for key in keys):
+            return
+        ia, ib, ic, limit, profile, frame, voltage = (kv[key] for key in keys)
+        name = self.cb_motor.itemText(int(profile)) or str(int(profile))
+        hint = (
+            f"跳闸当拍三相 {ia:.2f} / {ib:.2f} / {ic:.2f} A"
+            f"（阈值 {limit:.2f} A）\n"
+            f"档位 {name}，使能后第 {int(frame)} 个有效 ADC 样本\n"
+            f"电阻标定电压请求 {voltage:.3f} V"
+        )
+        if "OCVL" in kv:
+            hint += f"，电感交流幅值 {kv['OCVL']:.3f} V"
+        self.lbl_fault.setToolTip(hint)
+
+    def _update_calibration_button(self):
+        confirmed = self._motor_profile is not None and self._motor_req is None
+        ready = (self.io.is_open() and not self.io.link_lost and confirmed
+                 and self._last_fault in (None, 0))
+        self.btn_calib.setEnabled(ready)
+        if not confirmed:
+            tip = "等待读回固件的电机档位"
+        elif self._last_fault not in (None, 0):
+            tip = "清除设备故障后可开始校准"
+        else:
+            name = self.cb_motor.itemText(self._motor_profile)
+            tip = f"开始校准 {name}，电机需可自由转动"
+        self.btn_calib.setToolTip(tip)
+
+    def _start_calibration(self):
+        if self.btn_calib.isEnabled() and self.send(CMD["calib"]):
+            self.statusbar.flash("已按固件读回档位发送校准请求")
 
     def enable(self):
-        self._set_enabled(True)
-        self.send(CMD["enable"])
+        if self.send(CMD["enable"]):
+            self._set_enable_requested(True)
+            self.statusbar.flash("已发送使能请求")
+        else:
+            self.btn_enable.setChecked(self._enable_requested)
 
     def disable(self):
-        self._set_enabled(False)
-        self.send(CMD["disable"])
+        if self.send(CMD["disable"]):
+            self._set_enable_requested(False)
+            self.statusbar.flash("已发送失能请求")
+        else:
+            self.btn_disable.setChecked(False)
 
-    def _set_enabled(self, on):
-        self._enabled = on
+    def clear_fault(self):
+        if not self.send(CMD["disable"]):
+            return
+        self._set_enable_requested(False)
+        if self.send(CMD["clear_fault"]):
+            self.statusbar.flash("已请求清除故障，等待读回")
+
+    def _set_enable_requested(self, on):
+        self._enable_requested = on
         self.btn_enable.setChecked(on)
         self.btn_disable.setChecked(not on)
+        self._show_fault()
 
     def _clear_enable(self):
-        self._enabled = False
+        self._enable_requested = False
         self.btn_enable.setChecked(False)
         self.btn_disable.setChecked(False)
 
@@ -625,10 +723,15 @@ class MainWindow(QWidget):
         try:
             v = float(self.ent_target.text() or 0)
         except ValueError:
+            self.statusbar.flash("请输入有效目标值")
+            return
+        if not math.isfinite(v):
+            self.statusbar.flash("请输入有限目标值")
             return
         step = self._target_step or 1.0
+        v = min(max(v, self.sld_target.minimum() * step),
+                self.sld_target.maximum() * step)
         iv = int(round(v / step))
-        iv = min(max(iv, self.sld_target.minimum()), self.sld_target.maximum())
         v = iv * step
         # 同步滑条位置 (不回触发发送)
         self.sld_target.blockSignals(True)
@@ -715,7 +818,6 @@ class MainWindow(QWidget):
         fi = index_of("fault")
         if fi is not None and fi < len(vals) and vals[fi] is not None:
             fault = int(round(vals[fi]))
-        st = self.left.steppers
 
         def sv(k):
             s = st.get(k)
@@ -735,7 +837,7 @@ class MainWindow(QWidget):
             "样本数": "%d" % self.recorder.count,
             "时长": "%.3f s" % self.recorder.duration(),
             "运行模式": mode,
-            "故障": FAULT_TEXT.get(fault, "?"),
+            "故障": "/".join(fault_texts(fault)) if fault else "无",
             "读数": "Iq=%s Iq_set=%s vel=%s vel_set=%s Vbus=%s" %
                     (rd("Iq"), rd("Iq_set"), rd("vel"), rd("vel_set"), rd("Vbus")),
             "参数": "电流Kp=%s 电流Ki=%s 电流BW=%s 速度Kp=%s 速度Ki=%s 位置Kp=%s" %
@@ -863,10 +965,16 @@ class MainWindow(QWidget):
             self.io.close()
             self._set_conn_ui(False)
             self.title.set_connected(False, "已断开 · 可重连")
+            self.statusbar.flash("串口通信中断，已停止发送心跳")
         for line in self.io.poll_config():
             self._apply_device_config(line)
-        if self._cfg_wait_until and time.time() > self._cfg_wait_until:
+        if self._cfg_wait_until and time.monotonic() > self._cfg_wait_until:
             self._cfg_wait_until = 0.0
+            if self._motor_req is not None:
+                self._motor_req = None
+                self._motor_profile = None
+                self.cb_motor.setCurrentIndex(-1)
+                self._update_calibration_button()
             self.statusbar.flash("未收到设备参数回应 (固件可能未烧录带读取命令的版本)")
         frames = self._collect()
         # 录制独立于“曲线冻结”: 冻结只停绘图, 不影响记录
@@ -879,13 +987,13 @@ class MainWindow(QWidget):
             for vals in frames:
                 self.store.append(vals)
         if frames:
+            self._update_fault(frames[-1])
             self.plot_top.update()
             self.plot_main.update()
         self.overview.set_window(self.plot_main.t_left(), self.plot_main.t_span)
 
         vals = self.store.latest_values()
         self.right.update_values(vals)
-        self._update_fault(vals)
 
         now = time.time()
         if now - self._stat_t >= 0.5:
@@ -938,21 +1046,50 @@ class MainWindow(QWidget):
 
     def _update_fault(self, vals):
         fi = self._fault_idx
-        raw = vals[fi] if fi is not None and fi < len(vals) and vals[fi] is not None else 0.0
-        code = int(round(raw))
-        if code != self._last_fault:
-            self._last_fault = code
-            txt = FAULT_TEXT.get(code, "?")
-            self.lbl_fault.setText(txt)
-            self.lbl_fault.setStyleSheet("color:%s;background:transparent;font-weight:600;" %
-                                         (theme.GREEN if code == 0 else theme.RED))
-        # 状态灯 (故障码来自固件解析)
+        if fi is None or fi >= len(vals):
+            return
+        raw = vals[fi]
+        if raw is None or not math.isfinite(raw) or raw < 0 or int(raw) != raw:
+            return
+        code = int(raw)
+        if code == self._last_fault:
+            return
+        cleared = code == 0 and self._last_fault not in (None, 0)
+        self._last_fault = code
+        self.lbl_fault.setToolTip("")
+        if code:
+            self._clear_enable()
+        self._show_fault()
+        if (code & PHASE_OC_ISR) and self.io.is_open():
+            self.request_config()
+        if cleared:
+            self.statusbar.flash("设备已清除故障")
+
+    def _show_fault(self):
+        code = self._last_fault
+        active = code not in (None, 0)
+        connected = self.io.is_open()
+        self.btn_enable.setEnabled(connected and not active)
+        self.btn_clear_fault.setEnabled(connected and active)
+        self._update_calibration_button()
+        if code is None:
+            self.lbl_fault.setText("—")
+        elif code == 0:
+            self.lbl_fault.setText("无故障")
+        else:
+            # 多故障并发: 展开成文本, 用 / 连接 (如 "母线过压/母线欠压")
+            self.lbl_fault.setText("/".join(fault_texts(code)))
+        color = theme.RED if active else theme.GREEN if code == 0 else theme.FG_DIM
+        self.lbl_fault.setStyleSheet(
+            "color:%s;background:transparent;font-weight:600;" % color)
+        # 状态灯 (故障码来自固件解析, 位掩码用 & 判断)
         w = self.left.status_widgets
-        self._set_dot(w["enabled"], theme.GREEN if self._enabled else theme.FG_FAINT)
+        self._set_dot(w["enabled"],
+                      theme.GREEN if self._enable_requested else theme.FG_FAINT)
         self._set_dot(w["ok"], theme.GREEN if code == 0 else theme.FG_FAINT)
         for key, _name, kind in STATUS_ITEMS:
             if isinstance(kind, int):
-                self._set_dot(w[key], theme.RED if code == kind else theme.FG_FAINT)
+                self._set_dot(w[key], theme.RED if (code and (code & kind)) else theme.FG_FAINT)
 
     @staticmethod
     def _set_dot(lb, color):
@@ -1132,5 +1269,5 @@ class MainWindow(QWidget):
         if self.recorder.is_active():
             self._stop_record(auto=True, notify=False)
         self.save_cfg()
-        self.io.close()
+        self.disconnect()
         super().closeEvent(ev)

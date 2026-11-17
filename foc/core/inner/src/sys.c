@@ -1,5 +1,7 @@
 #include "sys.h"
 #include "cdc_acm.h"
+#include "log.h"
+#include "hpm_ewdg_drv.h"
 
 static void sys_init(void)
 {
@@ -103,23 +105,8 @@ static void sys_pmp_init(void)
 
 static void sys_console_init(void)
 {
-	console_config_t cfg;
-
-	/* 先配引脚再开时钟: 否则 RX 电平跳变会被当成起始位 */
-	HPM_IOC->PAD[SYS_CONSOLE_TX_PAD].FUNC_CTL = SYS_CONSOLE_TX_FUNC;
-	HPM_IOC->PAD[SYS_CONSOLE_RX_PAD].FUNC_CTL = SYS_CONSOLE_RX_FUNC;
-
-	clock_add_to_group(SYS_CONSOLE_UART_CLK, 0);
-
-	cfg.type = CONSOLE_TYPE_UART;
-	cfg.base = (uint32_t)SYS_CONSOLE_UART;
-	cfg.src_freq_in_hz = clock_get_frequency(SYS_CONSOLE_UART_CLK);
-	cfg.baudrate = SYS_CONSOLE_BAUDRATE;
-
-	if (console_init(&cfg) != status_success) {
-		while (1) {
-		}
-	}
+	/* printf 底层改为非阻塞环形缓冲 (log.c), 这里只初始化 UART */
+	log_uart_init();
 }
 
 void sys_board_init(void)
@@ -143,4 +130,37 @@ void sys_delay_us(uint32_t us)
 void sys_delay_ms(uint32_t ms)
 {
 	clock_cpu_delay_ms(ms);
+}
+
+/* 硬件看门狗: 超时 ~500ms 复位 MCU.
+ * 由 FOC 任务喂狗, ADC 计数器用于验证中断仍在运行. */
+void sys_wdg_init(void)
+{
+	ewdg_config_t cfg;
+
+	clock_add_to_group(clock_watchdog0, 0);
+	ewdg_get_default_config(HPM_EWDG0, &cfg);
+
+	/* 计数时钟源: 默认 cnt_clk_sel=ext_osc(24MHz 外部晶振).
+	 * 必须设置 cnt_src_freq, 否则 ewdg_init 因 cnt_src_freq==0 返回
+	 * invalid_argument, WDT_EN 永远写不进去 (看门狗形同虚设)。 */
+	cfg.cnt_src_freq = clock_get_frequency(clk_osc0clk0);
+
+	/* 超时 500ms: ADC 中断停更 500ms 触发硬件复位.
+	 * use_lowlevel_timeout=false 时用 µs 单位 */
+	cfg.ctrl_config.use_lowlevel_timeout = false;
+	cfg.ctrl_config.timeout_interrupt_us = 400000U; /* 400ms 触发中断 */
+	cfg.ctrl_config.timeout_reset_us     = 500000U; /* 500ms 触发复位 */
+	cfg.int_rst_config.enable_timeout_reset     = true;
+	cfg.int_rst_config.enable_timeout_interrupt = false;
+	cfg.enable_watchdog = true;
+
+	if (ewdg_init(HPM_EWDG0, &cfg) != status_success) {
+		printf("wdg: init fail\n");
+	}
+}
+
+void sys_wdg_feed(void)
+{
+	ewdg_refresh(HPM_EWDG0);
 }

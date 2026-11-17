@@ -48,13 +48,46 @@ FROM_VOFA = _parsed is not None
 from .fwconfig import load as _load_fw
 
 _FW = _load_fw()
-_DEFAULT_FAULT_TEXT = {0: "无", 1: "相过流", 2: "母线过压", 3: "母线欠压", 4: "ADC故障"}
-FAULT_TEXT = dict(_FW.faults) if _FW.faults else dict(_DEFAULT_FAULT_TEXT)
+
+# 故障位掩码表: key = 掩码值 (1<<bit), value = 中文文本.
+# 固件 foc.h 的 FOC_FAULT_* 现在是位掩码, 波形 fault 通道上报的是 errors_code 位掩码,
+# 多故障可并发 (如 0x06 = 过压|欠压), 故这里按"掩码值 -> 文本"映射.
+_DEFAULT_FAULT_TEXT = {
+    0: "无",
+    1 << 0: "相过流",
+    1 << 1: "母线过压",
+    1 << 2: "母线欠压",
+    1 << 3: "ADC故障",
+    1 << 4: "母线过流",
+    1 << 5: "相过流（快速关断）",
+    1 << 6: "编码器故障",
+}
+
+# 用固件解析结果覆盖默认值; 固件现在解析出的是 bit -> 文本, 需转成 掩码值 -> 文本
+_fw_by_mask = {1 << bit: text for bit, text in _FW.faults.items()}
+FAULT_TEXT = {**_DEFAULT_FAULT_TEXT, **_fw_by_mask}
 
 
 def _fault_text(suffix, default_code, default_text):
     code = _FW.fault_code(suffix, default_code)
-    return _FW.faults.get(code, default_text)
+    return _fw_by_mask.get(code, default_text)
+
+
+def fault_texts(mask):
+    """把故障位掩码展开成中文文本列表 (多故障并发时逐个列出)."""
+    if mask is None:
+        return []
+    if mask == 0:
+        return ["无"]
+    out = []
+    m = int(mask)
+    bit = 0
+    while m:
+        if m & 1:
+            out.append(FAULT_TEXT.get(1 << bit, "代码 %d" % (1 << bit)))
+        m >>= 1
+        bit += 1
+    return out
 
 
 def index_of(name):
@@ -76,14 +109,18 @@ def indices_of(*names):
             out.append(i)
     return out
 
-# 驱动器状态灯: (键, 显示名, 类型)  类型 int=故障码; str=特殊含义
+# 驱动器状态灯: (键, 显示名, kind)  kind 为位掩码值(1<<bit), 用 code & kind 判断;
+# 特殊项 "enabled"/"ok" 不参与位运算.
 STATUS_ITEMS = [
-    ("enabled", "电机使能", "enabled"),
-    ("ok",      "运行正常", "ok"),
-    ("f_oc",  _fault_text("PHASE_OC", 1, "相过流"),        _FW.fault_code("PHASE_OC", 1)),
-    ("f_ov",  _fault_text("OVER_VOLTAGE", 2, "母线过压"),  _FW.fault_code("OVER_VOLTAGE", 2)),
-    ("f_uv",  _fault_text("UNDER_VOLTAGE", 3, "母线欠压"), _FW.fault_code("UNDER_VOLTAGE", 3)),
-    ("f_adc", _fault_text("ADC", 4, "ADC故障"),            _FW.fault_code("ADC", 4)),
+    ("enabled", "已请求使能", "enabled"),
+    ("ok",      "无故障", "ok"),
+    ("f_oc",  _fault_text("PHASE_OC", 1 << 0, "相过流"),        _FW.fault_code("PHASE_OC", 1 << 0)),
+    ("f_ov",  _fault_text("OVER_VOLTAGE", 1 << 1, "母线过压"),  _FW.fault_code("OVER_VOLTAGE", 1 << 1)),
+    ("f_uv",  _fault_text("UNDER_VOLTAGE", 1 << 2, "母线欠压"), _FW.fault_code("UNDER_VOLTAGE", 1 << 2)),
+    ("f_adc", _fault_text("ADC", 1 << 3, "ADC故障"),            _FW.fault_code("ADC", 1 << 3)),
+    ("f_ibus", "母线过流", _FW.fault_code("IBUS_OC", 1 << 4)),
+    ("f_oc_isr", "相过流（快）", _FW.fault_code("PHASE_OC_ISR", 1 << 5)),
+    ("f_enc", "编码器故障", _FW.fault_code("ENCODER", 1 << 6)),
 ]
 
 

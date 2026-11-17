@@ -2,6 +2,7 @@
 import unittest
 
 from focscope.channels import ChannelModel, NCH, CHANNELS, FAULT_TEXT
+from focscope.fwconfig import _parse_faults
 
 
 class TestChannelModel(unittest.TestCase):
@@ -36,6 +37,38 @@ class TestChannelModel(unittest.TestCase):
         self.assertIn("母线电压", CHANNELS[9][1])
         self.assertIn("母线电流", CHANNELS[21][1])
         self.assertEqual(FAULT_TEXT[0], "无")
+
+    def test_reads_c_block_comment_on_fast_overcurrent_code(self):
+        labels, codes = _parse_faults(
+            "#define FOC_FAULT_NONE 0\n"
+            "#define FOC_FAULT_PHASE_OC_ISR 6 /* 相过流硬限幅 */\n"
+            "#define FOC_FAULT_ENCODER 7 // 编码器停更\n"
+        )
+        self.assertEqual(codes["PHASE_OC_ISR"], 6)
+        self.assertEqual(labels[6], "相过流硬限幅")
+        self.assertEqual(labels[7], "编码器停更")
+
+    def test_parses_bitmask_faults(self):
+        # 新版固件: 位掩码 (1u << n)
+        labels, codes = _parse_faults(
+            "#define FOC_FAULT_PHASE_OC (1u << 0)\n"
+            "#define FOC_FAULT_OVER_VOLTAGE (1u << 1) /* 母线过压 */\n"
+            "#define FOC_FAULT_UNDER_VOLTAGE (1u << 2) /* 母线欠压 */\n"
+        )
+        self.assertEqual(codes["PHASE_OC"], 1)
+        self.assertEqual(codes["OVER_VOLTAGE"], 2)
+        self.assertEqual(codes["UNDER_VOLTAGE"], 4)
+        # labels 的 key 是 bit 序号
+        self.assertEqual(labels[1], "母线过压")
+        self.assertEqual(labels[2], "母线欠压")
+
+    def test_fault_texts_expands_concurrent_faults(self):
+        from focscope.channels import fault_texts
+        mask = (1 << 1) | (1 << 2)  # 过压 | 欠压
+        texts = fault_texts(mask)
+        self.assertIn("母线过压", texts)
+        self.assertIn("母线欠压", texts)
+        self.assertEqual(fault_texts(0), ["无"])
 
 
 if __name__ == "__main__":
