@@ -14,10 +14,14 @@ build_*/
 *.su
 
 # ===== IDE / CMake 生成物 =====
-# 策略：SES 工程文件（.emProject / .emSession / .jlink / *.json）入库，
+# 策略：SES 工程文件（.emProject / .jlink / *.json）入库，
 #       克隆后可直接打开工程；只忽略编译输出。
+# 例外：.emSession 是 SES 的调试会话状态（断点/窗口布局），每次调试都会重写，
+#       已由 6e584ff 移出跟踪，这里显式忽略，别再让它以未跟踪文件的形式冒出来。
 # 注意：这里不能用 "foc/hpm5e00evk_flash_xip_debug/" 整目录忽略，
 #       因为 git 无法对被忽略目录内部的文件做反向放行（! 规则失效）。
+*.emSession
+.workbuddy/
 foc/hpm5e00evk_flash_xip_debug/segger_embedded_studio/Output/
 foc/hpm5e00evk_flash_xip_debug/build_tmp/
 foc/hpm5e00evk_flash_xip_debug/CMakeFiles/
