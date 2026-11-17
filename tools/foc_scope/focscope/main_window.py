@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import theme
-from .channels import ChannelModel, FAULT_TEXT, NCH, CHANNELS, index_of, STATUS_ITEMS
+from .channels import ChannelModel, NCH, CHANNELS, index_of, STATUS_ITEMS, fault_texts
 from .fwconfig import load as _load_fw
 from .buffers import DataStore
 from .protocol import CMD, HEARTBEAT_INTERVAL_MS, MODES
@@ -33,7 +33,7 @@ _FW = _load_fw()
 _CUR_LIM = _FW.get_float("current_limit", 8.0)
 _VEL_LIM = _FW.get_float("velocity_limit", 30.0)
 DEFAULT_FS = _FW.fs or 5000.0
-PHASE_OC_ISR = _FW.fault_code("PHASE_OC_ISR", 6)
+PHASE_OC_ISR = _FW.fault_code("PHASE_OC_ISR", 1 << 5)
 
 TARGET_DEFS = {
     # (标签, 命令键, 最小, 最大, 步长) —— 量程取自固件 current_limit / velocity_limit
@@ -603,7 +603,7 @@ class MainWindow(QWidget):
         if extra:
             msg += " | " + " ".join(extra)
         self.statusbar.flash(msg)
-        if self._last_fault == PHASE_OC_ISR:
+        if self._last_fault and (self._last_fault & PHASE_OC_ISR):
             self._show_phase_trip(kv)
 
     def _show_phase_trip(self, kv):
@@ -818,7 +818,6 @@ class MainWindow(QWidget):
         fi = index_of("fault")
         if fi is not None and fi < len(vals) and vals[fi] is not None:
             fault = int(round(vals[fi]))
-        st = self.left.steppers
 
         def sv(k):
             s = st.get(k)
@@ -838,7 +837,7 @@ class MainWindow(QWidget):
             "样本数": "%d" % self.recorder.count,
             "时长": "%.3f s" % self.recorder.duration(),
             "运行模式": mode,
-            "故障": FAULT_TEXT.get(fault, "?"),
+            "故障": "/".join(fault_texts(fault)) if fault else "无",
             "读数": "Iq=%s Iq_set=%s vel=%s vel_set=%s Vbus=%s" %
                     (rd("Iq"), rd("Iq_set"), rd("vel"), rd("vel_set"), rd("Vbus")),
             "参数": "电流Kp=%s 电流Ki=%s 电流BW=%s 速度Kp=%s 速度Ki=%s 位置Kp=%s" %
@@ -1061,7 +1060,7 @@ class MainWindow(QWidget):
         if code:
             self._clear_enable()
         self._show_fault()
-        if code == PHASE_OC_ISR and self.io.is_open():
+        if (code & PHASE_OC_ISR) and self.io.is_open():
             self.request_config()
         if cleared:
             self.statusbar.flash("设备已清除故障")
@@ -1073,19 +1072,24 @@ class MainWindow(QWidget):
         self.btn_enable.setEnabled(connected and not active)
         self.btn_clear_fault.setEnabled(connected and active)
         self._update_calibration_button()
-        self.lbl_fault.setText("—" if code is None else
-                               FAULT_TEXT.get(code, f"代码 {code}"))
+        if code is None:
+            self.lbl_fault.setText("—")
+        elif code == 0:
+            self.lbl_fault.setText("无故障")
+        else:
+            # 多故障并发: 展开成文本, 用 / 连接 (如 "母线过压/母线欠压")
+            self.lbl_fault.setText("/".join(fault_texts(code)))
         color = theme.RED if active else theme.GREEN if code == 0 else theme.FG_DIM
         self.lbl_fault.setStyleSheet(
             "color:%s;background:transparent;font-weight:600;" % color)
-        # 状态灯 (故障码来自固件解析)
+        # 状态灯 (故障码来自固件解析, 位掩码用 & 判断)
         w = self.left.status_widgets
         self._set_dot(w["enabled"],
                       theme.GREEN if self._enable_requested else theme.FG_FAINT)
         self._set_dot(w["ok"], theme.GREEN if code == 0 else theme.FG_FAINT)
         for key, _name, kind in STATUS_ITEMS:
             if isinstance(kind, int):
-                self._set_dot(w[key], theme.RED if code == kind else theme.FG_FAINT)
+                self._set_dot(w[key], theme.RED if (code and (code & kind)) else theme.FG_FAINT)
 
     @staticmethod
     def _set_dot(lb, color):

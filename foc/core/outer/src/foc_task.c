@@ -125,6 +125,8 @@ static void enter_state(tFSMState state)
 		foc_arm();
 		if (!FOC.is_armed)
 			foc_request_stage(IDLE);
+		else
+			FOC.statusword.status.switched_on = 1;
 		break;
 	case CALIBRATION:
 		calibration_start();
@@ -147,6 +149,7 @@ static void exit_state(tFSMState state)
 		sFSM.state_next_ready = 1;
 		break;
 	case RUN:
+		FOC.statusword.status.switched_on = 0;
 		sFSM.state_next_ready = 1;
 		break;
 	case CALIBRATION:
@@ -162,13 +165,8 @@ static void exit_state(tFSMState state)
 	}
 }
 
-/* 任务级母线保护，返回故障码，0 = 正常。
- *
- * L4 修正: 欠压阈值改为固定比较, 不再与滤波值挂钩, 否则缓慢下跌时
- *         保护会把自己关掉; 阈值 0 表示禁用.
- * L5 修正: 过压/欠压去抖改为"连续 N 次 1kHz 新采样"而不是任务调用次数.
- *         电压 1kHz 更新, 任务 5kHz 执行, 原"3次"实为同一采样重复比较. */
-static uint8_t foc_protection_check(void)
+/* 任务级母线保护，返回故障位掩码，0 = 正常（多故障可并发）。 */
+static uint32_t foc_protection_check(void)
 {
 	/* 电压去抖: 只在有新的 1kHz 电压采样 (adc_voltage_frames 自增) 时才计数 */
 	static uint32_t last_volt_frames = 0;
@@ -176,6 +174,7 @@ static uint8_t foc_protection_check(void)
 	static uint32_t uv_new_cnt = 0;
 	static uint32_t ibus_new_cnt = 0;
 
+	uint32_t faults = FOC_FAULT_NONE;
 	float vbus = FOC.Vbus;
 	bool new_volt_sample = (FOC.adc_voltage_frames != last_volt_frames);
 
@@ -185,7 +184,7 @@ static uint8_t foc_protection_check(void)
 	/* 母线电流保护: 滤波值 + 新采样去抖 */
 	if (FOC.Ibus_filt > Config.protect_i_bus_max) {
 		if (new_volt_sample && (++ibus_new_cnt >= 3U))
-			return FOC_FAULT_IBUS_OC;
+			faults |= FOC_FAULT_IBUS_OC;
 	} else {
 		ibus_new_cnt = 0;
 	}
@@ -193,7 +192,7 @@ static uint8_t foc_protection_check(void)
 	/* 过压: 需连续 3 次真实新采样 */
 	if (vbus > Config.protect_over_voltage) {
 		if (new_volt_sample && (++ov_new_cnt >= 3U))
-			return FOC_FAULT_OVER_VOLTAGE;
+			faults |= FOC_FAULT_OVER_VOLTAGE;
 	} else {
 		ov_new_cnt = 0;
 	}
@@ -203,12 +202,12 @@ static uint8_t foc_protection_check(void)
 	if ((Config.protect_under_voltage > 0.0f) &&
 	    (vbus < Config.protect_under_voltage)) {
 		if (new_volt_sample && (++uv_new_cnt >= 5U))
-			return FOC_FAULT_UNDER_VOLTAGE;
+			faults |= FOC_FAULT_UNDER_VOLTAGE;
 	} else {
 		uv_new_cnt = 0;
 	}
 
-	return FOC_FAULT_NONE;
+	return faults;
 }
 
 static void foc_check_and_trip(void)
@@ -217,18 +216,18 @@ static void foc_check_and_trip(void)
 	static TickType_t last_change_tick;
 	static uint32_t last_phase_seq;
 	static TickType_t last_seq_tick;
-	uint8_t fault = foc_protection_check();
+	uint32_t fault = foc_protection_check();
 	float vbus = FOC.Vbus;
 	uint32_t frames;
 
 	if ((vbus <= 2.0f) || (vbus >= 70.0f))
-		fault = FOC_FAULT_ADC;
+		fault |= FOC_FAULT_ADC;
 
 	/* 连续丢帧: adc.c 的计数在有效帧清零、无效帧自增, 必须任务直接读,
 	 * 不能依赖回调镜像 (回调只在有效帧被调用, 镜像恒为 0) */
 	FOC.adc_current_missed = adc_current_missed();
 	if (FOC.adc_current_missed >= 3U)
-		fault = FOC_FAULT_ADC;
+		fault |= FOC_FAULT_ADC;
 
 	/* 按真实时间判停更: 任务补跑间隔只有几微秒, 按次数会误报 */
 	frames = FOC.adc_current_frames;
@@ -237,13 +236,13 @@ static void foc_check_and_trip(void)
 		last_change_tick = xTaskGetTickCount();
 	} else if ((xTaskGetTickCount() - last_change_tick) >
 		   pdMS_TO_TICKS(10)) {
-		fault = FOC_FAULT_ADC;
+		fault |= FOC_FAULT_ADC;
 	}
 
 	if (FOC.adc_voltage_missed >= 3U)
-		fault = FOC_FAULT_ADC;
+		fault |= FOC_FAULT_ADC;
 	if (FOC.adc_ibus_missed >= 3U)
-		fault = FOC_FAULT_ADC;
+		fault |= FOC_FAULT_ADC;
 
 	/* 编码器停更检测: phase_seq 应每 200µs (5kHz) 递增,
 	 * 超过 5ms 没变说明 SPI/DMA 链路断了 */
@@ -252,12 +251,12 @@ static void foc_check_and_trip(void)
 		last_seq_tick = xTaskGetTickCount();
 	} else if ((xTaskGetTickCount() - last_seq_tick) >
 		   pdMS_TO_TICKS(ENCODER_SEQ_TIMEOUT_MS)) {
-		fault = FOC_FAULT_ENCODER;
+		fault |= FOC_FAULT_ENCODER;
 	}
 
 	/* ISR 级硬限幅已关断并置码, 任务只需补做状态切换 */
-	if (FOC.fault_code == FOC_FAULT_PHASE_OC_ISR)
-		fault = FOC_FAULT_PHASE_OC_ISR;
+	if (FOC.fault_code & FOC_FAULT_PHASE_OC_ISR)
+		fault |= FOC_FAULT_PHASE_OC_ISR;
 
 	if (fault != FOC_FAULT_NONE) {
 		/* 先关断再打印: printf 走阻塞 UART, 一行约 5ms.
@@ -266,7 +265,8 @@ static void foc_check_and_trip(void)
 		float vbus_at_fault = FOC.Vbus;
 
 		foc_disarm();
-		FOC.fault_code = fault;
+		FOC.fault_code |= fault;
+		FOC.statusword.errors.errors_code |= (uint16_t)fault;
 		foc_fault_request(IDLE);
 		printf("FAULT %u: Vbus %dmV, I %.2fA (uv %dmV ov %dmV)",
 		       (unsigned)fault, (int)(vbus_at_fault * 1000.0f),
@@ -277,7 +277,7 @@ static void foc_check_and_trip(void)
 			printf(" calib_step=%d", calibration_step());
 		if (foc_get_stage() == ANTICOGGING)
 			printf(" anticog_step=%d", anticogging_step());
-		if (fault == FOC_FAULT_PHASE_OC_ISR) {
+		if (fault & FOC_FAULT_PHASE_OC_ISR) {
 			foc_phase_trip_t trip;
 
 			if (foc_read_phase_trip(&trip)) {
@@ -347,8 +347,10 @@ static void Task_FOC(void *argument)
 
 		if (s_clear_fault_pending) {
 			s_clear_fault_pending = false;
-			if (sFSM.state == IDLE && !FOC.is_armed)
+			if (sFSM.state == IDLE && !FOC.is_armed) {
 				FOC.fault_code = FOC_FAULT_NONE;
+				FOC.statusword.errors.errors_code = 0;
+			}
 		}
 
 		if (slow_tick)
@@ -360,7 +362,8 @@ static void Task_FOC(void *argument)
 			if (!midpoint_done) {
 				midpoint_done = true;
 				if (!FOC.adc_ready && !foc_adc_midpoint()) {
-					FOC.fault_code = FOC_FAULT_ADC;
+					FOC.fault_code |= FOC_FAULT_ADC;
+					FOC.statusword.errors.adc_fault = 1;
 					printf("ADC midpoint calibration "
 					       "failed\n");
 					foc_fault_request(IDLE);
@@ -370,8 +373,10 @@ static void Task_FOC(void *argument)
 			 * foc_init() 在调度器启动前运行, 彼时全局中断关闭,
 			 * 第一次标定必然失败并留下 FOC_FAULT_ADC; 任务里重试后应清除. */
 			if (FOC.adc_ready && (foc_get_stage() == BOOT_UP)) {
-				if (FOC.fault_code == FOC_FAULT_ADC)
-					FOC.fault_code = FOC_FAULT_NONE;
+				if (FOC.fault_code & FOC_FAULT_ADC) {
+					FOC.fault_code &= ~FOC_FAULT_ADC;
+					FOC.statusword.errors.adc_fault = 0;
+				}
 				foc_clear_fault_req();
 				foc_request_stage(IDLE);
 			}

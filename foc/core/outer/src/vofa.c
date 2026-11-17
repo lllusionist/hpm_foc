@@ -10,10 +10,36 @@ uint8_t send_buf[MAX_BUFFER_SIZE];
 
 /* 读取设备参数的请求标志 (由 USB 命令置位, 在 vofa 任务包边界发出, 避免拆包) */
 static volatile uint8_t cfg_dump_req = 0;
+/* 读取标准状态字的请求标志 (0x62) */
+static volatile uint8_t sw_dump_req = 0;
 
 void vofa_request_config(void)
 {
 	cfg_dump_req = 1;
+}
+
+void vofa_request_statusword(void)
+{
+	sw_dump_req = 1;
+}
+
+/* 以一行 ASCII 回传标准状态字: $FOCSW,STATUS=0xXX,ERRORS=0xXX,ARM=%d,ON=%d,REACH=%d\n */
+static bool vofa_send_statusword(void)
+{
+	static char line[64];
+
+	/* target_reached 属 Controller 语义, 发送时动态同步 (不跨层维护) */
+	FOC.statusword.status.target_reached = Controller.target_reached ? 1 : 0;
+
+	int n = snprintf(
+	    line, sizeof(line),
+	    "$FOCSW,STATUS=0x%04X,ERRORS=0x%04X,ARM=%d,ON=%d,REACH=%d\n",
+	    FOC.statusword.status.status_code, FOC.statusword.errors.errors_code,
+	    (int)FOC.statusword.status.armed, (int)FOC.statusword.status.switched_on,
+	    (int)FOC.statusword.status.target_reached);
+	if (n <= 0 || n >= (int)sizeof(line) - 1)
+		return false;
+	return cdc_acm_transmit((const uint8_t *)line, (uint16_t)n);
 }
 
 /* 以一行 ASCII 回传当前参数: $FOCFG,KEY=VAL,...\n */
@@ -99,7 +125,7 @@ static void vofa_snapshot(float *d)
 	d[17] = FOC.Va;			     /* A 相电压 (V) */
 	d[18] = FOC.Vb;			     /* B 相电压 (V) */
 	d[19] = FOC.Vc;			     /* C 相电压 (V) */
-	d[20] = (float)FOC.fault_code;	     /* 故障码 */
+	d[20] = (float)FOC.statusword.errors.errors_code; /* 故障位掩码 */
 	d[21] = FOC.Ibus_filt;		     /* 母线电流 (A) */
 }
 
@@ -199,6 +225,12 @@ static void Vofa_task(void *argument)
 			cfg_dump_req = 0;
 			if (!vofa_send_config())
 				cfg_dump_req = 1;
+			continue;
+		}
+		if (sw_dump_req) {
+			sw_dump_req = 0;
+			if (!vofa_send_statusword())
+				sw_dump_req = 1;
 			continue;
 		}
 		if (st == 0U)

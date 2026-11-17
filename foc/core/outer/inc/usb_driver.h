@@ -43,6 +43,8 @@
 
 // 读参数: 固件回一行 ASCII($FOCFG,...), 由 vofa 任务整包发出
 #define USB_CMD_GET_CONFIG 0x3E
+// 读状态字: 固件回一行 ASCII($FOCSW,...), 由 vofa 任务整包发出
+#define USB_CMD_GET_STATUSWORD 0x62
 
 // 电流阶跃测试: 40kHz 采 Iq 后整包回传 "$STEP,..." + 浮点数据
 #define USB_CMD_STEP_TEST 0x60

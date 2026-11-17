@@ -28,7 +28,7 @@ bool foc_read_phase_trip(foc_phase_trip_t *trip)
 	bool valid;
 
 	taskENTER_CRITICAL();
-	valid = FOC.fault_code == FOC_FAULT_PHASE_OC_ISR;
+	valid = (FOC.fault_code & FOC_FAULT_PHASE_OC_ISR) != 0;
 	if (valid)
 		*trip = phase_trip;
 	taskEXIT_CRITICAL();
@@ -272,6 +272,7 @@ void foc_disarm(void)
 	if (FOC.is_armed)
 		disable_bldc_pwm_output();
 	FOC.is_armed = false;
+	FOC.statusword.status.armed = 0;
 	resistance_voltage = 0.0f;
 	if (step_state == 1U)
 		step_state = 0U;
@@ -298,7 +299,8 @@ void foc_disarm(void)
 void foc_arm(void)
 {
 	if (!FOC.adc_ready) {
-		FOC.fault_code = FOC_FAULT_ADC;
+		FOC.fault_code |= FOC_FAULT_ADC;
+		FOC.statusword.errors.adc_fault = 1;
 		return;
 	}
 	if (FOC.is_armed)
@@ -327,6 +329,7 @@ void foc_arm(void)
 	arm_adc_frame = FOC.adc_current_frames;
 	enable_bldc_pwm_output();
 	FOC.is_armed = true;
+	FOC.statusword.status.armed = 1;
 
 	taskEXIT_CRITICAL();
 }
@@ -506,8 +509,10 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 						  : encoder.phase;
 		phase_trip.kp = FOC.current_ctrl_p_gain;
 		phase_trip.ki = FOC.current_ctrl_i_gain;
-		FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;
+		FOC.fault_code |= FOC_FAULT_PHASE_OC_ISR;
+		FOC.statusword.errors.phase_oc = 1;
 		FOC.is_armed = false;
+		FOC.statusword.status.armed = 0;
 		if (step_state == 1U)
 			step_state = 0U;
 		return;
@@ -638,6 +643,9 @@ void foc_adc_callback(uint16_t ia_raw, uint16_t ib_raw, uint16_t ic_raw)
 
 void foc_init(void)
 {
+	FOC.fault_code = FOC_FAULT_NONE;
+	FOC.statusword.status.status_code = 0;
+	FOC.statusword.errors.errors_code = 0;
 	FOC.Vbus = VBUS_DEFAULT;
 	FOC.Vbus_filt = VBUS_DEFAULT;
 	FOC.Id_set = 0;
@@ -687,7 +695,9 @@ void foc_init(void)
 	FOC.adc_voltage_missed = 0U;
 	FOC.adc_ibus_missed = 0U;
 	adc1_init();
-	if (!foc_adc_midpoint())
-		FOC.fault_code = FOC_FAULT_ADC;
+	if (!foc_adc_midpoint()) {
+		FOC.fault_code |= FOC_FAULT_ADC;
+		FOC.statusword.errors.adc_fault = 1;
+	}
 	adc_callback_set(foc_adc_callback);
 }

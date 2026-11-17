@@ -35,15 +35,16 @@
  * 这个开关留着做回归: 改成 0 就能再测一遍 Voff, 平时必须是 1. */
 #define DT_COMP_IN_VOLTAGE 1
 
-/* 故障码 */
-#define FOC_FAULT_NONE 0
-#define FOC_FAULT_PHASE_OC 1	    /* 相过流 (5kHz 任务检测) */
-#define FOC_FAULT_OVER_VOLTAGE 2    /* 母线过压 */
-#define FOC_FAULT_UNDER_VOLTAGE 3   /* 母线欠压 */
-#define FOC_FAULT_ADC 4             /* ADC / 采样异常 */
-#define FOC_FAULT_IBUS_OC 5         /* 母线过流 */
-#define FOC_FAULT_PHASE_OC_ISR 6    /* 相过流硬限幅 (40kHz ISR 检测) */
-#define FOC_FAULT_ENCODER 7         /* 编码器停更或错误率过高 */
+/* 故障码：位掩码，可多故障并发（借鉴 dgm 的位域状态字设计）。
+ * 每个故障占一个 bit，用 |= 置位、& 判断，避免多故障同时发生时被覆盖。 */
+#define FOC_FAULT_NONE (0x0000u)
+#define FOC_FAULT_PHASE_OC (1u << 0)     /* 相过流 (5kHz 任务检测) */
+#define FOC_FAULT_OVER_VOLTAGE (1u << 1) /* 母线过压 */
+#define FOC_FAULT_UNDER_VOLTAGE (1u << 2) /* 母线欠压 */
+#define FOC_FAULT_ADC (1u << 3)          /* ADC / 采样异常 */
+#define FOC_FAULT_IBUS_OC (1u << 4)      /* 母线过流 */
+#define FOC_FAULT_PHASE_OC_ISR (1u << 5) /* 相过流硬限幅 (40kHz ISR 检测) */
+#define FOC_FAULT_ENCODER (1u << 6)      /* 编码器停更或错误率过高 */
 
 typedef struct {
 	float ia;
@@ -67,10 +68,38 @@ typedef struct {
 	float ki;
 } foc_phase_trip_t;
 
+/* 标准状态字（借鉴 dgm 的 tMCStatusword，CiA 402 极简子集）：
+ * 状态位与错误位分离，各自可用整体字段按字节收发，也可按 bit 读写。 */
+typedef struct {
+	union {
+		uint16_t status_code;
+		struct {
+			uint16_t switched_on : 1;    /* 电机已使能 */
+			uint16_t target_reached : 1; /* 控制目标到位 */
+			uint16_t armed : 1;          /* PWM 已使能 (foc_arm) */
+			uint16_t reserved : 13;
+		};
+	} status;
+
+	union {
+		uint16_t errors_code;
+		struct {
+			uint16_t phase_oc : 1;      /* 相过流 */
+			uint16_t over_voltage : 1;  /* 母线过压 */
+			uint16_t under_voltage : 1; /* 母线欠压 */
+			uint16_t adc_fault : 1;     /* ADC 采样异常 */
+			uint16_t ibus_oc : 1;       /* 母线过流 */
+			uint16_t encoder_fault : 1; /* 编码器停更 */
+			uint16_t reserved2 : 10;
+		};
+	} errors;
+} foc_statusword_t;
+
 typedef struct {
 
 	volatile bool is_armed;
-	volatile uint32_t fault_code; /* 0=正常, 见 FOC_FAULT_* */
+	volatile uint32_t fault_code; /* 位掩码, 0=正常, 见 FOC_FAULT_* */
+	volatile foc_statusword_t statusword; /* 标准状态字 (状态+错误分离) */
 	volatile bool adc_ready;
 	volatile uint32_t adc_current_frames;
 	volatile uint32_t adc_current_missed;

@@ -215,6 +215,10 @@ void USB_parse_frame(UsbFrame *frame)
 		vofa_request_config();
 		break;
 
+	case USB_CMD_GET_STATUSWORD:
+		vofa_request_statusword();
+		break;
+
 	// A/B 调试开关: 本函数在 USB 中断里跑, 不打 printf
 	case USB_CMD_SET_ANTICOG:
 		Config.anticogging_enable =

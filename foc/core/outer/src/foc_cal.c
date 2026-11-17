@@ -124,7 +124,8 @@ static bool cal_saved;
 void calibration_start(void)
 {
 	if (!FOC.adc_ready) {
-		FOC.fault_code = FOC_FAULT_ADC;
+		FOC.fault_code |= FOC_FAULT_ADC;
+		FOC.statusword.errors.adc_fault = 1;
 		foc_request_stage(IDLE);
 		mCalibStep = CS_NULL;
 		return;
