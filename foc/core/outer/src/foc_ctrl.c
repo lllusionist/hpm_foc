@@ -2,11 +2,13 @@
 #include "config.h"
 #include "encoder.h"
 #include "foc_task.h"
+#include "position_profile.h"
 #include <stdio.h>
 
 tController Controller;
 
 #define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
+#define POSITION_PROFILE_JERK_RAMP_S 0.05f
 
 // 低速摩擦前馈与速度增益调度; 电流值来自 Config 随电机档位变化
 // ENGAGE/RELEASE 速度阈值保持固定 (与电机无关)
@@ -18,6 +20,52 @@ tController Controller;
 
 static bool friction_boost;
 static bool friction_ff_en = true;
+static position_profile_t motion_profile;
+
+static void reset_position_profile(float position)
+{
+	float velocity = MIN(Config.profile_velocity, Config.velocity_limit);
+	position_profile_limits_t limits = {
+		.velocity = velocity * M_2PI,
+		.acceleration = Config.profile_accel * M_2PI,
+		.deceleration = Config.profile_decel * M_2PI,
+		.jerk = MIN(Config.profile_accel, Config.profile_decel) *
+			(M_2PI / POSITION_PROFILE_JERK_RAMP_S),
+	};
+
+	position_profile_reset(&motion_profile, position, limits);
+}
+
+static float track_position_profile(float velocity)
+{
+	float position = (float)encoder.count_aligned * (M_2PI / ENCODER_CPR_F);
+	float limit = motion_profile.limits.velocity * (1.0f / M_2PI);
+	float error, velocity_ref;
+	bool reached = false;
+
+	position_profile_set_target(&motion_profile, Controller.input_position);
+	position_profile_step(&motion_profile, CTRL_PERIOD);
+
+	Controller.pos_setpoint = motion_profile.reference.position;
+	Controller.vel_setpoint = motion_profile.reference.velocity *
+				 (1.0f / M_2PI);
+	Controller.cur_setpoint = 0.0f;
+
+	if (!position_profile_active(&motion_profile) &&
+	    fabsf(velocity) < Config.target_velcity_window) {
+		float target_error = position_profile_wrap_angle(
+		    motion_profile.target - position);
+
+		reached = fabsf(target_error) < Config.target_position_window;
+	}
+	Controller.target_reached = reached;
+
+	error = position_profile_wrap_angle(Controller.pos_setpoint - position);
+	velocity_ref = Controller.vel_setpoint + Config.pos_p_gain * error;
+	if (!(limit > 0.0f) || !isfinite(limit))
+		return 0.0f;
+	return CLAMP(velocity_ref, -limit, limit);
+}
 
 static const char *profile_name(int32_t p)
 {
@@ -67,6 +115,8 @@ void CONTROLLER_reset(void)
 	Controller.pos_setpoint = th_meas;
 	Controller.vel_setpoint = 0.0f;
 	Controller.cur_setpoint = 0.0f;
+	if (Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE)
+		reset_position_profile(th_meas);
 
 	Controller.vel_integrator = 0;
 
@@ -83,6 +133,10 @@ void CONTROLLER_reset(void)
 
 int CONTROLLER_set_op_mode(tControlMode mode)
 {
+	if (mode == CONTROL_MODE_POSITION_PROFILE &&
+	    Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE)
+		return 0;
+
 	Controller.ctrl_mode = mode;
 	CONTROLLER_reset();
 
@@ -103,6 +157,12 @@ int CONTROLLER_set_home(void)
 		float th_meas =
 		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
 		float pos_err = Controller.pos_setpoint - th_meas;
+		bool profile_mode =
+		    Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE;
+
+		if (profile_mode && position_profile_active(&motion_profile))
+			return -1;
+
 		while (pos_err > M_PI)
 			pos_err -= M_2PI;
 		while (pos_err < -M_PI)
@@ -117,11 +177,13 @@ int CONTROLLER_set_home(void)
 			encoder.pll_vel = 0;
 			encoder.count_in_cpr_prev = encoder.count_in_cpr;
 
-			Controller.input_position = 0;
-			Controller.input_position_buffer = 0;
-			Controller.pos_setpoint = 0;
-			Controller.vel_setpoint = 0;
-			Controller.cur_setpoint = 0;
+			if (!profile_mode) {
+				Controller.input_position = 0;
+				Controller.input_position_buffer = 0;
+				Controller.pos_setpoint = 0;
+				Controller.vel_setpoint = 0;
+				Controller.cur_setpoint = 0;
+			}
 
 			taskEXIT_CRITICAL();
 		} else {
@@ -243,6 +305,12 @@ void CONTROLLER_loop(void)
 		}
 	}
 
+	if (Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE &&
+	    ((stage != RUN) || !FOC.is_armed)) {
+		Controller.vel_setpoint = 0.0f;
+		Controller.target_reached = false;
+		return;
+	}
 	if ((stage != RUN) && (stage != ANTICOGGING))
 		return;
 
@@ -277,8 +345,11 @@ void CONTROLLER_loop(void)
 		}
 	} break;
 
-	case CONTROL_MODE_POSITION_FILTER:
-	case CONTROL_MODE_POSITION_PROFILE: {
+	case CONTROL_MODE_POSITION_PROFILE:
+		vel_des = track_position_profile(vel_meas);
+		break;
+
+	case CONTROL_MODE_POSITION_FILTER: {
 		// 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad
 		float th_meas =
 		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
