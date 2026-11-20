@@ -67,7 +67,7 @@ class AdcContractTests(unittest.TestCase):
 
     def test_raw_phase_overcurrent_precedes_all_active_pwm_paths(self):
         callback = FOC.split("void foc_adc_callback(", 1)[1]
-        trip = callback.index("FOC.fault_code = FOC_FAULT_PHASE_OC_ISR;")
+        trip = callback.index("FOC.fault_code |= FOC_FAULT_PHASE_OC_ISR;")
         for raw, phase in (("ia_raw", "ia"), ("ib_raw", "ib"), ("ic_raw", "ic")):
             self.assertRegex(callback[:trip], rf"float {phase} = .*{raw}")
             self.assertIn(f"fabsf({phase}) > limit", callback[:trip])

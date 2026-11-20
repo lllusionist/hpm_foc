@@ -394,9 +394,9 @@ static void Task_FOC(void *argument)
 			}
 			break;
 		case CALIBRATION:
-			if (slow_tick)
-				calibration_loop(); /* 校准 1kHz */
 			foc_check_and_trip();
+			if (slow_tick && FOC.fault_code == FOC_FAULT_NONE)
+				calibration_loop(); /* 校准 1kHz */
 			break;
 		case ANTICOGGING:
 			if (slow_tick) {

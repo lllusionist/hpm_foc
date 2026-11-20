@@ -252,8 +252,8 @@ void CONTROLLER_loop(void)
 		int32_t p = Controller.motor_profile_pending;
 	Controller.motor_profile_pending = -1;
 	Controller.enable_refused_pending = false;
-		if (FOC.is_armed) {
-			printf("motor profile: armed, refused\n");
+		if (FOC.is_armed || stage == CALIBRATION) {
+			printf("motor profile: drive busy, refused\n");
 		} else {
 			CONFIG_apply_motor_profile(p);
 			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
@@ -290,8 +290,8 @@ void CONTROLLER_loop(void)
 	if (Controller.config_cmd_pending != 0U) {
 		uint8_t cmd = Controller.config_cmd_pending;
 		Controller.config_cmd_pending = 0;
-		if (FOC.is_armed) {
-			printf("cfg cmd: motor armed, refused\n");
+		if (FOC.is_armed || stage == CALIBRATION) {
+			printf("cfg cmd: drive busy, refused\n");
 		} else if (cmd == 1U) {
 			printf("cfg save: %s\n",
 			       (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
