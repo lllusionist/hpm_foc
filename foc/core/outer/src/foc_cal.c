@@ -70,29 +70,39 @@ enum {
 };
 
 typedef struct {
+	float v_mag;
+	float i_mag;
+	float velocity;
+	float vd;
+	float vq;
+} flux_point_t;
+
+typedef struct {
+	flux_point_t sum;
+	uint32_t count;
+} flux_window_t;
+
+typedef struct {
+	flux_window_t window;
+	flux_point_t low_speed;
+	flux_point_t high_speed;
+	float resistance_estimate;
+	bool saturated;
+} flux_calibration_t;
+
+typedef struct {
 	tCalibStep step;
 	uint32_t ticks;
 	uint32_t valid_stages;
 	uint32_t overcurrent_ticks;
+	float drive_angle;
+	int16_t sample_index;
+	bool dir_runin_done;
 	bool exiting;
+	flux_calibration_t flux;
 } calibration_state_t;
 
 static calibration_state_t cal;
-static float phase_set;		 /* 电角度设定值 */
-static int16_t sample_count;	 /* 采样点下标 */
-static bool dir_pp_runin;	 /* 极对数标定: 预跑阶段是否已完成 */
-
-static float flux_v_sum, flux_i_sum; /* 电压/电流模长累加 */
-static float flux_v1, flux_i1, flux_v2, flux_i2;
-static float flux_vel1, flux_vel2; /* 两个转速点的实测机械转速 (rps) */
-static float flux_vel_sum;	   /* 转速窗口累加 (取平均, 避免撞上噪声尖峰) */
-static float flux_vq_sum;	   /* Vq 窗口累加 (同转速变电流测 R 用) */
-static float flux_vq_a;		   /* 高电流点的 Vq 均值 */
-static float flux_i_a;		   /* 高电流点的电流均值 */
-static float flux_r_est;	   /* 由 ΔVq 差算出的 R (反电势项抵消) */
-static float flux_vq_b;		   /* 第二转速点的 Vq 均值 */
-static float flux_vd_sum;	   /* Vd 窗口累加 (矢量差分法用) */
-static float flux_vd_a, flux_vd_b; /* 两个转速点的 Vd 均值 */
 
 /* J 标定: 加速->自由滑行, 摩擦相减: J = Kt·I/(2π·(a+ - a-)) */
 #define J_CAL_SAMPLES (150U)		       /* 每段采样点数 (1kHz -> 0.15s) */
@@ -111,9 +121,6 @@ static float j_slope(void)
 		return 0.0f;
 	return (n * j_sum_tv - j_sum_t * j_sum_v) / den * (float)CAL_LOOP_HZ;
 }
-
-static uint32_t flux_cnt;
-static bool flux_sat, flux_sat1, flux_sat2;
 
 /* 电阻: 自适应两点伏安法 */
 static float r_volt;	/* 当前注入电压 ures (V) */
@@ -185,15 +192,7 @@ void calibration_start(void)
 	FOC.calib_adv_angle = false;
 	FOC.vinj_acc = false;
 
-	phase_set = 0;
-	sample_count = 0;
 	memset(encoder_error_arr, 0, sizeof(encoder_error_arr));
-
-	/* 跨标定残留会混入 Vq1(实测 0.2985→0.6011), 每次必须清零 */
-	flux_v_sum = flux_i_sum = flux_vq_sum = flux_vd_sum = 0.0f;
-	flux_vel_sum = 0.0f;
-	flux_cnt = 0;
-	flux_r_est = 0.0f;
 
 	/* 回显实际生效参数, 便于确认配置已下发 */
 	printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm "
@@ -431,7 +430,7 @@ static void cal_rl_step(float ia_meas)
 		FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 		printf("ind: %.6f H (Iamp=%.3f Z=%.3f Vdc=%.3f Vamp=%.3f)\n",
 		       Config.phase_inductance, I_amp, Z, l_v_dc, l_v_amp);
-		phase_set = 0;
+		cal.drive_angle = 0;
 		cal.ticks = 0;
 		cal.step = CS_DIR_PP_START;
 	} break;
@@ -454,25 +453,26 @@ static void cal_dir_pp_step(float time, float calib_phase_vel,
 			taskENTER_CRITICAL();
 			encoder.shadow_count = 0;
 			taskEXIT_CRITICAL();
-			dir_pp_runin = false;
+			cal.dir_runin_done = false;
 			cal.ticks = 0;
-			phase_set = 0;
+			cal.drive_angle = 0;
 			cal.step = CS_DIR_PP_LOOP;
 		}
 		break;
 
 	case CS_DIR_PP_LOOP:
-		phase_set += calib_phase_vel / (float)CAL_LOOP_HZ;
-		calib_drag_if(Config.calib_current, phase_set,
+		cal.drive_angle += calib_phase_vel / (float)CAL_LOOP_HZ;
+		calib_drag_if(Config.calib_current, cal.drive_angle,
 			      calib_phase_vel);
-		if (!dir_pp_runin) {
-			if (phase_set >= total_calib_cycles * M_2PI) {
+		if (!cal.dir_runin_done) {
+			if (cal.drive_angle >= total_calib_cycles * M_2PI) {
 				taskENTER_CRITICAL();
 				encoder.shadow_count = 0;
 				taskEXIT_CRITICAL();
-				dir_pp_runin = true;
+				cal.dir_runin_done = true;
 			}
-		} else if (phase_set >= 2.0f * total_calib_cycles * M_2PI) {
+		} else if (cal.drive_angle >=
+			   2.0f * total_calib_cycles * M_2PI) {
 			FOC.calib_mode = false;
 			cal.step = CS_DIR_PP_END;
 		}
@@ -517,16 +517,16 @@ static void cal_encoder_step(void)
 {
 	switch (cal.step) {
 	case CS_ENCODER_START:
-		phase_set = 0;
+		cal.drive_angle = 0;
 		cal.ticks = 0;
-		sample_count = 0;
+		cal.sample_index = 0;
 		cal.step = CS_ENCODER_CW_LOOP;
 		break;
 
 	case CS_ENCODER_CW_LOOP:
-		if (sample_count <
+		if (cal.sample_index <
 		    (int32_t)(Config.pole_pairs * SAMPLES_PER_PPAIR)) {
-			float mech_phase = (phase_set + M_PI / 2.0f) /
+			float mech_phase = (cal.drive_angle + M_PI / 2.0f) /
 					   (float)Config.pole_pairs;
 			float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
 			if (mech_phase_wrapped < 0)
@@ -542,23 +542,23 @@ static void cal_encoder_step(void)
 				error -= ENCODER_CPR;
 			while (error < -ENCODER_CPR / 2)
 				error += ENCODER_CPR;
-			encoder_error_arr[sample_count] = error;
-			sample_count++;
-			phase_set += M_2PI / (float)SAMPLES_PER_PPAIR;
+			encoder_error_arr[cal.sample_index] = error;
+			cal.sample_index++;
+			cal.drive_angle += M_2PI / (float)SAMPLES_PER_PPAIR;
 		} else {
-			phase_set -= M_2PI / (float)SAMPLES_PER_PPAIR;
+			cal.drive_angle -= M_2PI / (float)SAMPLES_PER_PPAIR;
 			cal.ticks = 0;
-			sample_count--;
+			cal.sample_index--;
 			cal.step = CS_ENCODER_CCW_LOOP;
 		}
-		calib_drag_if(Config.calib_current, phase_set,
+		calib_drag_if(Config.calib_current, cal.drive_angle,
 			      (M_2PI / (float)SAMPLES_PER_PPAIR) *
 				  (float)CAL_LOOP_HZ);
 		break;
 
 	case CS_ENCODER_CCW_LOOP:
-		if (sample_count >= 0) {
-			float mech_phase = (phase_set + M_PI / 2.0f) /
+		if (cal.sample_index >= 0) {
+			float mech_phase = (cal.drive_angle + M_PI / 2.0f) /
 					   (float)Config.pole_pairs;
 			float mech_phase_wrapped = fmodf(mech_phase, M_2PI);
 			if (mech_phase_wrapped < 0)
@@ -574,17 +574,17 @@ static void cal_encoder_step(void)
 				error -= ENCODER_CPR;
 			while (error < -ENCODER_CPR / 2)
 				error += ENCODER_CPR;
-			encoder_error_arr[sample_count] =
-			    (encoder_error_arr[sample_count] + error) / 2;
-			sample_count--;
-			phase_set -= M_2PI / (float)SAMPLES_PER_PPAIR;
+			encoder_error_arr[cal.sample_index] =
+			    (encoder_error_arr[cal.sample_index] + error) / 2;
+			cal.sample_index--;
+			cal.drive_angle -= M_2PI / (float)SAMPLES_PER_PPAIR;
 			calib_drag_if(
-			    Config.calib_current, phase_set,
+			    Config.calib_current, cal.drive_angle,
 			    -(M_2PI / (float)SAMPLES_PER_PPAIR) *
 				(float)CAL_LOOP_HZ);
 		} else {
 			FOC.calib_mode = false;
-			sample_count = 0;
+			cal.sample_index = 0;
 			cal.ticks = 0;
 			cal.step = CS_ENCODER_END;
 		}
@@ -599,17 +599,17 @@ static void cal_encoder_step(void)
 		uint32_t total_samples =
 		    (uint32_t)Config.pole_pairs * SAMPLES_PER_PPAIR;
 		int window = (int)LUT_WINDOW;
-		if (sample_count == 0) {
+		if (cal.sample_index == 0) {
 			int64_t sum = 0;
 			for (uint32_t i = 0; i < total_samples; i++)
 				sum += encoder_error_arr[i];
 			Config.encoder_offset =
 			    (int32_t)(sum / (int64_t)total_samples);
 		}
-		if (sample_count < (int32_t)OFFSET_LUT_NUM) {
+		if (cal.sample_index < (int32_t)OFFSET_LUT_NUM) {
 			int64_t window_sum = 0;
 			for (int j = (-window) / 2; j < (window) / 2; j++) {
-				int index = (int)((int32_t)sample_count *
+				int index = (int)((int32_t)cal.sample_index *
 						  (int32_t)total_samples /
 						  (int32_t)OFFSET_LUT_NUM) +
 					    j;
@@ -622,16 +622,16 @@ static void cal_encoder_step(void)
 			int32_t window_avg = (int32_t)(window_sum / window);
 			int lut_offset = (int)((int64_t)encoder_error_arr[0] *
 					       OFFSET_LUT_NUM / ENCODER_CPR);
-			int lut_index =
-			    (lut_offset + sample_count) % (int)OFFSET_LUT_NUM;
+			int lut_index = (lut_offset + cal.sample_index) %
+					(int)OFFSET_LUT_NUM;
 			if (lut_index < 0)
 				lut_index += (int)OFFSET_LUT_NUM;
 			Config.offset_lut[lut_index] =
 			    window_avg - Config.encoder_offset;
-			sample_count++;
+			cal.sample_index++;
 		} else {
 			cal.ticks = 0;
-			sample_count = 0;
+			cal.sample_index = 0;
 			cal.valid_stages |= CAL_VALID_ENCODER;
 			cal.step = CS_FLUX_START;
 		}
@@ -649,10 +649,15 @@ static bool cal_flux_in_range(float flux)
 
 static void cal_finish_flux(void)
 {
+	const flux_calibration_t *flux_state = &cal.flux;
+	const flux_point_t *low = &flux_state->low_speed;
+	const flux_point_t *high = &flux_state->high_speed;
 	float pole_pairs = (float)Config.pole_pairs;
 	float exp1 = FLUX_SPEED1 / (M_2PI * pole_pairs);
 	float exp2 = FLUX_SPEED2 / (M_2PI * pole_pairs);
+	float speed_delta = FLUX_SPEED2 - FLUX_SPEED1;
 	float phase_r = Config.phase_resistance;
+	float phase_l = Config.phase_inductance;
 	float t1, t2, y1, y2, v_i1, v_i2, den, rr, lv1, lv2, lvp;
 	float dvd, dvq, dvm, lam_vec, flux;
 	float lambda = NAN;
@@ -660,38 +665,39 @@ static void cal_finish_flux(void)
 
 	FOC.calib_mode = false;
 	FOC.calib_adv_angle = false;
-	if (!isfinite(flux_vel1) || !isfinite(flux_vel2) ||
-	    fabsf(flux_vel1 - exp1) > FLUX_MAX_SPEED_ERROR * exp1 ||
-	    fabsf(flux_vel2 - exp2) > FLUX_MAX_SPEED_ERROR * exp2) {
+	if (!isfinite(low->velocity) || !isfinite(high->velocity) ||
+	    fabsf(low->velocity - exp1) > FLUX_MAX_SPEED_ERROR * exp1 ||
+	    fabsf(high->velocity - exp2) > FLUX_MAX_SPEED_ERROR * exp2) {
 		cal_reject("flux: rotor speed did not track");
 		printf("flux: vel %.3f/%.3f, %.3f/%.3f rps\n",
-		       flux_vel1, exp1, flux_vel2, exp2);
+		       low->velocity, exp1, high->velocity, exp2);
 		return;
 	}
 
-	if (flux_sat1 || flux_sat2 || !(flux_i1 > 0.05f) ||
-	    !(flux_i2 > 0.05f) || !isfinite(flux_i1) || !isfinite(flux_i2) ||
-	    !isfinite(flux_v1) || !isfinite(flux_v2)) {
+	if (flux_state->saturated ||
+	    !(low->i_mag > 0.05f) || !(high->i_mag > 0.05f) ||
+	    !isfinite(low->i_mag) || !isfinite(high->i_mag) ||
+	    !isfinite(low->v_mag) || !isfinite(high->v_mag)) {
 		cal_reject("flux: unusable current or voltage samples");
 		return;
 	}
 
-	t1 = SQ(flux_v1) - SQ(FLUX_SPEED1 * Config.phase_inductance * flux_i1);
-	t2 = SQ(flux_v2) - SQ(FLUX_SPEED2 * Config.phase_inductance * flux_i2);
+	t1 = SQ(low->v_mag) - SQ(FLUX_SPEED1 * phase_l * low->i_mag);
+	t2 = SQ(high->v_mag) - SQ(FLUX_SPEED2 * phase_l * high->i_mag);
 	y1 = sqrtf(fmaxf(t1, 0.0f));
 	y2 = sqrtf(fmaxf(t2, 0.0f));
-	v_i1 = FLUX_SPEED2 * flux_i1;
-	v_i2 = FLUX_SPEED1 * flux_i2;
+	v_i1 = FLUX_SPEED2 * low->i_mag;
+	v_i2 = FLUX_SPEED1 * high->i_mag;
 	den = v_i1 - v_i2;
 	if (fabsf(den) > FLT_EPSILON * fmaxf(v_i1, v_i2)) {
-		lambda = (y2 * flux_i1 - y1 * flux_i2) / den;
-		res = (y1 - FLUX_SPEED1 * lambda) / flux_i1;
+		lambda = (y2 * low->i_mag - y1 * high->i_mag) / den;
+		res = (y1 - FLUX_SPEED1 * lambda) / low->i_mag;
 	}
 
-	dvd = flux_vd_b - flux_vd_a;
-	dvq = flux_vq_b - flux_vq_a;
+	dvd = high->vd - low->vd;
+	dvq = high->vq - low->vq;
 	dvm = sqrtf(SQ(dvd) + SQ(dvq));
-	lam_vec = dvm / (FLUX_SPEED2 - FLUX_SPEED1);
+	lam_vec = dvm / speed_delta;
 	flux = cal_flux_in_range(lam_vec) ? lam_vec : lambda;
 	if (!cal_flux_in_range(flux)) {
 		cal_reject("flux: no usable flux linkage measurement");
@@ -700,25 +706,27 @@ static void cal_finish_flux(void)
 
 	printf("flux pts: V1=%.4f I1=%.3f vel1=%.3f | V2=%.4f "
 	       "I2=%.3f vel2=%.3f\n",
-	       flux_v1, flux_i1, flux_vel1, flux_v2, flux_i2, flux_vel2);
+	       low->v_mag, low->i_mag, low->velocity,
+	       high->v_mag, high->i_mag, high->velocity);
 	printf("flux cmd: we1=%.1f we2=%.1f rad/s (vel1=%.3f vel2=%.3f rps)\n",
 	       FLUX_SPEED1, FLUX_SPEED2, exp1, exp2);
 	printf("flux: R=%.3f Ohm lambda=%.6f Wb (simple %.6f)\n",
-	       res, lambda, (flux_v2 - flux_v1) / (FLUX_SPEED2 - FLUX_SPEED1));
+	       res, lambda, (high->v_mag - low->v_mag) / speed_delta);
 
 	rr = phase_r;
-	if (isfinite(flux_r_est) && flux_r_est > R_CAL_MIN_OHM)
-		rr = flux_r_est;
-	lv1 = (flux_vq_a - rr * flux_i1) / FLUX_SPEED1;
-	lv2 = (flux_vq_b - rr * flux_i2) / FLUX_SPEED2;
-	lvp = (dvq - rr * (flux_i2 - flux_i1)) / (FLUX_SPEED2 - FLUX_SPEED1);
+	if (isfinite(flux_state->resistance_estimate) &&
+	    flux_state->resistance_estimate > R_CAL_MIN_OHM)
+		rr = flux_state->resistance_estimate;
+	lv1 = (low->vq - rr * low->i_mag) / FLUX_SPEED1;
+	lv2 = (high->vq - rr * high->i_mag) / FLUX_SPEED2;
+	lvp = (dvq - rr * (high->i_mag - low->i_mag)) / speed_delta;
 	printf("flux Vq: Vq1=%.4f Vq2=%.4f Vd1=%.4f Vd2=%.4f (R=%.4f)\n",
-	       flux_vq_a, flux_vq_b, flux_vd_a, flux_vd_b, rr);
+	       low->vq, high->vq, low->vd, high->vd, rr);
 	printf("flux Vq: lam1=%.6f lam2=%.6f (单点, 差%.0f%%) 两点法=%.6f\n",
 	       lv1, lv2, 100.0f * (lv1 - lv2) / ((lv1 + lv2) * 0.5f + 1e-9f),
 	       lvp);
 	printf("flux vec: |dV|=%.4f (模差仅%.4f) -> lambda_vec=%.6f Wb\n",
-	       dvm, flux_v2 - flux_v1, lam_vec);
+	       dvm, high->v_mag - low->v_mag, lam_vec);
 
 	if ((res > 0.01f) && (res < 50.0f) &&
 	    (fabsf(res - phase_r) < 0.2f * phase_r)) {
@@ -734,9 +742,43 @@ static void cal_finish_flux(void)
 	cal.step = CS_MOTOR_J_START;
 }
 
+static void cal_flux_begin_samples(tCalibStep step)
+{
+	cal.flux.window = (flux_window_t){0};
+	cal.ticks = 0;
+	cal.step = step;
+}
+
+static void cal_flux_accumulate(flux_window_t *window, float vq)
+{
+	float id = FOC.Id;
+	float iq = FOC.Iq;
+
+	window->sum.i_mag += sqrtf(SQ(id) + SQ(iq));
+	window->sum.velocity += encoder.vel;
+	window->sum.vq += vq;
+	window->count++;
+}
+
+static flux_point_t cal_flux_average(const flux_window_t *window)
+{
+	float count = (float)window->count;
+
+	return (flux_point_t){
+		.v_mag = window->sum.v_mag / count,
+		.i_mag = window->sum.i_mag / count,
+		.velocity = window->sum.velocity / count,
+		.vd = window->sum.vd / count,
+		.vq = window->sum.vq / count,
+	};
+}
+
 /* 磁链标定 (CS_FLUX_* ) */
 static void cal_flux_step(float time)
 {
+	flux_calibration_t *flux = &cal.flux;
+	flux_window_t *window = &flux->window;
+
 	switch (cal.step) {
 	case CS_FLUX_START:
 		Config.flux_linkage = 0;
@@ -757,88 +799,60 @@ static void cal_flux_step(float time)
 			FOC.calib_phase_vel = FLUX_SPEED1;
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
-		if (time > FLUX_SETTLE_TIME) {
-			flux_v_sum = 0;
-			flux_i_sum = 0;
-			flux_vel_sum = 0.0f;
-			flux_cnt = 0;
-			flux_sat = false;
-			cal.ticks = 0;
-			cal.step = CS_FLUX_MEAS1;
-		}
+		if (time > FLUX_SETTLE_TIME)
+			cal_flux_begin_samples(CS_FLUX_MEAS1);
 		break;
 
 	case CS_FLUX_MEAS1:
 	case CS_FLUX_MEAS2: {
+		float vd, vq;
+
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
-		flux_v_sum += sqrtf(SQ(FOC.Vd_out) + SQ(FOC.Vq_out));
-		flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
-		flux_vq_sum += FOC.Vq_out;
-		flux_vd_sum += FOC.Vd_out;
-		flux_vel_sum += encoder.vel;
+		vd = FOC.Vd_out;
+		vq = FOC.Vq_out;
+		window->sum.v_mag += sqrtf(SQ(vd) + SQ(vq));
+		window->sum.vd += vd;
+		cal_flux_accumulate(window, vq);
 		if (FOC.saturated)
-			flux_sat = true;
-		flux_cnt++;
-		if (flux_cnt >= FLUX_MEAS_SAMPLES) {
-			float v_avg = flux_v_sum / (float)flux_cnt;
-			float i_avg = flux_i_sum / (float)flux_cnt;
-			if (cal.step == CS_FLUX_MEAS1) {
-				flux_v1 = v_avg;
-				flux_i1 = i_avg;
-				flux_sat1 = flux_sat;
-				flux_vel1 = flux_vel_sum / (float)flux_cnt;
-				flux_vq_a = flux_vq_sum / (float)flux_cnt;
-				flux_vd_a = flux_vd_sum / (float)flux_cnt;
-				flux_i_a = i_avg;
-				cal.ticks = 0;
-				flux_vel_sum = 0.0f;
-				flux_vq_sum = 0.0f;
-				flux_vd_sum = 0.0f;
-				flux_v_sum = 0.0f;
-				flux_i_sum = 0.0f;
-				flux_cnt = 0;
-				FOC.calib_iq = Config.calib_current *
-					       Config.calib_flux_iq_gain *
-					       Config.calib_flux_rtest_ratio;
-				cal.step = CS_FLUX_RTEST;
-			} else {
-				flux_v2 = v_avg;
-				flux_i2 = i_avg;
-				flux_sat2 = flux_sat;
-				flux_vel2 = flux_vel_sum / (float)flux_cnt;
-				flux_vq_b = flux_vq_sum / (float)flux_cnt;
-				flux_vd_b = flux_vd_sum / (float)flux_cnt;
-				cal.step = CS_FLUX_END;
-			}
+			flux->saturated = true;
+		if (window->count < FLUX_MEAS_SAMPLES)
+			break;
+
+		if (cal.step == CS_FLUX_MEAS1) {
+			flux->low_speed = cal_flux_average(window);
+			FOC.calib_iq = Config.calib_current *
+				       Config.calib_flux_iq_gain *
+				       Config.calib_flux_rtest_ratio;
+			cal_flux_begin_samples(CS_FLUX_RTEST);
+		} else {
+			flux->high_speed = cal_flux_average(window);
+			cal.step = CS_FLUX_END;
 		}
 	} break;
 
 	case CS_FLUX_RTEST: {
+		const flux_point_t *low = &flux->low_speed;
+		flux_point_t reduced;
+		float di;
+
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
-		flux_vq_sum += FOC.Vq_out;
-		flux_i_sum += sqrtf(SQ(FOC.Id) + SQ(FOC.Iq));
-		flux_vel_sum += encoder.vel;
-		flux_cnt++;
-		if (flux_cnt >= FLUX_MEAS_SAMPLES) {
-			float vq_b = flux_vq_sum / (float)flux_cnt;
-			float i_b = flux_i_sum / (float)flux_cnt;
-			float di = flux_i_a - i_b;
-			if (fabsf(di) > 0.1f)
-				flux_r_est = (flux_vq_a - vq_b) / di;
-			printf("flux Rtest: I %.3f->%.3f A, Vq %.4f->%.4f V, "
-			       "vel %.3f rps, R_est=%.4f Ohm\n",
-			       flux_i_a, i_b, flux_vq_a, vq_b,
-			       flux_vel_sum / (float)flux_cnt, flux_r_est);
-			FOC.calib_iq =
-			    Config.calib_current * Config.calib_flux_iq_gain;
-			flux_v_sum = flux_i_sum = flux_vq_sum = flux_vel_sum =
-			    0.0f;
-			flux_cnt = 0;
-			cal.ticks = 0;
-			cal.step = CS_FLUX_RAMP2;
-		}
+		cal_flux_accumulate(window, FOC.Vq_out);
+		if (window->count < FLUX_MEAS_SAMPLES)
+			break;
+
+		reduced = cal_flux_average(window);
+		di = low->i_mag - reduced.i_mag;
+		if (fabsf(di) > 0.1f)
+			flux->resistance_estimate = (low->vq - reduced.vq) / di;
+		printf("flux Rtest: I %.3f->%.3f A, Vq %.4f->%.4f V, "
+		       "vel %.3f rps, R_est=%.4f Ohm\n",
+		       low->i_mag, reduced.i_mag, low->vq, reduced.vq,
+		       reduced.velocity, flux->resistance_estimate);
+		FOC.calib_iq = Config.calib_current * Config.calib_flux_iq_gain;
+		cal.ticks = 0;
+		cal.step = CS_FLUX_RAMP2;
 	} break;
 
 	case CS_FLUX_RAMP2:
@@ -848,15 +862,8 @@ static void cal_flux_step(float time)
 			FOC.calib_phase_vel = FLUX_SPEED2;
 		if (FOC.calib_angle >= M_2PI)
 			FOC.calib_angle -= M_2PI;
-		if (time > FLUX_SETTLE_TIME) {
-			flux_v_sum = 0;
-			flux_i_sum = 0;
-			flux_vel_sum = 0.0f;
-			flux_cnt = 0;
-			flux_sat = false;
-			cal.ticks = 0;
-			cal.step = CS_FLUX_MEAS2;
-		}
+		if (time > FLUX_SETTLE_TIME)
+			cal_flux_begin_samples(CS_FLUX_MEAS2);
 		break;
 
 	case CS_FLUX_END:
@@ -1115,7 +1122,7 @@ void calibration_loop(void)
 			printf("drag(if): Iq=%.2fA I=%.2fA vel=%.3f rps "
 			       "elec=%.2f rad\n",
 			       (double)FOC.calib_iq, (double)ia_meas,
-			       (double)encoder.vel, (double)phase_set);
+			       (double)encoder.vel, (double)cal.drive_angle);
 		}
 	}
 

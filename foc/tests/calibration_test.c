@@ -21,6 +21,7 @@ typedef enum {
 	TEST_OPTIONAL_J_TRIP,
 	TEST_FLASH_FAILURE,
 	TEST_HARD_CURRENT_TRIP,
+	TEST_RTEST_SATURATION,
 } test_scenario_t;
 
 volatile foc_data_t FOC;
@@ -192,7 +193,10 @@ static void simulate_feedback(test_scenario_t scenario)
 		FOC.Vq_out = actual_resistance * FOC.Iq +
 			     electrical_velocity * CAL_TEST_FLUX_WB;
 		encoder.vel = mechanical_velocity;
-		FOC.saturated = (scenario == TEST_BAD_FLUX);
+		FOC.saturated =
+		    (scenario == TEST_BAD_FLUX && step == CS_FLUX_MEAS1) ||
+		    (scenario == TEST_RTEST_SATURATION &&
+		     step == CS_FLUX_RTEST);
 		break;
 
 	case CS_MOTOR_J_SPINUP:
@@ -215,6 +219,7 @@ static void run_calibration(test_scenario_t scenario)
 {
 	int final_step;
 	float inductance_ratio;
+	float flux_current, expected_flux;
 
 	set_up(scenario);
 	calibration_start();
@@ -234,12 +239,18 @@ static void run_calibration(test_scenario_t scenario)
 	case TEST_SUCCESS_5210:
 	case TEST_SUCCESS_4310:
 	case TEST_OPTIONAL_J_TRIP:
+	case TEST_RTEST_SATURATION:
 		assert(Config.calib_valid == 1 && saves == 1U);
 		assert(saved.calib_valid == 1 && saved.cogging_map_valid == 0);
 		assert(Config.cogging_map_valid == saved.cogging_map_valid);
 		assert(saved.pole_pairs == CAL_TEST_POLE_PAIRS);
 		inductance_ratio = saved.phase_inductance / actual_inductance;
 		assert(fabsf(inductance_ratio - 1.0f) < 0.02f);
+		flux_current = Config.calib_current * Config.calib_flux_iq_gain;
+		expected_flux = hypotf(CAL_TEST_FLUX_WB,
+				       actual_inductance * flux_current);
+		assert(fabsf(saved.flux_linkage / expected_flux - 1.0f) <
+		       0.002f);
 		break;
 	case TEST_FLASH_FAILURE:
 		assert(Config.calib_valid == 1 && saves == 1U);

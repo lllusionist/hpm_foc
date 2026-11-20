@@ -14,11 +14,12 @@ SCENARIOS = (
     "resistance with no response",
     "inductance below resistive impedance followed by a retry",
     "pole-pair measurement with no rotation",
-    "invalid flux result",
+    "saturation in the first flux measurement window",
     "soft overcurrent in a required stage",
     "soft overcurrent during optional inertia measurement",
     "flash write failure",
     "hard overcurrent during inductance measurement",
+    "saturation only in the diagnostic resistance window",
 )
 
 
