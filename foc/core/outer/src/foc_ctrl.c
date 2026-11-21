@@ -258,32 +258,8 @@ void CONTROLLER_loop(void)
 			CONFIG_apply_motor_profile(p);
 			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 			uint8_t r = CONFIG_save_to_flash();
-			printf("motor profile: %s Rs=%.3f L=%.1fuH Pn=%ld "
-			       "lam=%.5f CLIM=%.1fA VLIM=%.1frps bw=%.0fHz "
-			       "velkp=%.3f velki=%.2f dragmin=%.2fV "
-			       "fluxiq=%.2fA jiq=%.2fA save=%s\n",
-			       profile_name(p),
-			       (double)Config.phase_resistance,
-			       (double)(Config.phase_inductance * 1e6f),
-			       (long)Config.pole_pairs,
-			       (double)Config.flux_linkage,
-			       (double)Config.current_limit,
-			       (double)Config.velocity_limit,
-			       (double)Config.current_ctrl_bw,
-			       (double)Config.vel_p_gain,
-			       (double)Config.vel_i_gain,
-			       (double)Config.calib_drag_v_min,
-			       (double)(Config.calib_current *
-					Config.calib_flux_iq_gain),
-			       (double)(Config.calib_current *
-					Config.calib_j_iq_gain),
-			       (r == 0U) ? "ok" : "fail");
-			printf("motor profile: calibration invalidated, "
-			       "run 0x27 again before use");
-			if (Config.pole_pairs <= 0)
-				printf(" (Pn/lambda unknown -> 0x27 dir_pp "
-				       "will measure them)");
-			printf("\n");
+			printf("motor profile: %s flash=%s, run 0x27\n",
+			       profile_name(p), r == 0U ? "ok" : "fail");
 		}
 	}
 

@@ -86,8 +86,8 @@ typedef struct {
 	flux_window_t window;
 	flux_point_t low_speed;
 	flux_point_t high_speed;
-	float resistance_estimate;
 	bool saturated;
+	bool slip_reported;
 } flux_calibration_t;
 
 typedef struct {
@@ -194,15 +194,9 @@ void calibration_start(void)
 
 	memset(encoder_error_arr, 0, sizeof(encoder_error_arr));
 
-	/* 回显实际生效参数, 便于确认配置已下发 */
-	printf("calib: cur=%.2fA vol=%.2fV step=%.3fV R0=%.4fOhm "
-	       "drag_min=%.2fV flux_iq=%.2fA j_iq=%.2fA "
-	       "dtcomp_in_voltage=%d\n",
-	       Config.calib_current, Config.calib_voltage, (double)r_step,
-	       Config.phase_resistance, (double)Config.calib_drag_v_min,
-	       (double)(Config.calib_current * Config.calib_flux_iq_gain),
-	       (double)(Config.calib_current * Config.calib_j_iq_gain),
-	       (int)DT_COMP_IN_VOLTAGE);
+	printf("calib: start profile=%ld I=%.2fA V=%.2fV Rstep=%.3fV\n",
+	       (long)Config.motor_profile, Config.calib_current,
+	       Config.calib_voltage, r_step);
 
 	cal.step = CS_MOTOR_R_START;
 }
@@ -239,10 +233,10 @@ static void calib_drag_if(float iq, float elec_angle, float elec_vel)
 static void cal_finish_resistance(float current)
 {
 	float resistance = 0.0f;
-	float di_avg = current - r_i1;
 
 	if (r_di_cnt > 0U) {
-		di_avg = r_di_sum / (float)r_di_cnt;
+		float di_avg = r_di_sum / (float)r_di_cnt;
+
 		if (!isfinite(di_avg) || di_avg <= R_CAL_MIN_DELTA_A) {
 			cal_reject("R: insufficient differential current");
 			return;
@@ -255,15 +249,11 @@ static void cal_finish_resistance(float current)
 		cal_reject("R: no usable resistance measurement");
 		return;
 	}
-	if (r_di_cnt == 0U)
-		printf("res: WARN single point only, R is a rough V/I guess\n");
-
 	Config.phase_resistance = resistance;
 	cal.valid_stages |= CAL_VALID_R;
-	printf("res: %.4f Ohm (ures=%.3f I1=%.4f I2=%.4f steps=%u "
-	       "di_avg=%.5f Voff=%.3fV dtcomp=%d)\n",
-	       resistance, r_volt, r_i1, current, (unsigned)r_s1,
-	       di_avg, r_volt - current * resistance, (int)DT_COMP_IN_VOLTAGE);
+	printf("res: R=%.5fOhm method=%s Voff=%+.3fV\n", resistance,
+	       r_di_cnt > 0U ? "diff" : "single-point",
+	       r_volt - current * resistance);
 	cal.step = CS_MOTOR_R_END;
 }
 
@@ -397,9 +387,6 @@ static void cal_rl_step(float ia_meas)
 
 			/* 小信号受死区影响，避免按探测阻抗一次放大数倍。 */
 			new_amp = fminf(fmaxf(new_amp, min_v), max_amp);
-			printf(
-			    "ind-probe: Iamp=%.3f Z=%.3f Vamp %.3f -> %.3f\n",
-			    I_amp, Z, l_v_amp, new_amp);
 			l_v_amp_start = l_v_amp;
 			l_v_amp = new_amp;
 			FOC.vinj_sum_sin = 0;
@@ -428,8 +415,7 @@ static void cal_rl_step(float ia_meas)
 		cal.valid_stages |= CAL_VALID_L;
 		FOC.calib_vinj_mode = false;
 		FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
-		printf("ind: %.6f H (Iamp=%.3f Z=%.3f Vdc=%.3f Vamp=%.3f)\n",
-		       Config.phase_inductance, I_amp, Z, l_v_dc, l_v_amp);
+		printf("ind: L=%.2fuH\n", inductance * 1e6f);
 		cal.drive_angle = 0;
 		cal.ticks = 0;
 		cal.step = CS_DIR_PP_START;
@@ -502,8 +488,8 @@ static void cal_dir_pp_step(float time, float calib_phase_vel,
 		Config.encoder_dir = (diff > 0) ? 1 : -1;
 		Config.pole_pairs = pole_pairs;
 		cal.valid_stages |= CAL_VALID_DIR_PP;
-		printf("dir_pp: diff=%lld mech_revs=%.5f pp_raw=%.4f -> %d\n",
-		       (long long)diff, mech_revs, pp_raw, pole_pairs);
+		printf("dir_pp: Pn=%d dir=%+d\n", pole_pairs,
+		       (int)Config.encoder_dir);
 		cal.step = CS_ENCODER_START;
 	} break;
 
@@ -658,7 +644,7 @@ static void cal_finish_flux(void)
 	float speed_delta = FLUX_SPEED2 - FLUX_SPEED1;
 	float phase_r = Config.phase_resistance;
 	float phase_l = Config.phase_inductance;
-	float t1, t2, y1, y2, v_i1, v_i2, den, rr, lv1, lv2, lvp;
+	float t1, t2, y1, y2, v_i1, v_i2, den;
 	float dvd, dvq, dvm, lam_vec, flux;
 	float lambda = NAN;
 	float res = NAN;
@@ -703,30 +689,6 @@ static void cal_finish_flux(void)
 		cal_reject("flux: no usable flux linkage measurement");
 		return;
 	}
-
-	printf("flux pts: V1=%.4f I1=%.3f vel1=%.3f | V2=%.4f "
-	       "I2=%.3f vel2=%.3f\n",
-	       low->v_mag, low->i_mag, low->velocity,
-	       high->v_mag, high->i_mag, high->velocity);
-	printf("flux cmd: we1=%.1f we2=%.1f rad/s (vel1=%.3f vel2=%.3f rps)\n",
-	       FLUX_SPEED1, FLUX_SPEED2, exp1, exp2);
-	printf("flux: R=%.3f Ohm lambda=%.6f Wb (simple %.6f)\n",
-	       res, lambda, (high->v_mag - low->v_mag) / speed_delta);
-
-	rr = phase_r;
-	if (isfinite(flux_state->resistance_estimate) &&
-	    flux_state->resistance_estimate > R_CAL_MIN_OHM)
-		rr = flux_state->resistance_estimate;
-	lv1 = (low->vq - rr * low->i_mag) / FLUX_SPEED1;
-	lv2 = (high->vq - rr * high->i_mag) / FLUX_SPEED2;
-	lvp = (dvq - rr * (high->i_mag - low->i_mag)) / speed_delta;
-	printf("flux Vq: Vq1=%.4f Vq2=%.4f Vd1=%.4f Vd2=%.4f (R=%.4f)\n",
-	       low->vq, high->vq, low->vd, high->vd, rr);
-	printf("flux Vq: lam1=%.6f lam2=%.6f (单点, 差%.0f%%) 两点法=%.6f\n",
-	       lv1, lv2, 100.0f * (lv1 - lv2) / ((lv1 + lv2) * 0.5f + 1e-9f),
-	       lvp);
-	printf("flux vec: |dV|=%.4f (模差仅%.4f) -> lambda_vec=%.6f Wb\n",
-	       dvm, high->v_mag - low->v_mag, lam_vec);
 
 	if ((res > 0.01f) && (res < 50.0f) &&
 	    (fabsf(res - phase_r) < 0.2f * phase_r)) {
@@ -781,6 +743,7 @@ static void cal_flux_step(float time)
 
 	switch (cal.step) {
 	case CS_FLUX_START:
+		printf("calib: measuring flux\n");
 		Config.flux_linkage = 0;
 		FOC.calib_adv_angle = true;
 		FOC.calib_id = 0;
@@ -845,11 +808,8 @@ static void cal_flux_step(float time)
 		reduced = cal_flux_average(window);
 		di = low->i_mag - reduced.i_mag;
 		if (fabsf(di) > 0.1f)
-			flux->resistance_estimate = (low->vq - reduced.vq) / di;
-		printf("flux Rtest: I %.3f->%.3f A, Vq %.4f->%.4f V, "
-		       "vel %.3f rps, R_est=%.4f Ohm\n",
-		       low->i_mag, reduced.i_mag, low->vq, reduced.vq,
-		       reduced.velocity, flux->resistance_estimate);
+			printf("flux: Rtest=%.4fOhm at %.3f rps\n",
+			       (low->vq - reduced.vq) / di, reduced.velocity);
 		FOC.calib_iq = Config.calib_current * Config.calib_flux_iq_gain;
 		cal.ticks = 0;
 		cal.step = CS_FLUX_RAMP2;
@@ -915,11 +875,6 @@ static void cal_inertia_step(float time)
 
 		if (cal.step == CS_MOTOR_J_SPINUP) {
 			if ((encoder.vel >= J_SPINUP_RPS) || (time > 3.0f)) {
-				printf("J spinup: t=%.2f vel=%.3f Iq=%.3f "
-				       "set=%.3f ciq=%.2f armed=%d\n",
-				       (double)time, encoder.vel,
-				       (double)FOC.Iq, (double)FOC.Iq_set,
-				       (double)FOC.calib_iq, (int)FOC.is_armed);
 				j_sum_t = j_sum_v = j_sum_tv = j_sum_tt = 0.0f;
 				j_cnt = 0;
 				cal.ticks = 0;
@@ -963,14 +918,14 @@ static void cal_inertia_step(float time)
 		if (fabsf(da) > 1e-3f)
 			J = kt * (Config.calib_current * Config.calib_j_iq_gain) /
 			    (2.0f * 3.14159265f * da);
-		printf("J: a+=%.3f a-=%.3f rps/s  Kt=%.5f -> J=%.3e kg.m2\n",
-		       j_slope_acc, j_slope_dec, kt, J);
 		if ((J > 1e-7f) && (J < 1e-1f)) {
 			const float wbw = 2.0f * 3.14159265f * 10.0f;
-			printf(
-			    "J: 建议速度环 Kp=%.2f Ki=%.1f (zeta=1, bw=10Hz)\n",
-			    4.0f * 3.14159265f * wbw * J / kt,
-			    2.0f * 3.14159265f * J * wbw * wbw / kt);
+			printf("J: %.3e kg.m2, velPI(10Hz) Kp=%.2f Ki=%.1f\n",
+			       J, 4.0f * 3.14159265f * wbw * J / kt,
+			       2.0f * 3.14159265f * J * wbw * wbw / kt);
+		} else {
+			printf("J: unavailable (a+=%.2f a-=%.2f rps/s)\n",
+			       j_slope_acc, j_slope_dec);
 		}
 		cal.step = CS_REPORT_OFFSET_LUT;
 	} break;
@@ -986,11 +941,6 @@ static void cal_report_step(void)
 	float R = Config.phase_resistance;
 	float L = Config.phase_inductance;
 	float lm = Config.flux_linkage;
-	float wc = M_2PI * Config.current_ctrl_bw;
-	int32_t lut_min = Config.offset_lut[0];
-	int32_t lut_max = Config.offset_lut[0];
-	int32_t cg_min = Config.cogging_map[0];
-	int32_t cg_max = Config.cogging_map[0];
 	uint8_t saved;
 
 	if (cal.valid_stages != CAL_REQUIRED ||
@@ -1013,36 +963,15 @@ static void cal_report_step(void)
 	saved = CONFIG_save_to_flash();
 	cal_request_idle();
 
-	for (uint32_t i = 1U; i < OFFSET_LUT_NUM; i++) {
-		int32_t v = Config.offset_lut[i];
-
-		lut_min = MIN(lut_min, v);
-		lut_max = MAX(lut_max, v);
-	}
-	for (uint32_t i = 1U; i < COGGING_MAP_NUM; i++) {
-		int32_t v = (int32_t)Config.cogging_map[i];
-
-		cg_min = MIN(cg_min, v);
-		cg_max = MAX(cg_max, v);
-	}
-
-	printf("\n===== CALIB RESULT =====\n");
-	printf(" R      = %.5f Ohm\n", R);
-	printf(" L      = %.6f H\n", L);
-	printf(" lambda = %.6f Wb\n", lm);
-	printf(" Kt     = %.5f N.m/A\n", 1.5f * (float)Config.pole_pairs * lm);
-	printf(" curKp  = %.4f (L*wc)  curKi = %.1f (R*wc)\n", L * wc, R * wc);
-	printf(" poles  = %d pairs\n", (int)Config.pole_pairs);
-	printf(" enc    = dir %d offset %d cnt (%.3f deg)\n",
-	       (int)Config.encoder_dir, (int)Config.encoder_offset,
-	       (float)Config.encoder_offset * 360.0f / ENCODER_CPR_F);
-	printf(" offset_lut : min %d max %d pkpk %d\n",
-	       (int)lut_min, (int)lut_max, (int)(lut_max - lut_min));
-	printf(" cogging_map: min %d max %d pkpk %d (invalidated)\n",
-	       (int)cg_min, (int)cg_max, (int)(cg_max - cg_min));
-	printf(" valid  = %d flash=%s\n", (int)Config.calib_valid,
-	       (saved == 0U) ? "ok" : "fail");
-	printf("========================\n");
+	printf("calib: valid=%d flash=%s R=%.5fOhm L=%.2fuH lambda=%.3fmWb\n",
+	       (int)Config.calib_valid, (saved == 0U) ? "ok" : "fail",
+	       R, L * 1e6f, lm * 1e3f);
+	printf("calib: Pn=%ld dir=%+ld offset=%ldcnt Kt=%.5fNm/A "
+	       "curKp=%.4f curKi=%.1f\n",
+	       (long)Config.pole_pairs, (long)Config.encoder_dir,
+	       (long)Config.encoder_offset,
+	       1.5f * (float)Config.pole_pairs * lm,
+	       Config.current_kp, Config.current_ki);
 }
 
 static bool cal_check_overcurrent(float ia)
@@ -1080,10 +1009,9 @@ static bool cal_check_overcurrent(float ia)
 	}
 
 	printf("calib: OVER-CURRENT %.2fA > %.2fA at step %d "
-	       "(id=%.2f iq=%.2f cmd=%.2f vq=%.2f ang=%.2f rad)\n",
-	       peak, limit, (int)step, id, iq, iq_cmd, vq, angle);
-	if (optional)
-		printf("calib: skip J (optional), go to report\n");
+	       "(id=%.2f iq=%.2f cmd=%.2f vq=%.2f ang=%.2f rad)%s\n",
+	       peak, limit, (int)step, id, iq, iq_cmd, vq, angle,
+	       optional ? ", J skipped" : "");
 	return true;
 }
 
@@ -1113,32 +1041,18 @@ void calibration_loop(void)
 	if (cal_check_overcurrent(ia_meas))
 		return;
 
-	if ((cal.step == CS_DIR_PP_LOOP) ||
-	    (cal.step == CS_ENCODER_CW_LOOP) ||
-	    (cal.step == CS_ENCODER_CCW_LOOP)) {
-		static uint32_t drag_dbg_cnt;
-		if (++drag_dbg_cnt >= 300U) {
-			drag_dbg_cnt = 0;
-			printf("drag(if): Iq=%.2fA I=%.2fA vel=%.3f rps "
-			       "elec=%.2f rad\n",
-			       (double)FOC.calib_iq, (double)ia_meas,
-			       (double)encoder.vel, (double)cal.drive_angle);
-		}
-	}
-
-	/* 丢步检测 */
-	if ((cal.step >= CS_FLUX_RAMP1) && (cal.step <= CS_FLUX_MEAS2) &&
+	if (!cal.flux.slip_reported &&
+	    (cal.step == CS_FLUX_MEAS1 || cal.step == CS_FLUX_MEAS2) &&
 	    (Config.pole_pairs > 0) && (FOC.calib_phase_vel > 1.0f)) {
-		static uint32_t slip_dbg;
-		float exp_rps = FOC.calib_phase_vel /
-				(M_2PI * (float)Config.pole_pairs);
-		float dev = fabsf(encoder.vel - exp_rps) / exp_rps;
-		if (dev > FLUX_MAX_SPEED_ERROR) {
-			if ((slip_dbg++ % 200U) == 0U)
-				printf("flux: SLIP vel=%.3f exp=%.3f rps "
-				       "(dev %.0f%%)\n",
-				       (double)encoder.vel, (double)exp_rps,
-				       (double)(dev * 100.0f));
+		float expected = FOC.calib_phase_vel /
+				 (M_2PI * (float)Config.pole_pairs);
+		float actual = encoder.vel;
+		float tolerance = FLUX_MAX_SPEED_ERROR * expected;
+
+		if (fabsf(actual - expected) > tolerance) {
+			cal.flux.slip_reported = true;
+			printf("flux: SLIP vel=%.3f expected=%.3f rps\n",
+			       actual, expected);
 		}
 	}
 
