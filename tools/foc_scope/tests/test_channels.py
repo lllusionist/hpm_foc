@@ -36,6 +36,11 @@ class TestChannelModel(unittest.TestCase):
         self.assertEqual(CHANNELS[0][0], "Ia")
         self.assertIn("母线电压", CHANNELS[9][1])
         self.assertIn("母线电流", CHANNELS[21][1])
+        self.assertEqual([c[:3] for c in CHANNELS[22:25]], [
+            ("pos_target", "机械目标角", "rad"),
+            ("pos_actual", "机械实际角", "rad"),
+            ("pos_error", "跟随误差", "rad"),
+        ])
         self.assertEqual(FAULT_TEXT[0], "无")
 
     def test_reads_c_block_comment_on_fast_overcurrent_code(self):

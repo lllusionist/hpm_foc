@@ -34,6 +34,9 @@ _FALLBACK = [
     ("Vc",          "C相电压",     "V"),
     ("fault",       "故障码",      ""),
     ("Ibus",        "母线电流",    "A"),
+    ("pos_target",  "机械目标角",  "rad"),
+    ("pos_actual",  "机械实际角",  "rad"),
+    ("pos_error",   "跟随误差",   "rad"),
 ]
 
 _parsed = load_channels()

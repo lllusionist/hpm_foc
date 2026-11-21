@@ -25,6 +25,20 @@ TM = 20          # 顶部时间轴留白
 BM = 22          # 底部时间轴留白
 
 
+def _draw_trace(painter, points):
+    """用缺失样本断开曲线，避免把两段有效数据连起来。"""
+    poly = QPolygonF()
+    for x, y in points:
+        if math.isfinite(y):
+            poly.append(QPointF(x, y))
+        elif not poly.isEmpty():
+            if poly.size() >= 2:
+                painter.drawPolyline(poly)
+            poly.clear()
+    if poly.size() >= 2:
+        painter.drawPolyline(poly)
+
+
 class PlotWidget(QWidget):
     def __init__(self, store, model, parent=None):
         super().__init__(parent)
@@ -184,21 +198,18 @@ class PlotWidget(QWidget):
             for c in self.channels:
                 g, o = self.model.gain[c], self.model.off[c]
                 p.setPen(self._pen(self.model.color[c], 1.0))
-                poly = QPolygonF()
                 if envelope:
-                    for imn, vmin, imx, vmax in self.store.envelope(c, k0, k1, ncol):
-                        for ki, vi in ((imn, vmin), (imx, vmax)):
-                            yy = y1 - (vi * g + o - ymin) * ysc
-                            if math.isfinite(yy):
-                                poly.append(QPointF(x0 + (ki / self.store.fs - tL) * xsc, yy))
+                    columns = self.store.envelope(c, k0, k1, ncol)
+                    samples = (point for imn, vmin, imx, vmax in columns
+                               for point in ((imn, vmin), (imx, vmax)))
                 else:
                     base_k, vals = self.store.raw(c, k0, k1)
-                    for j, vv in enumerate(vals):
-                        yy = y1 - (vv * g + o - ymin) * ysc
-                        if math.isfinite(yy):
-                            poly.append(QPointF(x0 + ((base_k + j) / self.store.fs - tL) * xsc, yy))
-                if poly.size() >= 2:
-                    p.drawPolyline(poly)
+                    samples = enumerate(vals, start=base_k)
+                _draw_trace(p, (
+                    (x0 + (k / self.store.fs - tL) * xsc,
+                     y1 - (value * g + o - ymin) * ysc)
+                    for k, value in samples
+                ))
             p.restore()
 
         p.setPen(self._pen(theme.PLOT_AXIS, 1.0))
@@ -525,12 +536,11 @@ class OverviewWidget(QWidget):
         p.setClipRect(QRectF(x0, y0, x1 - x0, y1 - y0))
         for color, g, o, env in envs:
             p.setPen(PlotWidget._pen(color, 1.0))
-            poly = QPolygonF()
-            for imn, vmin, imx, vmax in env:
-                poly.append(QPointF(X(imn), y1 - (vmin * g + o - lo) * ysc))
-                poly.append(QPointF(X(imx), y1 - (vmax * g + o - lo) * ysc))
-            if poly.size() >= 2:
-                p.drawPolyline(poly)
+            _draw_trace(p, (
+                (X(k), y1 - (value * g + o - lo) * ysc)
+                for imn, vmin, imx, vmax in env
+                for k, value in ((imn, vmin), (imx, vmax))
+            ))
         p.restore()
 
         p.setPen(PlotWidget._pen(theme.PLOT_AXIS, 1.0))
