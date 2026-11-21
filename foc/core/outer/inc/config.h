@@ -76,7 +76,7 @@ typedef struct {
 	float calib_flux_rtest_ratio; // 磁链同速校验的降流比例
 	float cog_sweep_rps;          // 齿槽扫描速度 (rps)
 
-	float vel_integrator_limit; // 速度积分器限幅 (A)
+	float vel_integrator_limit; // Flash v2 旧积分限幅，保留用于回退固件
 	float friction_move_a;      // 动摩擦前馈电流 (A)
 	float friction_break_a;     // 静摩擦前馈电流 (A)
 

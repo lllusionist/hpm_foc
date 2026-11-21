@@ -226,8 +226,6 @@ void CONTROLLER_sync_callback(void)
 // 5 kHz 外环生成电流给定；电流环在 ADC 中断中执行。
 void CONTROLLER_loop(void)
 {
-	float iq_set = 0;
-	float v_err = 0.0f;
 	tFSMState stage = foc_get_stage();
 
 	if (Controller.enable_refused_pending) {
@@ -359,7 +357,8 @@ void CONTROLLER_loop(void)
 	    CLAMP(vel_des, -Config.velocity_limit, +Config.velocity_limit);
 
 	// 速度环 PI
-	iq_set = Controller.cur_setpoint;
+	const float current_limit = Config.current_limit;
+	float iq_set = Controller.cur_setpoint;
 
 	float vel_kp = Config.vel_p_gain;
 	float vel_ki = Config.vel_i_gain;
@@ -381,18 +380,22 @@ void CONTROLLER_loop(void)
 		vel_kp *= boost;
 		vel_ki *= boost;
 
-		v_err = vel_des - vel_meas;
+		float v_err = vel_des - vel_meas;
+		float integral = Controller.vel_integrator +
+				 (vel_ki * CTRL_PERIOD) * v_err;
+		/* 按 TI 的顺序先限幅本拍积分，总输出叠加前馈后再限幅。 */
+		Controller.vel_integrator =
+		    CLAMP(integral, -current_limit, current_limit);
 		iq_set += vel_kp * v_err;
 		iq_set += Controller.vel_integrator;
-	}
-
-	// 电流模式下按速度限值约束 Iq 给定。
-	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
+	} else {
+		// 电流模式下按速度限值约束 Iq 给定。
 		float Imax =
 		    (+Config.velocity_limit - vel_meas) * Config.vel_p_gain;
 		float Imin =
 		    (-Config.velocity_limit - vel_meas) * Config.vel_p_gain;
 		iq_set = CLAMP(iq_set, Imin, Imax);
+		Controller.vel_integrator = 0.0f;
 	}
 
 	// 根据静摩擦或动摩擦补偿前馈电流，USB 0x2B 可在线关闭。
@@ -430,33 +433,8 @@ void CONTROLLER_loop(void)
 		iq_set += cg / COGGING_SCALE;
 	}
 
-	// 电流限幅
-	bool limited = false;
-	if (iq_set > +Config.current_limit) {
-		limited = true;
-		iq_set = +Config.current_limit;
-	}
-	if (iq_set < -Config.current_limit) {
-		limited = true;
-		iq_set = -Config.current_limit;
-	}
-
 	FOC.Id_set = 0.0f;
-	FOC.Iq_set = iq_set;
-
-	// 速度积分器 (抗饱和 + 限幅)
-	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP)
-		Controller.vel_integrator = 0.0f;
-	else if (limited)
-		Controller.vel_integrator *= 0.99f;
-	else
-		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
-	// 齿槽标定期间放宽速度积分限幅; 正常运行用配置值 (随电机档位变化)
-	float vint_lim =
-	    (foc_get_stage() == ANTICOGGING) ? 4.0f
-					     : Config.vel_integrator_limit;
-	Controller.vel_integrator =
-	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
+	FOC.Iq_set = CLAMP(iq_set, -current_limit, current_limit);
 }
 
 // 读取摩擦前馈开关状态，供标定流程保存和恢复。

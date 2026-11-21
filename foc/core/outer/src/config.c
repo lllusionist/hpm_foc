@@ -59,8 +59,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		// 0.1rps 会粘滑
 		Config.cog_sweep_rps = 0.30f;
 		Config.motor_profile = MOTOR_PROFILE_5210;
-		// 速度积分器 / 摩擦前馈随电机档位配置
-		Config.vel_integrator_limit = 4.0f; // 5210 限流 8A, 积分器半幅
+		Config.vel_integrator_limit = 4.0f;
 		Config.friction_move_a = 0.08f;
 		Config.friction_break_a = 0.12f;
 	} else if (profile == MOTOR_PROFILE_2312) {
@@ -124,7 +123,7 @@ void CONFIG_apply_motor_profile(int32_t profile)
 		Config.calib_flux_rtest_ratio = 0.5f;
 		Config.cog_sweep_rps = 0.10f;
 		Config.motor_profile = MOTOR_PROFILE_4310;
-		Config.vel_integrator_limit = 0.5f; // 4310 限流 1.5A
+		Config.vel_integrator_limit = 0.5f;
 		Config.friction_move_a = 0.030f;
 		Config.friction_break_a = 0.050f;
 	}
