@@ -2,11 +2,13 @@
 #include "config.h"
 #include "encoder.h"
 #include "foc_task.h"
+#include "position_profile.h"
 #include <stdio.h>
 
 tController Controller;
 
 #define CTRL_PERIOD (1.0f / 5000.0f) // Task_FOC 周期 (5kHz)
+#define POSITION_PROFILE_JERK_RAMP_S 0.05f
 
 // 低速摩擦前馈与速度增益调度; 电流值来自 Config 随电机档位变化
 // ENGAGE/RELEASE 速度阈值保持固定 (与电机无关)
@@ -18,6 +20,52 @@ tController Controller;
 
 static bool friction_boost;
 static bool friction_ff_en = true;
+static position_profile_t motion_profile;
+
+static void reset_position_profile(float position)
+{
+	float velocity = MIN(Config.profile_velocity, Config.velocity_limit);
+	position_profile_limits_t limits = {
+		.velocity = velocity * M_2PI,
+		.acceleration = Config.profile_accel * M_2PI,
+		.deceleration = Config.profile_decel * M_2PI,
+		.jerk = MIN(Config.profile_accel, Config.profile_decel) *
+			(M_2PI / POSITION_PROFILE_JERK_RAMP_S),
+	};
+
+	position_profile_reset(&motion_profile, position, limits);
+}
+
+static float track_position_profile(float velocity)
+{
+	float position = (float)encoder.count_aligned * (M_2PI / ENCODER_CPR_F);
+	float limit = motion_profile.limits.velocity * (1.0f / M_2PI);
+	float error, velocity_ref;
+	bool reached = false;
+
+	position_profile_set_target(&motion_profile, Controller.input_position);
+	position_profile_step(&motion_profile, CTRL_PERIOD);
+
+	Controller.pos_setpoint = motion_profile.reference.position;
+	Controller.vel_setpoint = motion_profile.reference.velocity *
+				 (1.0f / M_2PI);
+	Controller.cur_setpoint = 0.0f;
+
+	if (!position_profile_active(&motion_profile) &&
+	    fabsf(velocity) < Config.target_velcity_window) {
+		float target_error = position_profile_wrap_angle(
+		    motion_profile.target - position);
+
+		reached = fabsf(target_error) < Config.target_position_window;
+	}
+	Controller.target_reached = reached;
+
+	error = position_profile_wrap_angle(Controller.pos_setpoint - position);
+	velocity_ref = Controller.vel_setpoint + Config.pos_p_gain * error;
+	if (!(limit > 0.0f) || !isfinite(limit))
+		return 0.0f;
+	return CLAMP(velocity_ref, -limit, limit);
+}
 
 static const char *profile_name(int32_t p)
 {
@@ -67,6 +115,8 @@ void CONTROLLER_reset(void)
 	Controller.pos_setpoint = th_meas;
 	Controller.vel_setpoint = 0.0f;
 	Controller.cur_setpoint = 0.0f;
+	if (Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE)
+		reset_position_profile(th_meas);
 
 	Controller.vel_integrator = 0;
 
@@ -83,6 +133,10 @@ void CONTROLLER_reset(void)
 
 int CONTROLLER_set_op_mode(tControlMode mode)
 {
+	if (mode == CONTROL_MODE_POSITION_PROFILE &&
+	    Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE)
+		return 0;
+
 	Controller.ctrl_mode = mode;
 	CONTROLLER_reset();
 
@@ -103,6 +157,12 @@ int CONTROLLER_set_home(void)
 		float th_meas =
 		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
 		float pos_err = Controller.pos_setpoint - th_meas;
+		bool profile_mode =
+		    Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE;
+
+		if (profile_mode && position_profile_active(&motion_profile))
+			return -1;
+
 		while (pos_err > M_PI)
 			pos_err -= M_2PI;
 		while (pos_err < -M_PI)
@@ -117,11 +177,13 @@ int CONTROLLER_set_home(void)
 			encoder.pll_vel = 0;
 			encoder.count_in_cpr_prev = encoder.count_in_cpr;
 
-			Controller.input_position = 0;
-			Controller.input_position_buffer = 0;
-			Controller.pos_setpoint = 0;
-			Controller.vel_setpoint = 0;
-			Controller.cur_setpoint = 0;
+			if (!profile_mode) {
+				Controller.input_position = 0;
+				Controller.input_position_buffer = 0;
+				Controller.pos_setpoint = 0;
+				Controller.vel_setpoint = 0;
+				Controller.cur_setpoint = 0;
+			}
 
 			taskEXIT_CRITICAL();
 		} else {
@@ -164,8 +226,6 @@ void CONTROLLER_sync_callback(void)
 // 5 kHz 外环生成电流给定；电流环在 ADC 中断中执行。
 void CONTROLLER_loop(void)
 {
-	float iq_set = 0;
-	float v_err = 0.0f;
 	tFSMState stage = foc_get_stage();
 
 	if (Controller.enable_refused_pending) {
@@ -190,46 +250,22 @@ void CONTROLLER_loop(void)
 		int32_t p = Controller.motor_profile_pending;
 	Controller.motor_profile_pending = -1;
 	Controller.enable_refused_pending = false;
-		if (FOC.is_armed) {
-			printf("motor profile: armed, refused\n");
+		if (FOC.is_armed || stage == CALIBRATION) {
+			printf("motor profile: drive busy, refused\n");
 		} else {
 			CONFIG_apply_motor_profile(p);
 			FOC_update_current_ctrl_gain(Config.current_ctrl_bw);
 			uint8_t r = CONFIG_save_to_flash();
-			printf("motor profile: %s Rs=%.3f L=%.1fuH Pn=%ld "
-			       "lam=%.5f CLIM=%.1fA VLIM=%.1frps bw=%.0fHz "
-			       "velkp=%.3f velki=%.2f dragmin=%.2fV "
-			       "fluxiq=%.2fA jiq=%.2fA save=%s\n",
-			       profile_name(p),
-			       (double)Config.phase_resistance,
-			       (double)(Config.phase_inductance * 1e6f),
-			       (long)Config.pole_pairs,
-			       (double)Config.flux_linkage,
-			       (double)Config.current_limit,
-			       (double)Config.velocity_limit,
-			       (double)Config.current_ctrl_bw,
-			       (double)Config.vel_p_gain,
-			       (double)Config.vel_i_gain,
-			       (double)Config.calib_drag_v_min,
-			       (double)(Config.calib_current *
-					Config.calib_flux_iq_gain),
-			       (double)(Config.calib_current *
-					Config.calib_j_iq_gain),
-			       (r == 0U) ? "ok" : "fail");
-			printf("motor profile: calibration invalidated, "
-			       "run 0x27 again before use");
-			if (Config.pole_pairs <= 0)
-				printf(" (Pn/lambda unknown -> 0x27 dir_pp "
-				       "will measure them)");
-			printf("\n");
+			printf("motor profile: %s flash=%s, run 0x27\n",
+			       profile_name(p), r == 0U ? "ok" : "fail");
 		}
 	}
 
 	if (Controller.config_cmd_pending != 0U) {
 		uint8_t cmd = Controller.config_cmd_pending;
 		Controller.config_cmd_pending = 0;
-		if (FOC.is_armed) {
-			printf("cfg cmd: motor armed, refused\n");
+		if (FOC.is_armed || stage == CALIBRATION) {
+			printf("cfg cmd: drive busy, refused\n");
 		} else if (cmd == 1U) {
 			printf("cfg save: %s\n",
 			       (CONFIG_save_to_flash() == 0) ? "ok" : "fail");
@@ -243,6 +279,12 @@ void CONTROLLER_loop(void)
 		}
 	}
 
+	if (Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE &&
+	    ((stage != RUN) || !FOC.is_armed)) {
+		Controller.vel_setpoint = 0.0f;
+		Controller.target_reached = false;
+		return;
+	}
 	if ((stage != RUN) && (stage != ANTICOGGING))
 		return;
 
@@ -277,8 +319,11 @@ void CONTROLLER_loop(void)
 		}
 	} break;
 
-	case CONTROL_MODE_POSITION_FILTER:
-	case CONTROL_MODE_POSITION_PROFILE: {
+	case CONTROL_MODE_POSITION_PROFILE:
+		vel_des = track_position_profile(vel_meas);
+		break;
+
+	case CONTROL_MODE_POSITION_FILTER: {
 		// 单圈机械角 (用对齐计数, 零位与校准一致), 单位 rad
 		float th_meas =
 		    (float)encoder.count_aligned * (6.2831853f / ENCODER_CPR_F);
@@ -312,7 +357,8 @@ void CONTROLLER_loop(void)
 	    CLAMP(vel_des, -Config.velocity_limit, +Config.velocity_limit);
 
 	// 速度环 PI
-	iq_set = Controller.cur_setpoint;
+	const float current_limit = Config.current_limit;
+	float iq_set = Controller.cur_setpoint;
 
 	float vel_kp = Config.vel_p_gain;
 	float vel_ki = Config.vel_i_gain;
@@ -334,18 +380,22 @@ void CONTROLLER_loop(void)
 		vel_kp *= boost;
 		vel_ki *= boost;
 
-		v_err = vel_des - vel_meas;
+		float v_err = vel_des - vel_meas;
+		float integral = Controller.vel_integrator +
+				 (vel_ki * CTRL_PERIOD) * v_err;
+		/* 按 TI 的顺序先限幅本拍积分，总输出叠加前馈后再限幅。 */
+		Controller.vel_integrator =
+		    CLAMP(integral, -current_limit, current_limit);
 		iq_set += vel_kp * v_err;
 		iq_set += Controller.vel_integrator;
-	}
-
-	// 电流模式下按速度限值约束 Iq 给定。
-	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP) {
+	} else {
+		// 电流模式下按速度限值约束 Iq 给定。
 		float Imax =
 		    (+Config.velocity_limit - vel_meas) * Config.vel_p_gain;
 		float Imin =
 		    (-Config.velocity_limit - vel_meas) * Config.vel_p_gain;
 		iq_set = CLAMP(iq_set, Imin, Imax);
+		Controller.vel_integrator = 0.0f;
 	}
 
 	// 根据静摩擦或动摩擦补偿前馈电流，USB 0x2B 可在线关闭。
@@ -383,33 +433,8 @@ void CONTROLLER_loop(void)
 		iq_set += cg / COGGING_SCALE;
 	}
 
-	// 电流限幅
-	bool limited = false;
-	if (iq_set > +Config.current_limit) {
-		limited = true;
-		iq_set = +Config.current_limit;
-	}
-	if (iq_set < -Config.current_limit) {
-		limited = true;
-		iq_set = -Config.current_limit;
-	}
-
 	FOC.Id_set = 0.0f;
-	FOC.Iq_set = iq_set;
-
-	// 速度积分器 (抗饱和 + 限幅)
-	if (Controller.ctrl_mode < CONTROL_MODE_VELOCITY_RAMP)
-		Controller.vel_integrator = 0.0f;
-	else if (limited)
-		Controller.vel_integrator *= 0.99f;
-	else
-		Controller.vel_integrator += (vel_ki * CTRL_PERIOD) * v_err;
-	// 齿槽标定期间放宽速度积分限幅; 正常运行用配置值 (随电机档位变化)
-	float vint_lim =
-	    (foc_get_stage() == ANTICOGGING) ? 4.0f
-					     : Config.vel_integrator_limit;
-	Controller.vel_integrator =
-	    CLAMP(Controller.vel_integrator, -vint_lim, vint_lim);
+	FOC.Iq_set = CLAMP(iq_set, -current_limit, current_limit);
 }
 
 // 读取摩擦前馈开关状态，供标定流程保存和恢复。

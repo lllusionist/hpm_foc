@@ -3,7 +3,7 @@ import math
 import unittest
 
 from focscope.buffers import DataStore
-from focscope.channels import NCH
+from focscope.channels import NCH, index_of
 
 
 class TestDataStore(unittest.TestCase):
@@ -60,6 +60,27 @@ class TestDataStore(unittest.TestCase):
         s = DataStore(fs=1000.0, max_span=10.0)
         k0, k1 = s.k_range(0.0, 1.0)
         self.assertEqual(k0, k1)
+
+    def test_position_samples_keep_time_and_statistics_through_gaps(self):
+        s = DataStore()
+        target = index_of("pos_target")
+        legacy = (0.0,) * target
+        s.append(legacy)
+        s.append(legacy + (0.5, 0.25, 0.25))
+        s.append(legacy + (math.nan, 0.25, math.nan))
+        s.append(legacy + (1.5, 0.75, 0.75))
+        s.append(legacy)
+
+        self.assertIsNone(s.sample_at(target, 0))
+        self.assertEqual(s.sample_at(target, 1), 0.5)
+        self.assertIsNone(s.sample_at(target, 2))
+        self.assertIsNone(s.latest(target))
+        self.assertEqual(s.stats(target), (0.5, 1.5, 1.0))
+        self.assertEqual(s.envelope(target, 0, 2, 1), [(1, 0.5, 1, 0.5)])
+        self.assertTrue(math.isnan(s.envelope(target, 2, 3, 1)[0][1]))
+        s.clear()
+        s.append(legacy)
+        self.assertEqual(s.raw(target, 0, 1), (0, []))
 
 
 if __name__ == "__main__":

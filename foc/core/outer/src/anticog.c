@@ -321,32 +321,6 @@ static void cg_report_harmonics(void)
 	       best_h[0], (double)(best_a[0] * 1000.0f / COGGING_SCALE),
 	       best_h[1], (double)(best_a[1] * 1000.0f / COGGING_SCALE),
 	       best_h[2], (double)(best_a[2] * 1000.0f / COGGING_SCALE));
-	/* 物理意义阶次: 14=极对数, 28=极数, 24=槽数, 84/168=齿槽周期 */
-	{
-		static const int probe[] = { 6, 12, 14, 24, 28, 42, 84, 168 };
-		printf("cogging: harm of interest ");
-		for (uint32_t k = 0; k < sizeof(probe) / sizeof(probe[0]); k++) {
-			int h = probe[k];
-			float wr = cosf(6.2831853f * (float)h /
-					(float)COGGING_MAP_NUM);
-			float wi = -sinf(6.2831853f * (float)h /
-					 (float)COGGING_MAP_NUM);
-			float cr = 1.0f, ci = 0.0f, sr = 0.0f, si = 0.0f;
-			for (uint32_t i = 0; i < COGGING_MAP_NUM; i++) {
-				float v = (float)Config.cogging_map[i];
-				sr += v * cr;
-				si += v * ci;
-				float t = cr * wr - ci * wi;
-				ci = cr * wi + ci * wr;
-				cr = t;
-			}
-			float a = sqrtf(sr * sr + si * si) * 2.0f /
-				  (float)COGGING_MAP_NUM;
-			printf("%d:%.1fmA ", h,
-			       (double)(a * 1000.0f / COGGING_SCALE));
-		}
-		printf("\n");
-	}
 }
 
 /* 空走: 每 CG_GAP_MS 一步 */
@@ -394,8 +368,6 @@ static void cg_scan_step(float dir)
 		if (cg_tick >= CG_SETTLE_MAX_MS) {
 			/* 个别点被齿槽夹住就就地采样并计数, 超时超 20% 才判失败 */
 			cg_settle_timeouts++;
-			printf("cogging: settle timeout #%u at step %d\n",
-			       (unsigned)cg_settle_timeouts, cg_number);
 			cg_iq_sum = 0;
 			cg_iq_n = 0;
 			cg_state = CG_ST_AVG;
@@ -423,9 +395,10 @@ static void cg_scan_step(float dir)
 			break;
 
 		cg_step_idx = 0;
-		if (cg_phase == CG_PH_SCAN_FWD)
+		if (cg_phase == CG_PH_SCAN_FWD) {
 			cg_phase = CG_PH_GAP_REV;
-		else
+			printf("cogging: reversing\n");
+		} else
 			cg_phase = CG_PH_DONE;
 		cg_state = CG_ST_MOVE;
 		cg_tick = 0;
@@ -491,15 +464,6 @@ static bool cg_sweep_loop(void)
 	while (d < -M_PI)
 		d += M_2PI;
 	cg_sw_prev = mech;
-
-	if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
-		printf("cogging: sweep dir=%+d trav=%.2f rev vel=%.3f "
-		       "iq=%.3f enc_bad=%lu\n",
-		       (cg_sw_dir > 0.0f) ? 1 : -1,
-		       (double)(cg_sw_travel / M_2PI), (double)encoder.vel,
-		       (double)FOC.Iq_filt,
-		       (unsigned long)encoder.bad_frame_cnt);
-	}
 
 	/* 粘滑检测: 0.1rps 时静/动摩擦差会让转子"跳一下停一下",
 	 * 采到的电流是历史相关而不是位置相关 -> 扫出来的表没用 */
@@ -573,6 +537,7 @@ static bool cg_sweep_loop(void)
 			if (cg_sw_dir > 0.0f) {
 				cg_sw_dir = -1.0f;
 				cg_sw_phase = 0U; /* 先减速到 0 再反向 */
+				printf("cogging: reversing\n");
 			} else {
 				cg_sw_phase = 2U;
 			}
@@ -608,14 +573,6 @@ bool anticogging_loop(void)
 	}
 	if (cg_method == 1U)
 		return cg_sweep_loop();
-
-	if ((cg_total_ticks % CAL_LOOP_HZ) == 0U) {
-		printf("cogging: step=%d ph=%d st=%d inpos=%.3f act=%.3f "
-		       "iq=%.2f\n",
-		       cg_number, (int)cg_phase, (int)cg_state,
-		       (double)Controller.input_position, (double)cg_pos(),
-		       (double)FOC.Iq_filt);
-	}
 
 	switch (cg_phase) {
 	case CG_PH_GAP_FWD:
@@ -668,17 +625,11 @@ void anticogging_end(void)
 			if (Config.cogging_map[i] > mx)
 				mx = Config.cogging_map[i];
 		}
-		printf("cogging: done, %u pts, %d steps, map %d~%d pkpk %d "
-		       "(%.3f A)\n",
-		       (unsigned)COGGING_MAP_NUM, cg_number, mn, mx,
-		       (int)(mx - mn), (float)(mx - mn) / COGGING_SCALE);
-		printf("cogging: save %s, timeout %u/%u\n",
-		       (sv == 0U) ? "ok" : "FAIL",
-		       (unsigned)cg_settle_timeouts,
-		       (unsigned)(2U * COGGING_MAP_NUM));
+		printf("cogging: done %u pts pkpk=%.3fA timeouts=%u flash=%s\n",
+		       (unsigned)COGGING_MAP_NUM,
+		       (float)(mx - mn) / COGGING_SCALE,
+		       (unsigned)cg_settle_timeouts, sv == 0U ? "ok" : "fail");
 		cg_report_harmonics();
-		/* 自动 dump 整张表, 便于离线分析 */
-		cg_dump_idx = 0U;
 	} else {
 		Config.cogging_map_valid = 0;
 		printf("cogging: aborted, invalid (step=%d)\n", cg_number);

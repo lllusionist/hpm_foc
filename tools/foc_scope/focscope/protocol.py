@@ -24,7 +24,7 @@ CMD = {
 
 TAIL = b"\x00\x00\x80\x7f"
 CFG_MAGIC = b"$FOCFG,"
-NCH = 22
+NCH = 25
 HEARTBEAT_INTERVAL_MS = 100
 FLOAT32_MAX = float.fromhex("0x1.fffffep127")
 STEP_MAGIC = b"$STEP,"

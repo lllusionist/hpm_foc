@@ -45,8 +45,13 @@ class TestJustfloatParser(unittest.TestCase):
         out = p.feed(data[5:])
         self.assertEqual(out, [(1.0, 2.0, 3.0)])
 
-    def test_nch_constant(self):
-        self.assertEqual(NCH, 22)
+    def test_position_channels_extend_the_legacy_frame(self):
+        legacy = tuple(float(i) for i in range(22))
+        extended = legacy + (0.25, -0.125, 0.375)
+        self.assertEqual(NCH, len(extended))
+        p = JustfloatParser()
+        self.assertEqual(p.feed(self._frame(*legacy) + self._frame(*extended)),
+                         [legacy, extended])
 
 
 class TestStepReply(unittest.TestCase):

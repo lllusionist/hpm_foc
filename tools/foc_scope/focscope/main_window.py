@@ -819,9 +819,9 @@ class MainWindow(QWidget):
         if fi is not None and fi < len(vals) and vals[fi] is not None:
             fault = int(round(vals[fi]))
 
-        def sv(k):
-            s = st.get(k)
-            return "-" if s is None else s.value()
+        def parameter_value(key):
+            stepper = self.left.steppers.get(key)
+            return "-" if stepper is None else stepper.value()
 
         port = "demo" if self.demo else (self.left.current_port() or "-")
         if self._mode is None:
@@ -840,9 +840,12 @@ class MainWindow(QWidget):
             "故障": "/".join(fault_texts(fault)) if fault else "无",
             "读数": "Iq=%s Iq_set=%s vel=%s vel_set=%s Vbus=%s" %
                     (rd("Iq"), rd("Iq_set"), rd("vel"), rd("vel_set"), rd("Vbus")),
-            "参数": "电流Kp=%s 电流Ki=%s 电流BW=%s 速度Kp=%s 速度Ki=%s 位置Kp=%s" %
-                    (sv("curkp"), sv("curki"), sv("curbw"),
-                     sv("velkp"), sv("velki"), sv("poskp")),
+            "参数": ("电流Kp=%s 电流Ki=%s 电流BW=%s "
+                     "速度Kp=%s 速度Ki=%s 位置Kp=%s") % (
+                parameter_value("curkp"), parameter_value("curki"),
+                parameter_value("curbw"), parameter_value("velkp"),
+                parameter_value("velki"), parameter_value("poskp"),
+            ),
         }
 
     def _on_vis_changed(self):
@@ -930,12 +933,8 @@ class MainWindow(QWidget):
         self.disconnect()
         self.demo = False
         self.store.clear()
-        rows = arr.shape[0]
-        for r in range(rows):
-            row = list(arr[r, 1:1 + NCH])
-            if len(row) < NCH:
-                row += [0.0] * (NCH - len(row))
-            self.store.append(tuple(row[:NCH]))
+        for row in arr:
+            self.store.append(row[1:1 + NCH])
         if fs and fs > 0:
             self.fs = fs
             self.store.fs = fs

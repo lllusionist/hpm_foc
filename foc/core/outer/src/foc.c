@@ -342,14 +342,6 @@ void FOC_update_current_ctrl_gain(float bw)
 
 	Config.current_kp = FOC.current_ctrl_p_gain;
 	Config.current_ki = FOC.current_ctrl_i_gain;
-
-	printf("cur loop: Kp=%.4f Ki=%.1f (L=%.1fuH R=%.4fOhm bw=%.0fHz) "
-	       "deadtime_comp=ff(前馈, dt=%.0fns)\n",
-	       (double)FOC.current_ctrl_p_gain,
-	       (double)FOC.current_ctrl_i_gain,
-	       (double)(Config.phase_inductance * 1e6f),
-	       (double)Config.phase_resistance, (double)bw,
-	       (double)DT_DEAD_NS);
 }
 
 static void foc_current(float Id_set, float Iq_set, float phase,

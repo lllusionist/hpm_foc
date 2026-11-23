@@ -53,9 +53,9 @@ typedef struct {
 	float current_ramp_rate;      // 电流斜坡速率
 	float velocity_ramp_rate;     // 速度斜坡速率
 	float position_filter_bw;     // 位置滤波带宽(Hz)
-	float profile_velocity;       // 轮廓模式最大速度
-	float profile_accel;          // 轮廓模式加速度
-	float profile_decel;          // 轮廓模式减速度
+	float profile_velocity;	      /* 轨迹速度上限 (rps) */
+	float profile_accel;	      /* 轨迹加速度上限 (rps/s) */
+	float profile_decel;	      /* 轨迹减速度上限 (rps/s) */
 
 	int32_t node_id;               // CAN节点ID
 	int32_t can_baudrate;          // CAN波特率
@@ -76,7 +76,7 @@ typedef struct {
 	float calib_flux_rtest_ratio; // 磁链同速校验的降流比例
 	float cog_sweep_rps;          // 齿槽扫描速度 (rps)
 
-	float vel_integrator_limit; // 速度积分器限幅 (A)
+	float vel_integrator_limit; // Flash v2 旧积分限幅，保留用于回退固件
 	float friction_move_a;      // 动摩擦前馈电流 (A)
 	float friction_break_a;     // 静摩擦前馈电流 (A)
 

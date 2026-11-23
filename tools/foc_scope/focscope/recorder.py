@@ -5,6 +5,7 @@
 - 每个通道一个 array('f'), 时间 = 相对录制起点的秒数
 - 命令事件与数据写在同一文件: # 注释行 (解析器可跳过)
 """
+import math
 import os
 import time
 from array import array
@@ -56,7 +57,7 @@ class Recorder:
             except (TypeError, ValueError):
                 self.bufs[c].append(0.0)
         for c in range(n, NCH):
-            self.bufs[c].append(0.0)
+            self.bufs[c].append(math.nan)
         self.count += 1
 
     def add_event(self, name, value=None):

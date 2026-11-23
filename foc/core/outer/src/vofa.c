@@ -1,7 +1,9 @@
 #include "vofa.h"
 #include "cdc_acm.h"
 #include "foc_ctrl.h"
+#include "foc_task.h"
 #include "config.h"
+#include "position_profile.h"
 #include "math.h"
 #include "stdio.h"
 #include "string.h"
@@ -87,7 +89,7 @@ static bool vofa_send_config(void)
 /* 批量发送 */
 /* USB CDC 约 1000 包/s: ADC 分频采样入环形缓冲, 任务每 1ms 打包,
  * 有效采样率与 USB 包率解耦 */
-#define VOFA_NCH 22
+#define VOFA_NCH 25
 #define VOFA_RING 64 /* 环形缓冲样本数 */
 #define VOFA_BATCH_MAX (MAX_BUFFER_SIZE / (VOFA_NCH * 4 + 4))
 
@@ -102,6 +104,24 @@ void vofa_transmit(uint8_t *buf, uint16_t len)
 
 static void vofa_snapshot(float *d)
 {
+	float pos_actual = (float)encoder.count_aligned * (M_2PI / ENCODER_CPR_F);
+	float pos_target = NAN;
+	float pos_error = NAN;
+
+	if (FOC.is_armed && foc_get_stage() == RUN) {
+		if (Controller.ctrl_mode == CONTROL_MODE_POSITION_FILTER)
+			pos_target = Controller.input_position;
+		else if (Controller.ctrl_mode == CONTROL_MODE_POSITION_PROFILE)
+			pos_target = Controller.pos_setpoint;
+	}
+	if (isfinite(pos_target)) {
+		/* 用位置环的角度差，保留跨圈时的最短路径方向。 */
+		pos_error = position_profile_wrap_angle(pos_target - pos_actual);
+		pos_target = position_profile_wrap_angle(pos_target);
+	}
+	if (pos_actual > M_PI)
+		pos_actual -= M_2PI;
+
 	/* A 相电流 (A) */
 	d[0] = (FOC.Ia - FOC.Ia_midpoint) * FOC_CURRENT_SCALE;
 	/* B 相电流 (A) */
@@ -127,6 +147,9 @@ static void vofa_snapshot(float *d)
 	d[19] = FOC.Vc;			     /* C 相电压 (V) */
 	d[20] = (float)FOC.statusword.errors.errors_code; /* 故障位掩码 */
 	d[21] = FOC.Ibus_filt;		     /* 母线电流 (A) */
+	d[22] = pos_target;		     /* 机械目标角 (rad) */
+	d[23] = pos_actual;		     /* 机械实际角 (rad) */
+	d[24] = pos_error;		     /* 跟随误差 (rad) */
 }
 
 /* 由 ADC 中断按分频调用 */

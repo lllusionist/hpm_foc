@@ -9,13 +9,13 @@ typedef enum {
 	CONTROL_MODE_CURRENT_RAMP = 0,	   /* 电流斜坡 */
 	CONTROL_MODE_VELOCITY_RAMP = 1,	   /* 速度斜坡 */
 	CONTROL_MODE_POSITION_FILTER = 2,  /* 位置滤波控制 */
-	CONTROL_MODE_POSITION_PROFILE = 3, /* 轨迹规划 (暂按位置滤波处理) */
+	CONTROL_MODE_POSITION_PROFILE = 3, /* S 形轨迹规划 */
 } tControlMode;
 
 typedef struct sController {
 	int ctrl_mode; /* 当前控制模式 */
 
-	float input_position; /* 位置输入 (锁存值) */
+	volatile float input_position; /* 位置输入 (锁存值) */
 	float input_velocity; /* 速度输入 */
 	float input_current;  /* 电流输入 */
 
